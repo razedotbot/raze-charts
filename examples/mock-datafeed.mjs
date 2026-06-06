@@ -46,7 +46,7 @@ export function makeMockDatafeed({ bars = 2000, startPrice = 1000 } = {}) {
         name: symbol, ticker: symbol, description: symbol,
         type: "crypto", session: "24x7", timezone: "Etc/UTC",
         exchange: "Mock", listed_exchange: "Mock", format: "price",
-        minmov: 1, pricescale: 100, has_intraday: true, has_seconds: true,
+        minmov: 1, pricescale: 1, has_intraday: true, has_seconds: true,
         seconds_multipliers: ["1", "5"], intraday_multipliers: ["1", "5", "15", "60"],
         has_daily: true, daily_multipliers: ["1"],
         supported_resolutions: ["1S", "5S", "1", "5", "15", "60", "1D"],

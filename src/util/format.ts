@@ -11,19 +11,18 @@ export function decimalsFromPricescale(pricescale: number): number {
 export function formatPrice(value: number, pricescale: number): string {
   if (!Number.isFinite(value)) return "";
   const decimals = decimalsFromPricescale(pricescale);
-  const abs = Math.abs(value);
 
-  // Large values (typical of market-cap display) → compact notation.
-  if (decimals === 0 && abs >= 1000) {
-    return formatCompact(value);
-  }
-  // Mid-range whole numbers get thousands separators.
+  // Match TradingView: full numbers with thousands separators (e.g. 89,909 /
+  // 140,000), decimals taken from the symbol's pricescale. (Compact K/M/B is
+  // reserved for volume only — see formatVolume.)
   if (decimals === 0) {
     return Math.round(value).toLocaleString("en-US");
   }
-  // Small fractional prices: trim trailing zeros but keep at least 2 dp.
-  const fixed = value.toFixed(decimals);
-  return trimZeros(fixed);
+  // Fractional prices: show up to `decimals` places, trimming trailing zeros
+  // past the second so sub-penny tokens still read cleanly.
+  const minFrac = Math.min(decimals, 2);
+  const s = value.toLocaleString("en-US", { minimumFractionDigits: minFrac, maximumFractionDigits: decimals });
+  return s;
 }
 
 export function formatCompact(value: number): string {

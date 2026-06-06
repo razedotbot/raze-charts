@@ -20,12 +20,23 @@ import type { DataManager } from "../data/DataManager";
 import { resolutionToMs, parseResolution, resolutionLabel } from "../util/resolution";
 import { decimalsFromPricescale, formatPrice, formatVolume } from "../util/format";
 
-const PRICE_AXIS_W = 66;
+const PRICE_AXIS_W_DEFAULT = 64;
+const PRICE_AXIS_W_MIN = 56;
+const PRICE_AXIS_W_MAX = 128;
 const TIME_AXIS_H = 22;
 const MIN_BAR_SPACING = 1.5;
 const MAX_BAR_SPACING = 64;
 const VOLUME_FRACTION = 0.16; // bottom 16% of the plot reserved for volume bars
 const CANDLE_MAX_WIDTH = 18;  // cap so few-bar charts don't render giant blocks
+
+// Round time-step boundaries (ms) for time-axis gridlines, ascending.
+const SEC = 1000, MIN_MS = 60_000, HR = 3_600_000, DAY_MS = 86_400_000;
+const NICE_TIME_STEPS = [
+  SEC, 5 * SEC, 15 * SEC, 30 * SEC,
+  MIN_MS, 5 * MIN_MS, 15 * MIN_MS, 30 * MIN_MS,
+  HR, 2 * HR, 3 * HR, 6 * HR, 12 * HR,
+  DAY_MS, 7 * DAY_MS, 14 * DAY_MS, 30 * DAY_MS, 90 * DAY_MS, 365 * DAY_MS,
+];
 
 interface Crosshair {
   x: number;
@@ -42,6 +53,7 @@ export class ChartRenderer {
   private plotT = 0;
   private plotW = 0;
   private plotH = 0;
+  private priceAxisW = PRICE_AXIS_W_DEFAULT; // widened to fit the widest label
   private priceMin = 0;
   private priceMax = 1;
 
@@ -206,7 +218,7 @@ export class ChartRenderer {
 
     this.plotL = 0;
     this.plotT = 0;
-    this.plotW = Math.max(1, W - PRICE_AXIS_W);
+    this.plotW = Math.max(1, W - this.priceAxisW);
     this.plotH = Math.max(1, H - TIME_AXIS_H);
 
     this.computePriceRange();
@@ -214,6 +226,10 @@ export class ChartRenderer {
     const t = this.context.theme;
     const priceTicks = this.computePriceTicks();
     const timeTicks = this.computeTimeTicks();
+
+    // Size the price axis to the widest label it must show (TV-style), so full
+    // comma-separated numbers aren't clipped. Converges in one frame.
+    this.adjustPriceAxisWidth(ctx, priceTicks);
 
     this.drawGrid(ctx, priceTicks, timeTicks);
     this.drawVolume(ctx);
@@ -488,29 +504,62 @@ export class ChartRenderer {
     const bars = this.context.bars;
     if (!bars.length) return [];
     const { from, to } = this.context.visibleRange;
-    const target = Math.max(2, Math.floor(this.plotW / 90));
-    const span = to - from;
-    const stepBars = Math.max(1, Math.round(span / target));
-    const ticks: { index: number; time: number }[] = [];
     const start = Math.max(0, Math.floor(from));
     const end = Math.min(bars.length - 1, Math.ceil(to));
+    if (end < start) return [];
+
+    // Pick a "nice" time step (round clock boundary) so gridlines land on
+    // :00 / :15 / the hour / the day rather than arbitrary bar counts.
+    const target = Math.max(2, Math.floor(this.plotW / 110));
+    const spanMs = Math.max(1, bars[end]!.time - bars[start]!.time);
+    const step = NICE_TIME_STEPS.find((s) => spanMs / s <= target) ?? NICE_TIME_STEPS[NICE_TIME_STEPS.length - 1]!;
+
+    // Bars are aligned to the resolution boundary, so the first bar that enters
+    // each step bucket sits on a round time (e.g. HH:00). Tick there.
+    const ticks: { index: number; time: number }[] = [];
+    let lastBucket: number | null = null;
     for (let i = start; i <= end; i++) {
-      if (i % stepBars !== 0) continue;
-      ticks.push({ index: i, time: bars[i]!.time });
+      const bucket = Math.floor(bars[i]!.time / step);
+      if (lastBucket === null || bucket !== lastBucket) {
+        ticks.push({ index: i, time: bars[i]!.time });
+        lastBucket = bucket;
+      }
     }
     return ticks;
+  }
+
+  private adjustPriceAxisWidth(ctx: CanvasRenderingContext2D, ticks: number[]): void {
+    const pricescale = this.context.symbolInfo?.pricescale ?? 100;
+    ctx.font = `11px ${this.context.fontFamily}`;
+    let widest = 0;
+    const consider = (v: number): void => {
+      const w = ctx.measureText(formatPrice(v, pricescale)).width;
+      if (w > widest) widest = w;
+    };
+    for (const p of ticks) consider(p);
+    consider(this.priceMax);
+    consider(this.priceMin);
+    const last = this.context.bars[this.context.bars.length - 1];
+    if (last) consider(last.close);
+    const desired = Math.round(
+      Math.max(PRICE_AXIS_W_MIN, Math.min(PRICE_AXIS_W_MAX, widest + 16)),
+    );
+    if (Math.abs(desired - this.priceAxisW) > 1) {
+      this.priceAxisW = desired;
+      this.engine.markDirty(); // relayout next frame with the new width
+    }
   }
 
   private drawPriceAxis(ctx: CanvasRenderingContext2D, ticks: number[]): void {
     const t = this.context.theme;
     const pricescale = this.context.symbolInfo?.pricescale ?? 100;
     ctx.fillStyle = t.scaleBackground;
-    ctx.fillRect(this.plotL + this.plotW, 0, PRICE_AXIS_W, this.engine.cssHeight);
+    ctx.fillRect(this.plotL + this.plotW, 0, this.priceAxisW, this.engine.cssHeight);
     ctx.fillStyle = t.scaleText;
     ctx.font = `11px ${this.context.fontFamily}`;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    const rightEdge = this.plotL + this.plotW + PRICE_AXIS_W - 7;
+    const rightEdge = this.plotL + this.plotW + this.priceAxisW - 7;
     for (const p of ticks) {
       const y = this.yForPrice(p);
       if (y < this.plotT + 6 || y > this.plotT + this.plotH - 2) continue;
@@ -527,21 +576,25 @@ export class ChartRenderer {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const y = this.plotT + this.plotH + TIME_AXIS_H / 2;
-    const intraday = parseResolution(this.context.resolution).kind !== "days";
+    const kind = parseResolution(this.context.resolution).kind;
     for (const tk of ticks) {
       const x = this.xForIndex(tk.index);
-      if (x < this.plotL + 16 || x > this.plotL + this.plotW - 16) continue;
-      ctx.fillText(this.formatAxisTime(tk.time, intraday), x, y);
+      if (x < this.plotL + 18 || x > this.plotL + this.plotW - 18) continue;
+      ctx.fillText(this.formatAxisTime(tk.time, kind), x, y);
     }
   }
 
-  private formatAxisTime(ms: number, intraday: boolean): string {
+  private formatAxisTime(ms: number, kind: string): string {
     const d = new Date(ms);
     const pad = (n: number): string => String(n).padStart(2, "0");
+    const intraday = kind === "seconds" || kind === "minutes" || kind === "hours";
     if (intraday) {
-      // Show date at midnight boundaries, else HH:MM (UTC, matching Etc/UTC).
-      if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) {
+      // Date at midnight, seconds resolution shows HH:MM:SS, else HH:MM (UTC).
+      if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) {
         return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+      }
+      if (kind === "seconds") {
+        return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
       }
       return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
     }
@@ -554,13 +607,13 @@ export class ChartRenderer {
     const h = 16;
     const top = Math.max(this.plotT, Math.min(this.plotT + this.plotH - h, y - h / 2));
     ctx.fillStyle = bg;
-    this.roundRect(ctx, x0 + 3, top, PRICE_AXIS_W - 5, h, 3);
+    this.roundRect(ctx, x0 + 3, top, this.priceAxisW - 5, h, 3);
     ctx.fill();
     ctx.font = `${bold ? "600 " : ""}11px ${this.context.fontFamily}`;
     ctx.fillStyle = fg;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillText(text, x0 + PRICE_AXIS_W - 7, top + h / 2 + 0.5);
+    ctx.fillText(text, x0 + this.priceAxisW - 7, top + h / 2 + 0.5);
   }
 
   /** Build a rounded-rect path (caller fills/strokes). */
@@ -649,8 +702,7 @@ export class ChartRenderer {
       this.drawAxisTag(ctx, y, formatPrice(this.priceForY(y), pricescale), pill.bg, pill.fg);
     }
     if (t.showTimeScaleCrosshairLabel && snapBar) {
-      const intraday = parseResolution(this.context.resolution).kind !== "days";
-      const label = this.formatCrosshairTime(snapBar.time, intraday);
+      const label = this.formatCrosshairTime(snapBar.time, parseResolution(this.context.resolution).kind);
       ctx.font = `11px ${this.context.fontFamily}`;
       const w = ctx.measureText(label).width + 14;
       const tx = Math.max(this.plotL, Math.min(this.plotL + this.plotW - w, x - w / 2));
@@ -664,12 +716,14 @@ export class ChartRenderer {
     }
   }
 
-  private formatCrosshairTime(ms: number, intraday: boolean): string {
+  private formatCrosshairTime(ms: number, kind: string): string {
     const d = new Date(ms);
     const pad = (n: number): string => String(n).padStart(2, "0");
     const date = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} '${String(d.getUTCFullYear()).slice(2)}`;
-    if (intraday) return `${date} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-    return date;
+    const intraday = kind === "seconds" || kind === "minutes" || kind === "hours";
+    if (!intraday) return date;
+    const hm = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    return kind === "seconds" ? `${date} ${hm}:${pad(d.getUTCSeconds())}` : `${date} ${hm}`;
   }
 
   private drawLegend(ctx: CanvasRenderingContext2D): void {
@@ -719,8 +773,11 @@ export class ChartRenderer {
     seg("L", f(bar.low));
     seg("C", f(bar.close));
     if (bar.open > 0) {
-      const chg = ((bar.close - bar.open) / bar.open) * 100;
-      const chgStr = `${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`;
+      // Match TV: signed absolute change then (signed percent), e.g. -1,812 (-2.02%)
+      const abs = bar.close - bar.open;
+      const pct = (abs / bar.open) * 100;
+      const sign = abs >= 0 ? "+" : "-";
+      const chgStr = `${sign}${formatPrice(Math.abs(abs), pricescale)} (${sign}${Math.abs(pct).toFixed(2)}%)`;
       ctx.fillStyle = col;
       ctx.fillText(chgStr, x, y);
     }
