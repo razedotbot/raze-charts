@@ -396,37 +396,69 @@ export class ChartRenderer {
 
     const resMs = resolutionToMs(this.context.resolution);
     const firstT = bars[0]!.time;
-    const baseY = this.plotT + this.plotH - this.plotH * VOLUME_FRACTION;
+    const r = 7;                 // fixed small radius (TV-style badges)
+    const gap = 3;               // vertical gap between stacked marks
+    const maxStack = 4;          // beyond this, collapse into a "+N" badge
+    const bottomLimit = this.plotT + this.plotH - 4;
 
+    // Group marks by bar index so multiple marks on one bar stack vertically
+    // instead of piling up on the same pixel.
+    const byBar = new Map<number, Mark[]>();
     for (const m of marks) {
-      const tMs = m.time * 1000;
-      // Map the mark's time to the nearest bar index.
-      const idx = Math.round((tMs - firstT) / resMs);
+      const idx = Math.round((m.time * 1000 - firstT) / resMs);
       if (idx < 0 || idx >= bars.length) continue;
+      const list = byBar.get(idx);
+      if (list) list.push(m);
+      else byBar.set(idx, [m]);
+    }
+
+    // Declutter horizontally: walk bars left→right, skip groups whose x is
+    // within one badge of the previously drawn group so dense runs don't blur.
+    const indices = Array.from(byBar.keys()).sort((a, b) => a - b);
+    let lastDrawnX = -Infinity;
+    for (const idx of indices) {
       const x = this.xForIndex(idx);
-      if (x < this.plotL - 10 || x > this.plotL + this.plotW + 10) continue;
-      const r = Math.max(7, Math.min(13, (m.minSize ?? 16) / 2));
-      const y = baseY - 6;
-      const col = m.color as MarkCustomColor;
-      const border = typeof col === "object" ? col.border : "#2962ff";
-      const bg = typeof col === "object" ? col.background : "#2962ff";
+      if (x < this.plotL - r || x > this.plotL + this.plotW + r) continue;
+      if (x - lastDrawnX < 2 * r + 1) continue;
+      lastDrawnX = x;
 
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = bg;
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = border;
-      ctx.stroke();
+      const group = byBar.get(idx)!;
+      const bar = bars[idx]!;
+      // Anchor just beneath the bar's low so marks attach to their bar, then
+      // stack downward toward the time axis.
+      const lowY = this.yForPrice(bar.low > 0 ? bar.low : Math.min(bar.open, bar.close));
+      const stepY = 2 * r + gap;
+      const shown = Math.min(group.length, maxStack);
+      // Clamp the start so the whole stack stays inside the plot.
+      const maxStart = bottomLimit - r - (shown - 1) * stepY;
+      let y = Math.max(this.plotT + r, Math.min(maxStart, lowY + r + 6));
 
-      if (m.label) {
-        ctx.fillStyle = m.labelFontColor || "#fff";
-        ctx.font = `bold ${Math.round(r)}px ${this.context.fontFamily}`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(m.label.slice(0, 2), x, y + 0.5);
+      for (let k = 0; k < shown; k++) {
+        const m = group[k]!;
+        const isLast = k === shown - 1 && group.length > maxStack;
+        const col = m.color as MarkCustomColor;
+        const border = typeof col === "object" ? col.border : "#2962ff";
+        const bg = typeof col === "object" ? col.background : "#2962ff";
+
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = bg;
+        ctx.fill();
+        ctx.lineWidth = 1.25;
+        ctx.strokeStyle = border;
+        ctx.stroke();
+
+        const label = isLast ? `+${group.length - maxStack + 1}` : (m.label ? m.label.slice(0, 2) : "");
+        if (label) {
+          ctx.fillStyle = m.labelFontColor || "#fff";
+          ctx.font = `bold ${isLast ? 8 : 9}px ${this.context.fontFamily}`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(label, x, y + 0.5);
+        }
+        this.markScreen.push({ mark: m, x, y, r });
+        y += stepY; // stack downward, away from the candle
       }
-      this.markScreen.push({ mark: m, x, y, r });
     }
   }
 

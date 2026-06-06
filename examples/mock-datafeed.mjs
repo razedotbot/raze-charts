@@ -86,20 +86,20 @@ export function makeMockDatafeed({ bars = 2000, startPrice = 1000 } = {}) {
       if (timer) clearInterval(timer);
       subs.delete(guid);
     },
-    getMarks(_symbolInfo, from, to, onData, _res) {
-      const series = seriesFor("1");
+    getMarks(_symbolInfo, from, to, onData, res) {
+      const series = seriesFor(res ?? "1");
       const out = [];
-      for (let i = 0; i < series.length; i += 250) {
-        const b = series[i];
-        const tSec = Math.floor(b.time / 1000);
-        if (tSec < from || tSec > to) continue;
-        const buy = i % 500 === 0;
+      const push = (tSec, buy, label) => {
+        if (tSec < from || tSec > to) return;
         out.push({
-          id: `m${i}`, time: tSec,
+          id: `m${out.length}`, time: tSec,
           color: { border: buy ? "#26a69a" : "#ef5350", background: buy ? "#26a69a" : "#ef5350" },
-          text: buy ? "Buy" : "Sell", label: buy ? "B" : "S",
-          labelFontColor: "#fff", minSize: 16,
+          text: buy ? "Buy" : "Sell", label, labelFontColor: "#fff", minSize: 16,
         });
+      };
+      for (let i = 0; i < series.length; i += 120) {
+        const b = series[i];
+        push(Math.floor(b.time / 1000), i % 240 === 0, i % 240 === 0 ? "B" : "S");
       }
       onData(out);
     },
