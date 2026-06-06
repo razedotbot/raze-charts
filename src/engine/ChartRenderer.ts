@@ -152,28 +152,45 @@ export class ChartRenderer {
     }
     const bars = this.context.bars;
     const { from, to } = this.context.visibleRange;
-    let lo = Infinity;
-    let hi = -Infinity;
     const start = Math.max(0, Math.floor(from));
     const end = Math.min(bars.length - 1, Math.ceil(to));
+
+    // Track the candle BODY envelope (open/close) separately from the full
+    // high/low extent. The scale fits the bodies; wicks get bounded extra room.
+    let bodyHi = -Infinity;
+    let bodyLo = Infinity;
+    let hi = -Infinity;
+    let lo = Infinity;
     for (let i = start; i <= end; i++) {
       const b = bars[i];
       if (!b) continue;
-      if (b.low > 0 && b.low < lo) lo = b.low;
+      const c = b.close > 0 ? b.close : b.open;
+      const bH = Math.max(b.open, c);
+      const bL = Math.min(b.open, c);
+      if (bH > bodyHi) bodyHi = bH;
+      if (bL > 0 && bL < bodyLo) bodyLo = bL;
       if (b.high > hi) hi = b.high;
+      const low = b.low > 0 ? b.low : bL;
+      if (low > 0 && low < lo) lo = low;
     }
     // NOTE: horizontal-line shapes (limit/avg/ATH lines) are deliberately NOT
-    // folded into the auto-fit. TradingView fits the price scale to the bars and
-    // lets off-range lines clip at the edges; including them would squish the
-    // candles whenever a line sits far from current price.
-    if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= 0) {
+    // folded into the auto-fit — off-range lines clip at the edges (TV behaviour).
+    if (!Number.isFinite(bodyHi) || !Number.isFinite(bodyLo) || bodyHi <= 0) {
       this.priceMin = 0;
       this.priceMax = 1;
       return;
     }
-    if (lo === hi) {
-      lo *= 0.99;
-      hi *= 1.01;
+    // Bodies are always fully visible; wicks may extend up to `wickRoom` beyond
+    // the body envelope. An isolated extreme wick (common on a token's first
+    // bars) then clips instead of stretching the whole axis and leaving the
+    // candles squashed against one edge with a wall of empty space.
+    const bodyRange = Math.max(0, bodyHi - bodyLo);
+    const wickRoom = Math.max(bodyRange, bodyHi * 0.06);
+    hi = Math.min(hi, bodyHi + wickRoom);
+    lo = Math.max(Math.max(0, bodyLo - wickRoom), Number.isFinite(lo) ? lo : bodyLo);
+    if (lo >= hi) {
+      lo = bodyLo * 0.99;
+      hi = bodyHi * 1.01;
     }
     const pad = (hi - lo) * 0.08;
     this.priceMin = Math.max(0, lo - pad);
@@ -206,6 +223,21 @@ export class ChartRenderer {
     this.drawTimeAxis(ctx, timeTicks);
     this.drawCrosshair(ctx);
     this.drawLegend(ctx);
+
+    // Opt-in debug snapshot for QA (window.__RAZE_DEBUG = true).
+    if ((window as unknown as { __RAZE_DEBUG?: boolean }).__RAZE_DEBUG) {
+      const bars = this.context.bars;
+      let nonzero = 0, firstReal = -1, lastReal = -1;
+      for (let i = 0; i < bars.length; i++) {
+        if (bars[i]!.close > 0) { nonzero++; if (firstReal < 0) firstReal = i; lastReal = i; }
+      }
+      (window as unknown as { __razeChartState?: unknown }).__razeChartState = {
+        bars: bars.length, nonzero, firstReal, lastReal,
+        visibleRange: { ...this.context.visibleRange },
+        priceMin: this.priceMin, priceMax: this.priceMax,
+        firstBarClose: bars[0]?.close, lastBarClose: bars[bars.length - 1]?.close,
+      };
+    }
 
     // Axis separators.
     ctx.strokeStyle = t.scaleLine;

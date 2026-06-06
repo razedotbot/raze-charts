@@ -1,0 +1,11 @@
+import { chromium } from "playwright";
+const mint = process.argv[2];
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1280, height: 760 } });
+await p.addInitScript(() => { window.__RAZE_DEBUG = true; });
+await p.goto(`http://localhost:3210/token/${mint}`, { waitUntil:"domcontentloaded", timeout:120000 });
+await p.waitForSelector(".raze-chart-root canvas", { timeout:60000 }).catch(()=>{});
+await p.waitForTimeout(9000);
+const s = await p.evaluate(() => window.__razeChartState);
+console.log(JSON.stringify(s, null, 1));
+await b.close();

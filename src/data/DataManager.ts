@@ -94,8 +94,9 @@ export class DataManager {
       return;
     }
     const visibleCount = Math.min(n, 120);
-    // Leave a little empty space on the right (TV's default scroll position).
-    const rightPad = Math.max(2, Math.floor(visibleCount * 0.06));
+    // A small right gutter (TV's default scroll position), but capped so sparse
+    // charts don't open with a wall of empty space on the right.
+    const rightPad = Math.min(8, Math.max(1, Math.round(visibleCount * 0.06)));
     this.context.visibleRange = {
       from: n - visibleCount,
       to: n - 1 + rightPad,
