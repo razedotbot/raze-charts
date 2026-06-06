@@ -101,6 +101,17 @@ await new Promise((r) => chart.setResolution("5", r));
 assert(chart.resolution() === "5", "setResolution changed resolution");
 assert(intervalFired === "5", "onIntervalChanged fired with new resolution");
 
+// P3: header interval selector rendered + a user click drives the change
+const toolbarBtns = [...container.querySelectorAll(".raze-chart-toolbar div")]
+  .filter((d) => ["1s", "1m", "5m", "15m", "1h", "4h", "1D"].includes(d.textContent));
+assert(toolbarBtns.length >= 3, `interval selector rendered favorites (${toolbarBtns.length})`);
+const oneMinBtn = toolbarBtns.find((d) => d.textContent === "1m");
+intervalFired = null;
+oneMinBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 20));
+assert(chart.resolution() === "1", "clicking the 1m interval button changed resolution");
+assert(intervalFired === "1", "user interval click fired onIntervalChanged");
+
 // shapes: createShape → getShapeById → setPoints/getPoints → removeEntity
 const id = await chart.createShape({ time: Math.floor(Date.now() / 1000), price: 1000 }, {
   shape: "horizontal_line", lock: false, text: "Limit ↕",

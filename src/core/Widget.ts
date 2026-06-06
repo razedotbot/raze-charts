@@ -21,6 +21,7 @@ import { ChartApi, type ChartApiDeps } from "./ChartApi";
 import { ChartEngine } from "../engine/ChartEngine";
 import { ChartRenderer } from "../engine/ChartRenderer";
 import { Toolbar } from "../ui/Toolbar";
+import { IntervalSelector } from "../ui/IntervalSelector";
 import { LoadingScreen } from "../ui/LoadingScreen";
 import { showContextMenu, closeContextMenu } from "../ui/ContextMenu";
 
@@ -35,6 +36,7 @@ export class Widget implements IChartingLibraryWidget {
   private engine: ChartEngine;
   private renderer: ChartRenderer;
   private toolbar: Toolbar;
+  private intervalSelector: IntervalSelector | null = null;
   private loading: LoadingScreen | null;
   private api: ChartApi;
 
@@ -120,7 +122,10 @@ export class Widget implements IChartingLibraryWidget {
         void this.data.changeResolution(res).then(() => cb?.());
       },
       setSymbol: (sym, cb) => {
-        void this.data.changeSymbol(sym).then(() => cb?.());
+        void this.data.changeSymbol(sym).then(() => {
+          this.intervalSelector?.refresh();
+          cb?.();
+        });
       },
       createShape: (point, opts) => this.shapes.create(point, opts),
       getShapeById: (id) => this.shapes.adapter(id),
@@ -153,6 +158,18 @@ export class Widget implements IChartingLibraryWidget {
       console.error("[raze-charts] failed to load symbol", e);
     }
     if (this.destroyed) return;
+
+    // Mount the header interval selector now that supported_resolutions is known.
+    this.intervalSelector = new IntervalSelector(
+      this.context,
+      this.toolbar.intervalSlot,
+      (res) => { void this.data.changeResolution(res); },
+    );
+    // Keep the selector's highlight in sync with programmatic resolution changes.
+    this.context.intervalChanged.subscribe(null, ((res: ResolutionString) => {
+      this.intervalSelector?.setActive(String(res));
+    }) as never);
+
     this.loading?.hide();
     this.loading = null;
     // headerReady fires first (the app mounts buttons), then onChartReady.
@@ -231,6 +248,7 @@ export class Widget implements IChartingLibraryWidget {
     this.renderer.destroy();
     this.engine.destroy();
     this.data.destroy();
+    this.intervalSelector?.destroy();
     this.toolbar.destroy();
     this.loading?.destroy();
     this.chartReady.destroy();
