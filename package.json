@@ -1,0 +1,28 @@
+{
+  "name": "@raze/charts",
+  "version": "0.0.0",
+  "description": "Raze Charts — an open, Canvas-2D financial charting library. Drop-in compatible with the TradingView Charting Library widget API surface used by app.raze.bot.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/charting_library.cjs.js",
+  "module": "dist/charting_library.esm.js",
+  "types": "dist/charting_library.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/charting_library.d.ts",
+      "import": "./dist/charting_library.esm.js",
+      "require": "./dist/charting_library.cjs.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node build.mjs && node examples/smoke.mjs",
+    "dev": "node build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}
