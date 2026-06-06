@@ -17,7 +17,7 @@ import type { ChartContext } from "../core/context";
 import type { ChartEngine } from "./ChartEngine";
 import type { ShapeStore, StoredShape } from "../core/ShapeStore";
 import type { DataManager } from "../data/DataManager";
-import { resolutionToMs, parseResolution } from "../util/resolution";
+import { resolutionToMs, parseResolution, resolutionLabel } from "../util/resolution";
 import { decimalsFromPricescale, formatPrice, formatVolume } from "../util/format";
 
 const PRICE_AXIS_W = 66;
@@ -25,6 +25,7 @@ const TIME_AXIS_H = 22;
 const MIN_BAR_SPACING = 1.5;
 const MAX_BAR_SPACING = 64;
 const VOLUME_FRACTION = 0.16; // bottom 16% of the plot reserved for volume bars
+const CANDLE_MAX_WIDTH = 18;  // cap so few-bar charts don't render giant blocks
 
 interface Crosshair {
   x: number;
@@ -221,6 +222,7 @@ export class ChartRenderer {
     this.drawMarks(ctx);
     this.drawPriceAxis(ctx, priceTicks);
     this.drawTimeAxis(ctx, timeTicks);
+    this.drawLastPrice(ctx);
     this.drawCrosshair(ctx);
     this.drawLegend(ctx);
 
@@ -282,7 +284,9 @@ export class ChartRenderer {
     if (!bars.length) return;
     const t = this.context.theme;
     const spacing = this.barSpacing;
-    const bodyW = Math.max(1, Math.min(MAX_BAR_SPACING, spacing * 0.7));
+    // Cap candle width so sparse charts (a handful of bars stretched across the
+    // pane) render as real candles, not giant blocks.
+    const bodyW = Math.max(1, Math.min(CANDLE_MAX_WIDTH, spacing * 0.74));
     const half = bodyW / 2;
     const thinBars = spacing < 4;
 
@@ -352,7 +356,7 @@ export class ChartRenderer {
     const volH = this.plotH * VOLUME_FRACTION;
     const baseY = this.plotT + this.plotH;
     const spacing = this.barSpacing;
-    const w = Math.max(1, spacing * 0.7);
+    const w = Math.max(1, Math.min(CANDLE_MAX_WIDTH, spacing * 0.74));
     for (let i = start; i <= end; i++) {
       const b = bars[i];
       if (!b || !b.volume) continue;
@@ -504,12 +508,13 @@ export class ChartRenderer {
     ctx.fillRect(this.plotL + this.plotW, 0, PRICE_AXIS_W, this.engine.cssHeight);
     ctx.fillStyle = t.scaleText;
     ctx.font = `11px ${this.context.fontFamily}`;
-    ctx.textAlign = "left";
+    ctx.textAlign = "right";
     ctx.textBaseline = "middle";
+    const rightEdge = this.plotL + this.plotW + PRICE_AXIS_W - 7;
     for (const p of ticks) {
       const y = this.yForPrice(p);
       if (y < this.plotT + 6 || y > this.plotT + this.plotH - 2) continue;
-      ctx.fillText(formatPrice(p, pricescale), this.plotL + this.plotW + 6, y);
+      ctx.fillText(formatPrice(p, pricescale), rightEdge, y);
     }
   }
 
@@ -543,28 +548,92 @@ export class ChartRenderer {
     return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
   }
 
-  private drawAxisTag(ctx: CanvasRenderingContext2D, y: number, text: string, bg: string, fg: string): void {
-    ctx.font = `11px ${this.context.fontFamily}`;
-    const w = PRICE_AXIS_W - 2;
-    const h = 15;
+  /** Rounded price-axis pill (crosshair value, last price, shape levels). */
+  private drawAxisTag(ctx: CanvasRenderingContext2D, y: number, text: string, bg: string, fg: string, bold = false): void {
+    const x0 = this.plotL + this.plotW;
+    const h = 16;
+    const top = Math.max(this.plotT, Math.min(this.plotT + this.plotH - h, y - h / 2));
     ctx.fillStyle = bg;
-    ctx.fillRect(this.plotL + this.plotW + 1, y - h / 2, w, h);
+    this.roundRect(ctx, x0 + 3, top, PRICE_AXIS_W - 5, h, 3);
+    ctx.fill();
+    ctx.font = `${bold ? "600 " : ""}11px ${this.context.fontFamily}`;
     ctx.fillStyle = fg;
-    ctx.textAlign = "left";
+    ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillText(text, this.plotL + this.plotW + 6, y);
+    ctx.fillText(text, x0 + PRICE_AXIS_W - 7, top + h / 2 + 0.5);
+  }
+
+  /** Build a rounded-rect path (caller fills/strokes). */
+  private roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    const anyCtx = ctx as CanvasRenderingContext2D & { roundRect?: (x: number, y: number, w: number, h: number, r: number) => void };
+    if (typeof anyCtx.roundRect === "function") {
+      anyCtx.roundRect(x, y, w, h, rr);
+      return;
+    }
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  // ── Last price line + pill ──────────────────────────────────────────────────
+  private drawLastPrice(ctx: CanvasRenderingContext2D): void {
+    const bars = this.context.bars;
+    const last = bars[bars.length - 1];
+    if (!last || !(last.close > 0)) return;
+    const t = this.context.theme;
+    const price = last.close;
+    const up = last.close >= last.open;
+    const color = up ? t.candleUp : t.candleDown;
+    const pricescale = this.context.symbolInfo?.pricescale ?? 100;
+    const y = this.yForPrice(price);
+
+    if (y >= this.plotT && y <= this.plotT + this.plotH) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      const yy = Math.round(y) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(this.plotL, yy);
+      ctx.lineTo(this.plotL + this.plotW, yy);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Always show the price pill, clamped into the axis even when off-screen.
+    const cy = Math.max(this.plotT + 8, Math.min(this.plotT + this.plotH - 8, y));
+    this.drawAxisTag(ctx, cy, formatPrice(price, pricescale), color, "#10100e", true);
+  }
+
+  /** Neutral pill background/foreground for crosshair tags (theme-aware). */
+  private neutralPill(): { bg: string; fg: string } {
+    const light = this.context.theme.paneBackground.toLowerCase() === "#ffffff";
+    return light ? { bg: "#131722", fg: "#ffffff" } : { bg: "#3a3833", fg: "#f4eee1" };
   }
 
   // ── Crosshair + legend ──────────────────────────────────────────────────────
   private drawCrosshair(ctx: CanvasRenderingContext2D): void {
     if (!this.crosshair.active) return;
     const t = this.context.theme;
-    const { x, y } = this.crosshair;
+    const { y } = this.crosshair;
+    let { x } = this.crosshair;
     if (x > this.plotL + this.plotW || y > this.plotT + this.plotH) return;
+
+    // Snap the vertical line to the hovered bar's centre for a precise feel.
+    const bars = this.context.bars;
+    const idx = Math.round(this.indexForX(x));
+    const snapBar = bars[Math.max(0, Math.min(bars.length - 1, idx))];
+    if (snapBar && idx >= 0 && idx < bars.length) x = this.xForIndex(idx);
+
     ctx.save();
     ctx.strokeStyle = t.crosshair;
     ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(Math.round(x) + 0.5, this.plotT);
     ctx.lineTo(Math.round(x) + 0.5, this.plotT + this.plotH);
@@ -574,27 +643,24 @@ export class ChartRenderer {
     ctx.setLineDash([]);
     ctx.restore();
 
+    const pill = this.neutralPill();
     const pricescale = this.context.symbolInfo?.pricescale ?? 100;
     if (t.showPriceScaleCrosshairLabel) {
-      this.drawAxisTag(ctx, y, formatPrice(this.priceForY(y), pricescale), t.scaleText === "#131722" ? "#e0e3eb" : "#363a45", t.scaleText === "#131722" ? "#131722" : "#ffffff");
+      this.drawAxisTag(ctx, y, formatPrice(this.priceForY(y), pricescale), pill.bg, pill.fg);
     }
-    if (t.showTimeScaleCrosshairLabel) {
-      const bars = this.context.bars;
-      const idx = Math.round(this.indexForX(x));
-      const bar = bars[Math.max(0, Math.min(bars.length - 1, idx))];
-      if (bar) {
-        const intraday = parseResolution(this.context.resolution).kind !== "days";
-        const label = this.formatCrosshairTime(bar.time, intraday);
-        ctx.font = `11px ${this.context.fontFamily}`;
-        const w = ctx.measureText(label).width + 12;
-        const tx = Math.max(this.plotL, Math.min(this.plotL + this.plotW - w, x - w / 2));
-        ctx.fillStyle = "#363a45";
-        ctx.fillRect(tx, this.plotT + this.plotH + 1, w, TIME_AXIS_H - 2);
-        ctx.fillStyle = "#ffffff";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(label, tx + w / 2, this.plotT + this.plotH + TIME_AXIS_H / 2);
-      }
+    if (t.showTimeScaleCrosshairLabel && snapBar) {
+      const intraday = parseResolution(this.context.resolution).kind !== "days";
+      const label = this.formatCrosshairTime(snapBar.time, intraday);
+      ctx.font = `11px ${this.context.fontFamily}`;
+      const w = ctx.measureText(label).width + 14;
+      const tx = Math.max(this.plotL, Math.min(this.plotL + this.plotW - w, x - w / 2));
+      ctx.fillStyle = pill.bg;
+      this.roundRect(ctx, tx, this.plotT + this.plotH + 2, w, TIME_AXIS_H - 4, 3);
+      ctx.fill();
+      ctx.fillStyle = pill.fg;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, tx + w / 2, this.plotT + this.plotH + TIME_AXIS_H / 2 + 0.5);
     }
   }
 
@@ -619,21 +685,49 @@ export class ChartRenderer {
     const up = bar.close >= bar.open;
     const col = up ? t.candleUp : t.candleDown;
 
-    const name = this.context.symbolInfo?.name ?? this.context.symbol;
-    ctx.font = `bold 13px ${this.context.fontFamily}`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillStyle = t.scaleText;
-    ctx.fillText(name, 8, 6);
-
-    ctx.font = `12px ${this.context.fontFamily}`;
-    ctx.fillStyle = col;
+    const light = t.paneBackground.toLowerCase() === "#ffffff";
+    const nameColor = light ? "#131722" : "#f4eee1";
+    const dim = t.scaleText;
     const f = (v: number): string => formatPrice(v, pricescale);
-    const ohlc = `O ${f(bar.open)}  H ${f(bar.high)}  L ${f(bar.low)}  C ${f(bar.close)}`;
-    ctx.fillText(ohlc, 8, 24);
+
+    // Line 1: symbol  ·  resolution.
+    const name = this.context.symbolInfo?.name ?? this.context.symbol;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.font = `600 13px ${this.context.fontFamily}`;
+    ctx.fillStyle = nameColor;
+    ctx.fillText(name, 10, 19);
+    const nameW = ctx.measureText(name).width;
+    ctx.font = `11px ${this.context.fontFamily}`;
+    ctx.fillStyle = dim;
+    ctx.fillText(`· ${resolutionLabel(this.context.resolution)}`, 10 + nameW + 8, 19);
+
+    // Line 2: O/H/L/C with dim labels + candle-coloured values, then change %.
+    let x = 10;
+    const y = 37;
+    ctx.font = `12px ${this.context.fontFamily}`;
+    const seg = (label: string, value: string): void => {
+      ctx.fillStyle = dim;
+      ctx.fillText(label, x, y);
+      x += ctx.measureText(label).width + 3;
+      ctx.fillStyle = col;
+      ctx.fillText(value, x, y);
+      x += ctx.measureText(value).width + 9;
+    };
+    seg("O", f(bar.open));
+    seg("H", f(bar.high));
+    seg("L", f(bar.low));
+    seg("C", f(bar.close));
+    if (bar.open > 0) {
+      const chg = ((bar.close - bar.open) / bar.open) * 100;
+      const chgStr = `${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`;
+      ctx.fillStyle = col;
+      ctx.fillText(chgStr, x, y);
+    }
     if (bar.volume) {
-      ctx.fillStyle = t.scaleText;
-      ctx.fillText(`Vol ${formatVolume(bar.volume)}`, 8, 40);
+      ctx.fillStyle = dim;
+      ctx.font = `11px ${this.context.fontFamily}`;
+      ctx.fillText(`Vol ${formatVolume(bar.volume)}`, 10, 53);
     }
   }
 
