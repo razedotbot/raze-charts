@@ -56,7 +56,7 @@
     w.onChartReady(() => {
       const chart = w.activeChart();
       // A horizontal "limit line" the way the app draws them.
-      chart.createShape({ time: Math.floor(Date.now() / 1000), price: 6400 }, {
+      chart.createShape({ time: Math.floor(Date.now() / 1000), price: 11200 }, {
         shape: "horizontal_line", lock: false, text: "Limit Buy ↕",
         overrides: { linecolor: "#66d89e", linestyle: 1, linewidth: 1, textcolor: "#66d89e", showPrice: true },
       });

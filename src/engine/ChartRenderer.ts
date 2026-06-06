@@ -158,14 +158,10 @@ export class ChartRenderer {
       if (b.low > 0 && b.low < lo) lo = b.low;
       if (b.high > hi) hi = b.high;
     }
-    // Fold visible shape price levels into the range so horizontal lines show.
-    for (const s of this.shapes.list()) {
-      const p = s.points[0]?.price;
-      if (typeof p === "number" && Number.isFinite(p) && p > 0) {
-        if (p < lo) lo = p;
-        if (p > hi) hi = p;
-      }
-    }
+    // NOTE: horizontal-line shapes (limit/avg/ATH lines) are deliberately NOT
+    // folded into the auto-fit. TradingView fits the price scale to the bars and
+    // lets off-range lines clip at the edges; including them would squish the
+    // candles whenever a line sits far from current price.
     if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= 0) {
       this.priceMin = 0;
       this.priceMax = 1;
