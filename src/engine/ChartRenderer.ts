@@ -45,8 +45,12 @@ export class ChartRenderer {
   private priceMax = 1;
 
   // Pointer/drag state.
-  private dragging: null | { kind: "pan"; startX: number; startFrom: number; startTo: number }
-    | { kind: "shape"; id: string; startY: number } = null;
+  private dragging:
+    | null
+    | { kind: "pan"; startX: number; startFrom: number; startTo: number }
+    | { kind: "shape"; id: string; startY: number }
+    | { kind: "priceScale"; startY: number; startMin: number; startMax: number }
+    | { kind: "timeScale"; startX: number; startFrom: number; startTo: number } = null;
   private hoverShapeId: string | null = null;
 
   private boundMove: (e: MouseEvent) => void;
@@ -54,7 +58,7 @@ export class ChartRenderer {
   private boundUp: (e: MouseEvent) => void;
   private boundLeave: () => void;
   private boundWheel: (e: WheelEvent) => void;
-  private boundDbl: () => void;
+  private boundDbl: (e: MouseEvent) => void;
   private onData: () => void;
 
   constructor(
@@ -69,7 +73,7 @@ export class ChartRenderer {
     this.boundUp = () => this.onMouseUp();
     this.boundLeave = () => this.onMouseLeave();
     this.boundWheel = (e) => this.onWheel(e);
-    this.boundDbl = () => this.onDblClick();
+    this.boundDbl = (e) => this.onDblClick(e);
     this.onData = () => this.engine.markDirty();
   }
 
@@ -613,7 +617,27 @@ export class ChartRenderer {
         from: this.dragging.startFrom - dxBars,
         to: this.dragging.startTo - dxBars,
       };
-      this.context.autoScalePrice = true;
+      void this.data.maybeLoadMoreHistory();
+    } else if (this.dragging?.kind === "priceScale") {
+      // Drag the price axis vertically to rescale price: down = zoom out
+      // (wider range), up = zoom in. Pivots around the range centre captured at
+      // mousedown so the scaling is stable across the whole drag.
+      const dy = y - this.dragging.startY;
+      const factor = Math.min(20, Math.max(0.05, 1 + dy / (this.plotH * 0.5)));
+      const center = (this.dragging.startMin + this.dragging.startMax) / 2;
+      const half = ((this.dragging.startMax - this.dragging.startMin) / 2) * factor;
+      this.context.autoScalePrice = false;
+      this.context.priceRange = { min: Math.max(0, center - half), max: center + half };
+    } else if (this.dragging?.kind === "timeScale") {
+      // Drag the time axis horizontally to change bar spacing: left = zoom out
+      // (more bars), right = zoom in. Anchored on the right edge.
+      const dx = x - this.dragging.startX;
+      const span = this.dragging.startTo - this.dragging.startFrom;
+      const factor = Math.min(20, Math.max(0.05, 1 - dx / (this.plotW * 0.5)));
+      const minSpan = this.plotW / MAX_BAR_SPACING;
+      const maxSpan = this.plotW / MIN_BAR_SPACING;
+      const newSpan = Math.min(maxSpan, Math.max(minSpan, span * factor));
+      this.context.visibleRange = { from: this.dragging.startTo - newSpan, to: this.dragging.startTo };
       void this.data.maybeLoadMoreHistory();
     } else if (this.dragging?.kind === "shape") {
       const s = this.shapes.get(this.dragging.id as never);
@@ -621,15 +645,25 @@ export class ChartRenderer {
         s.points[0].price = this.priceForY(y);
       }
     } else {
-      // Hover detection for draggable (unlocked) shapes → resize cursor.
+      // Hover cursor: axes get resize affordances, unlocked shapes too.
+      const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
+      const inTimeAxis = y > this.plotT + this.plotH && x < this.plotL + this.plotW;
       this.hoverShapeId = null;
-      for (const { shape, y: sy } of this.shapeScreen) {
-        if (!shape.lock && Math.abs(sy - y) <= 4 && x <= this.plotL + this.plotW) {
-          this.hoverShapeId = shape.id as unknown as string;
-          break;
+      if (!inPriceAxis && !inTimeAxis) {
+        for (const { shape, y: sy } of this.shapeScreen) {
+          if (!shape.lock && Math.abs(sy - y) <= 4 && x <= this.plotL + this.plotW) {
+            this.hoverShapeId = shape.id as unknown as string;
+            break;
+          }
         }
       }
-      this.canvas.style.cursor = this.hoverShapeId ? "ns-resize" : "crosshair";
+      this.canvas.style.cursor = inPriceAxis
+        ? "ns-resize"
+        : inTimeAxis
+          ? "ew-resize"
+          : this.hoverShapeId
+            ? "ns-resize"
+            : "crosshair";
     }
     this.engine.markDirty();
   }
@@ -638,8 +672,27 @@ export class ChartRenderer {
     if (e.button !== 0) return;
     const x = e.offsetX;
     const y = e.offsetY;
+    const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
+    const inTimeAxis = y > this.plotT + this.plotH && x < this.plotL + this.plotW;
+
     if (this.hoverShapeId) {
       this.dragging = { kind: "shape", id: this.hoverShapeId, startY: y };
+      return;
+    }
+    if (inPriceAxis) {
+      // Snapshot the currently-displayed range so the drag scales from here.
+      this.dragging = { kind: "priceScale", startY: y, startMin: this.priceMin, startMax: this.priceMax };
+      this.context.autoScalePrice = false;
+      this.context.priceRange = { min: this.priceMin, max: this.priceMax };
+      return;
+    }
+    if (inTimeAxis) {
+      this.dragging = {
+        kind: "timeScale",
+        startX: x,
+        startFrom: this.context.visibleRange.from,
+        startTo: this.context.visibleRange.to,
+      };
       return;
     }
     if (x <= this.plotL + this.plotW && y <= this.plotT + this.plotH) {
@@ -680,20 +733,25 @@ export class ChartRenderer {
       from: pivot - leftFrac * newSpan,
       to: pivot + (1 - leftFrac) * newSpan,
     };
-    this.context.autoScalePrice = true;
     void this.data.maybeLoadMoreHistory();
     this.engine.markDirty();
   }
 
-  private onDblClick(): void {
-    // Reset to the most recent window + auto price scale.
-    const n = this.context.bars.length;
-    if (n) {
-      const count = Math.min(n, 120);
-      this.context.visibleRange = { from: n - count, to: n - 1 + Math.max(2, Math.floor(count * 0.06)) };
-    }
+  private onDblClick(e: MouseEvent): void {
+    const x = e.offsetX;
+    const y = e.offsetY;
+    const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
+    // Double-clicking the price axis resets ONLY the price scale to auto-fit
+    // (keeps the time view); anywhere else resets the whole view.
     this.context.priceRange = null;
     this.context.autoScalePrice = true;
+    if (!inPriceAxis) {
+      const n = this.context.bars.length;
+      if (n) {
+        const count = Math.min(n, 120);
+        this.context.visibleRange = { from: n - count, to: n - 1 + Math.max(2, Math.floor(count * 0.06)) };
+      }
+    }
     this.engine.markDirty();
   }
 }
