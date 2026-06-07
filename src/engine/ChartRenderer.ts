@@ -400,6 +400,7 @@ export class ChartRenderer {
     const gap = 3;               // vertical gap between stacked marks
     const maxStack = 4;          // beyond this, collapse into a "+N" badge
     const bottomLimit = this.plotT + this.plotH - 4;
+    const topLimit = this.plotT + 4;
 
     // Group marks by bar index so multiple marks on one bar stack vertically
     // instead of piling up on the same pixel.
@@ -424,14 +425,14 @@ export class ChartRenderer {
 
       const group = byBar.get(idx)!;
       const bar = bars[idx]!;
-      // Anchor just beneath the bar's low so marks attach to their bar, then
-      // stack downward toward the time axis.
-      const lowY = this.yForPrice(bar.low > 0 ? bar.low : Math.min(bar.open, bar.close));
+      // Anchor just above the bar's high so marks sit over their bar, then
+      // stack upward toward the top of the pane.
+      const highY = this.yForPrice(bar.high);
       const stepY = 2 * r + gap;
       const shown = Math.min(group.length, maxStack);
-      // Clamp the start so the whole stack stays inside the plot.
-      const maxStart = bottomLimit - r - (shown - 1) * stepY;
-      let y = Math.max(this.plotT + r, Math.min(maxStart, lowY + r + 6));
+      // Clamp so the whole upward stack stays inside the plot.
+      const minStart = topLimit + r + (shown - 1) * stepY;
+      let y = Math.max(minStart, Math.min(bottomLimit - r, highY - r - 6));
 
       for (let k = 0; k < shown; k++) {
         const m = group[k]!;
@@ -457,7 +458,7 @@ export class ChartRenderer {
           ctx.fillText(label, x, y + 0.5);
         }
         this.markScreen.push({ mark: m, x, y, r });
-        y += stepY; // stack downward, away from the candle
+        y -= stepY; // stack upward, above the candle
       }
     }
   }
