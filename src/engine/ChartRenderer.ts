@@ -17,7 +17,7 @@ import type { ChartContext } from "../core/context";
 import type { ChartEngine } from "./ChartEngine";
 import type { ShapeStore, StoredShape } from "../core/ShapeStore";
 import type { DataManager } from "../data/DataManager";
-import { resolutionToMs, parseResolution, resolutionLabel } from "../util/resolution";
+import { resolutionToMs, parseResolution } from "../util/resolution";
 import { decimalsFromPricescale, formatPrice, formatVolume } from "../util/format";
 
 const PRICE_AXIS_W_DEFAULT = 64;
@@ -772,26 +772,15 @@ export class ChartRenderer {
     const up = bar.close >= bar.open;
     const col = up ? t.candleUp : t.candleDown;
 
-    const light = t.paneBackground.toLowerCase() === "#ffffff";
-    const nameColor = light ? "#131722" : "#f4eee1";
     const dim = t.scaleText;
     const f = (v: number): string => formatPrice(v, pricescale);
 
-    // Line 1: symbol  ·  resolution.
-    const name = this.context.symbolInfo?.name ?? this.context.symbol;
+    // O/H/L/C with dim labels + candle-coloured values, then change %.
+    // (Symbol name + interval intentionally omitted — shown by the app's own UI.)
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.font = `600 13px ${this.context.fontFamily}`;
-    ctx.fillStyle = nameColor;
-    ctx.fillText(name, 10, 19);
-    const nameW = ctx.measureText(name).width;
-    ctx.font = `11px ${this.context.fontFamily}`;
-    ctx.fillStyle = dim;
-    ctx.fillText(`· ${resolutionLabel(this.context.resolution)}`, 10 + nameW + 8, 19);
-
-    // Line 2: O/H/L/C with dim labels + candle-coloured values, then change %.
     let x = 10;
-    const y = 37;
+    const y = 19;
     ctx.font = `12px ${this.context.fontFamily}`;
     const seg = (label: string, value: string): void => {
       ctx.fillStyle = dim;
@@ -817,7 +806,7 @@ export class ChartRenderer {
     if (bar.volume) {
       ctx.fillStyle = dim;
       ctx.font = `11px ${this.context.fontFamily}`;
-      ctx.fillText(`Vol ${formatVolume(bar.volume)}`, 10, 53);
+      ctx.fillText(`Vol ${formatVolume(bar.volume)}`, 10, 35);
     }
   }
 
