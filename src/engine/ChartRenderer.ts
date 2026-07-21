@@ -166,6 +166,12 @@ export class ChartRenderer {
     return { unixTime, price: this.priceForY(y) };
   }
 
+  /** Same as timePriceAt but from a raw mouse event (AppZoom-safe). */
+  timePriceAtEvent(e: MouseEvent): { unixTime: number; price: number } {
+    const { x, y } = this.pointerXY(e);
+    return this.timePriceAt(x, y);
+  }
+
   // ── Visible-price computation (auto-fit) ────────────────────────────────────
   private computePriceRange(): void {
     if (this.context.priceRange && !this.context.autoScalePrice) {
@@ -831,7 +837,8 @@ export class ChartRenderer {
     const t = this.context.theme;
     const { y } = this.crosshair;
     let { x } = this.crosshair;
-    if (x > this.plotL + this.plotW || y > this.plotT + this.plotH) return;
+    const contentBottom = this.timeAxisTop();
+    if (x < this.plotL || x > this.plotL + this.plotW || y < this.plotT || y > contentBottom) return;
 
     // Snap the vertical line to the hovered bar's centre for a precise feel.
     const bars = this.context.bars;
@@ -839,22 +846,30 @@ export class ChartRenderer {
     const snapBar = bars[Math.max(0, Math.min(bars.length - 1, idx))];
     if (snapBar && idx >= 0 && idx < bars.length) x = this.xForIndex(idx);
 
+    const inMainPane = y <= this.plotT + this.plotH;
     ctx.save();
     ctx.strokeStyle = t.crosshair;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
+    // Vertical through main + RSI panes.
     ctx.moveTo(Math.round(x) + 0.5, this.plotT);
-    ctx.lineTo(Math.round(x) + 0.5, this.plotT + this.plotH);
-    ctx.moveTo(this.plotL, Math.round(y) + 0.5);
-    ctx.lineTo(this.plotL + this.plotW, Math.round(y) + 0.5);
+    ctx.lineTo(Math.round(x) + 0.5, contentBottom);
+    // Horizontal only in the pane under the cursor.
+    if (inMainPane) {
+      ctx.moveTo(this.plotL, Math.round(y) + 0.5);
+      ctx.lineTo(this.plotL + this.plotW, Math.round(y) + 0.5);
+    } else if (this.rsiH > 0 && y >= this.rsiT) {
+      ctx.moveTo(this.plotL, Math.round(y) + 0.5);
+      ctx.lineTo(this.plotL + this.plotW, Math.round(y) + 0.5);
+    }
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
 
     const pill = this.neutralPill();
     const pricescale = this.context.symbolInfo?.pricescale ?? 100;
-    if (t.showPriceScaleCrosshairLabel) {
+    if (t.showPriceScaleCrosshairLabel && inMainPane) {
       this.drawAxisTag(ctx, y, formatPrice(this.priceForY(y), pricescale), pill.bg, pill.fg);
     }
     if (t.showTimeScaleCrosshairLabel && snapBar) {
@@ -947,11 +962,27 @@ export class ChartRenderer {
     }
   }
 
+  /** Map a mouse event into canvas CSS-pixel space. Required under AppZoom's
+   *  CSS `zoom` — `offsetX`/`offsetY` diverge from the layout box we draw in. */
+  private pointerXY(e: MouseEvent): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const rw = rect.width || 1;
+    const rh = rect.height || 1;
+    return {
+      x: (e.clientX - rect.left) * (this.engine.cssWidth / rw),
+      y: (e.clientY - rect.top) * (this.engine.cssHeight / rh),
+    };
+  }
+
   // ── Interaction ─────────────────────────────────────────────────────────────
   private onMouseMove(e: MouseEvent): void {
-    const x = e.offsetX;
-    const y = e.offsetY;
-    this.crosshair = { x, y, active: x <= this.plotL + this.plotW && y <= this.plotT + this.plotH };
+    const { x, y } = this.pointerXY(e);
+    const contentBottom = this.timeAxisTop();
+    this.crosshair = {
+      x,
+      y,
+      active: x >= this.plotL && x <= this.plotL + this.plotW && y >= this.plotT && y <= contentBottom,
+    };
 
     if (this.dragging?.kind === "pan") {
       const dxBars = (x - this.dragging.startX) / this.barSpacing;
@@ -989,9 +1020,9 @@ export class ChartRenderer {
     } else {
       // Hover cursor: axes get resize affordances, unlocked shapes too.
       const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
-      const inTimeAxis = y > this.plotT + this.plotH && x < this.plotL + this.plotW;
+      const inTimeAxis = y >= contentBottom && x < this.plotL + this.plotW;
       this.hoverShapeId = null;
-      if (!inPriceAxis && !inTimeAxis) {
+      if (!inPriceAxis && !inTimeAxis && y <= this.plotT + this.plotH) {
         for (const { shape, y: sy } of this.shapeScreen) {
           if (!shape.lock && Math.abs(sy - y) <= 4 && x <= this.plotL + this.plotW) {
             this.hoverShapeId = shape.id as unknown as string;
@@ -1012,10 +1043,10 @@ export class ChartRenderer {
 
   private onMouseDown(e: MouseEvent): void {
     if (e.button !== 0) return;
-    const x = e.offsetX;
-    const y = e.offsetY;
+    const { x, y } = this.pointerXY(e);
+    const contentBottom = this.timeAxisTop();
     const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
-    const inTimeAxis = y > this.plotT + this.plotH && x < this.plotL + this.plotW;
+    const inTimeAxis = y >= contentBottom && x < this.plotL + this.plotW;
 
     if (this.hoverShapeId) {
       this.dragging = { kind: "shape", id: this.hoverShapeId, startY: y };
@@ -1069,7 +1100,8 @@ export class ChartRenderer {
     const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
     const newSpan = Math.max(this.plotW / MAX_BAR_SPACING, Math.min(this.plotW / MIN_BAR_SPACING, span * factor));
     // Zoom around the cursor's bar index.
-    const pivot = this.indexForX(e.offsetX);
+    const { x } = this.pointerXY(e);
+    const pivot = this.indexForX(x);
     const leftFrac = (pivot - from) / span;
     this.context.visibleRange = {
       from: pivot - leftFrac * newSpan,
@@ -1080,8 +1112,7 @@ export class ChartRenderer {
   }
 
   private onDblClick(e: MouseEvent): void {
-    const x = e.offsetX;
-    const y = e.offsetY;
+    const { x, y } = this.pointerXY(e);
     const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
     // Double-clicking the price axis resets ONLY the price scale to auto-fit
     // (keeps the time view); anywhere else resets the whole view.

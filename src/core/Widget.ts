@@ -287,7 +287,7 @@ export class Widget implements IChartingLibraryWidget {
     this.chartArea.addEventListener("contextmenu", (e) => {
       if (!this.contextMenuCb) return;
       e.preventDefault();
-      const { unixTime, price } = this.renderer.timePriceAt(e.offsetX, e.offsetY);
+      const { unixTime, price } = this.renderer.timePriceAtEvent(e);
       const result = this.contextMenuCb(unixTime, price);
       const show = (items: typeof result extends Promise<infer R> ? R : typeof result): void => {
         showContextMenu(e.clientX, e.clientY, items as never, this.context.fontFamily);
