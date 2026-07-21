@@ -17,6 +17,7 @@ import type { ChartContext } from "../core/context";
 import type { ChartEngine } from "./ChartEngine";
 import type { ShapeStore, StoredShape } from "../core/ShapeStore";
 import type { DataManager } from "../data/DataManager";
+import type { StudyStore } from "../studies/StudyStore";
 import { resolutionToMs, parseResolution } from "../util/resolution";
 import { decimalsFromPricescale, formatPrice, formatVolume } from "../util/format";
 
@@ -26,7 +27,8 @@ const PRICE_AXIS_W_MAX = 128;
 const TIME_AXIS_H = 22;
 const MIN_BAR_SPACING = 1.5;
 const MAX_BAR_SPACING = 64;
-const VOLUME_FRACTION = 0.16; // bottom 16% of the plot reserved for volume bars
+const VOLUME_FRACTION = 0.16; // bottom 16% of the main plot reserved for volume bars
+const RSI_PANE_FRACTION = 0.22; // of full canvas height when RSI is active
 const CANDLE_MAX_WIDTH = 18;  // cap so few-bar charts don't render giant blocks
 
 // Round time-step boundaries (ms) for time-axis gridlines, ascending.
@@ -53,6 +55,8 @@ export class ChartRenderer {
   private plotT = 0;
   private plotW = 0;
   private plotH = 0;
+  private rsiT = 0;
+  private rsiH = 0;
   private priceAxisW = PRICE_AXIS_W_DEFAULT; // widened to fit the widest label
   private priceMin = 0;
   private priceMax = 1;
@@ -79,6 +83,7 @@ export class ChartRenderer {
     private readonly engine: ChartEngine,
     private readonly shapes: ShapeStore,
     private readonly data: DataManager,
+    private readonly studies: StudyStore,
   ) {
     this.canvas = engine.canvas;
     this.boundMove = (e) => this.onMouseMove(e);
@@ -137,6 +142,11 @@ export class ChartRenderer {
   private priceForY(y: number): number {
     const r = this.priceMax - this.priceMin || 1;
     return this.priceMax - (y - this.plotT) / this.plotH * r;
+  }
+
+  /** Top of the time-axis strip (below main plot, or below RSI when present). */
+  private timeAxisTop(): number {
+    return this.rsiH > 0 ? this.rsiT + this.rsiH : this.plotT + this.plotH;
   }
 
   /** Public: time (unix seconds) + price under a canvas pixel — for onContextMenu. */
@@ -216,10 +226,16 @@ export class ChartRenderer {
     const H = this.engine.cssHeight;
     if (W <= 0 || H <= 0) return;
 
+    const hasRsi = this.studies.hasRsi();
+    const rsiPane = hasRsi ? Math.max(48, Math.floor(H * RSI_PANE_FRACTION)) : 0;
+    const paneGap = hasRsi ? 3 : 0;
+
     this.plotL = 0;
     this.plotT = 0;
     this.plotW = Math.max(1, W - this.priceAxisW);
-    this.plotH = Math.max(1, H - TIME_AXIS_H);
+    this.plotH = Math.max(1, H - TIME_AXIS_H - rsiPane - paneGap);
+    this.rsiT = this.plotT + this.plotH + paneGap;
+    this.rsiH = rsiPane;
 
     this.computePriceRange();
 
@@ -234,9 +250,11 @@ export class ChartRenderer {
     this.drawGrid(ctx, priceTicks, timeTicks);
     this.drawVolume(ctx);
     this.drawCandles(ctx);
+    this.drawOverlayStudies(ctx);
     this.drawShapes(ctx);
     this.drawMarks(ctx);
     this.drawPriceAxis(ctx, priceTicks);
+    if (hasRsi) this.drawRsiPane(ctx, timeTicks);
     this.drawTimeAxis(ctx, timeTicks);
     this.drawLastPrice(ctx);
     this.drawCrosshair(ctx);
@@ -254,6 +272,7 @@ export class ChartRenderer {
         visibleRange: { ...this.context.visibleRange },
         priceMin: this.priceMin, priceMax: this.priceMax,
         firstBarClose: bars[0]?.close, lastBarClose: bars[bars.length - 1]?.close,
+        studies: this.studies.list().map((s) => ({ id: s.id, kind: s.kind, length: s.length })),
       };
     }
 
@@ -262,10 +281,113 @@ export class ChartRenderer {
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(this.plotL + this.plotW + 0.5, 0);
-    ctx.lineTo(this.plotL + this.plotW + 0.5, this.plotT + this.plotH);
+    ctx.lineTo(this.plotL + this.plotW + 0.5, this.plotT + this.plotH + this.rsiH + paneGap);
     ctx.moveTo(0, this.plotT + this.plotH + 0.5);
     ctx.lineTo(W, this.plotT + this.plotH + 0.5);
+    if (hasRsi) {
+      ctx.moveTo(0, this.rsiT + this.rsiH + 0.5);
+      ctx.lineTo(W, this.rsiT + this.rsiH + 0.5);
+    }
     ctx.stroke();
+  }
+
+  private drawOverlayStudies(ctx: CanvasRenderingContext2D): void {
+    for (const s of this.studies.list()) {
+      if (s.pane !== "overlay") continue;
+      this.strokeStudyLine(ctx, s.values, s.color, (v) => this.yForPrice(v), this.plotT, this.plotT + this.plotH);
+    }
+  }
+
+  private drawRsiPane(
+    ctx: CanvasRenderingContext2D,
+    timeTicks: { index: number; time: number }[],
+  ): void {
+    if (this.rsiH <= 0) return;
+    const t = this.context.theme;
+    const yForRsi = (v: number): number => {
+      const clamped = Math.max(0, Math.min(100, v));
+      return this.rsiT + (100 - clamped) / 100 * this.rsiH;
+    };
+
+    ctx.fillStyle = t.paneBackground;
+    ctx.fillRect(this.plotL, this.rsiT, this.plotW, this.rsiH);
+    ctx.strokeStyle = t.horzGrid;
+    ctx.lineWidth = 1;
+    for (const level of [30, 50, 70]) {
+      const y = Math.round(yForRsi(level)) + 0.5;
+      ctx.beginPath();
+      ctx.setLineDash(level === 50 ? [3, 3] : []);
+      ctx.moveTo(this.plotL, y);
+      ctx.lineTo(this.plotL + this.plotW, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.strokeStyle = t.vertGrid;
+    ctx.beginPath();
+    for (const tk of timeTicks) {
+      const x = Math.round(this.xForIndex(tk.index)) + 0.5;
+      if (x < this.plotL || x > this.plotL + this.plotW) continue;
+      ctx.moveTo(x, this.rsiT);
+      ctx.lineTo(x, this.rsiT + this.rsiH);
+    }
+    ctx.stroke();
+
+    for (const s of this.studies.list()) {
+      if (s.pane !== "rsi") continue;
+      this.strokeStudyLine(ctx, s.values, s.color, yForRsi, this.rsiT, this.rsiT + this.rsiH);
+    }
+
+    ctx.fillStyle = t.scaleText;
+    ctx.font = `10px ${this.context.fontFamily}`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const level of [30, 70]) {
+      ctx.fillText(String(level), this.plotL + this.plotW + 6, yForRsi(level));
+    }
+    ctx.textBaseline = "top";
+    ctx.fillText("RSI", this.plotL + 6, this.rsiT + 4);
+  }
+
+  private strokeStudyLine(
+    ctx: CanvasRenderingContext2D,
+    values: (number | null)[],
+    color: string,
+    yFor: (v: number) => number,
+    clipTop: number,
+    clipBot: number,
+  ): void {
+    const bars = this.context.bars;
+    if (!bars.length || values.length === 0) return;
+    const { from, to } = this.context.visibleRange;
+    const start = Math.max(0, Math.floor(from) - 1);
+    const end = Math.min(bars.length - 1, Math.ceil(to) + 1);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.plotL, clipTop, this.plotW, Math.max(1, clipBot - clipTop));
+    ctx.clip();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.25;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    let drawing = false;
+    for (let i = start; i <= end; i++) {
+      const v = values[i];
+      if (v == null || !Number.isFinite(v)) {
+        drawing = false;
+        continue;
+      }
+      const x = this.xForIndex(i);
+      const y = yFor(v);
+      if (!drawing) {
+        ctx.moveTo(x, y);
+        drawing = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   private drawGrid(
@@ -602,13 +724,14 @@ export class ChartRenderer {
 
   private drawTimeAxis(ctx: CanvasRenderingContext2D, ticks: { index: number; time: number }[]): void {
     const t = this.context.theme;
+    const top = this.timeAxisTop();
     ctx.fillStyle = t.scaleBackground;
-    ctx.fillRect(0, this.plotT + this.plotH, this.engine.cssWidth, TIME_AXIS_H);
+    ctx.fillRect(0, top, this.engine.cssWidth, TIME_AXIS_H);
     ctx.fillStyle = t.scaleText;
     ctx.font = `11px ${this.context.fontFamily}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const y = this.plotT + this.plotH + TIME_AXIS_H / 2;
+    const y = top + TIME_AXIS_H / 2;
     const kind = parseResolution(this.context.resolution).kind;
     for (const tk of ticks) {
       const x = this.xForIndex(tk.index);
@@ -739,13 +862,14 @@ export class ChartRenderer {
       ctx.font = `11px ${this.context.fontFamily}`;
       const w = ctx.measureText(label).width + 14;
       const tx = Math.max(this.plotL, Math.min(this.plotL + this.plotW - w, x - w / 2));
+      const axisTop = this.timeAxisTop();
       ctx.fillStyle = pill.bg;
-      this.roundRect(ctx, tx, this.plotT + this.plotH + 2, w, TIME_AXIS_H - 4, 3);
+      this.roundRect(ctx, tx, axisTop + 2, w, TIME_AXIS_H - 4, 3);
       ctx.fill();
       ctx.fillStyle = pill.fg;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(label, tx + w / 2, this.plotT + this.plotH + TIME_AXIS_H / 2 + 0.5);
+      ctx.fillText(label, tx + w / 2, axisTop + TIME_AXIS_H / 2 + 0.5);
     }
   }
 
@@ -802,6 +926,19 @@ export class ChartRenderer {
       const chgStr = `${sign}${formatPrice(Math.abs(abs), pricescale)} (${sign}${Math.abs(pct).toFixed(2)}%)`;
       ctx.fillStyle = col;
       ctx.fillText(chgStr, x, y);
+      x += ctx.measureText(chgStr).width + 12;
+    }
+    for (const s of this.studies.list()) {
+      const v = s.values[idx];
+      if (v == null || !Number.isFinite(v)) continue;
+      const label = `${s.kind}${s.length}`;
+      const value = s.kind === "RSI" ? v.toFixed(1) : f(v);
+      ctx.fillStyle = dim;
+      ctx.fillText(label, x, y);
+      x += ctx.measureText(label).width + 3;
+      ctx.fillStyle = s.color;
+      ctx.fillText(value, x, y);
+      x += ctx.measureText(value).width + 9;
     }
     if (bar.volume) {
       ctx.fillStyle = dim;

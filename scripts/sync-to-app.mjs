@@ -4,7 +4,7 @@
 //
 //   node scripts/sync-to-app.mjs [/path/to/app.raze.bot]
 //
-// Default app path assumes the sibling layout /home/debian/raze/app.raze.bot.
+// Default app path: /home/debian/raze/app.raze.bot (sibling of this package).
 
 import { copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";

@@ -23,6 +23,8 @@ import { ChartRenderer } from "../engine/ChartRenderer";
 import { Toolbar } from "../ui/Toolbar";
 import { IntervalSelector } from "../ui/IntervalSelector";
 import { LoadingScreen } from "../ui/LoadingScreen";
+import { IndicatorsMenu } from "../ui/IndicatorsMenu";
+import { StudyStore } from "../studies/StudyStore";
 import { showContextMenu, closeContextMenu } from "../ui/ContextMenu";
 
 const DEFAULT_FONT = "'Trebuchet MS', Roboto, Ubuntu, sans-serif";
@@ -37,8 +39,10 @@ export class Widget implements IChartingLibraryWidget {
   private renderer: ChartRenderer;
   private toolbar: Toolbar;
   private intervalSelector: IntervalSelector | null = null;
+  private indicatorsMenu: IndicatorsMenu | null = null;
   private loading: LoadingScreen | null;
   private api: ChartApi;
+  private studies: StudyStore;
 
   private chartReady: Delegate<[]> = new Delegate();
   private isChartReady = false;
@@ -108,8 +112,9 @@ export class Widget implements IChartingLibraryWidget {
     // ── Subsystems ─────────────────────────────────────────────────────────────
     this.data = new DataManager(this.context);
     this.shapes = new ShapeStore(this.context);
+    this.studies = new StudyStore(this.context);
     this.engine = new ChartEngine(this.chartArea, this.context);
-    this.renderer = new ChartRenderer(this.context, this.engine, this.shapes, this.data);
+    this.renderer = new ChartRenderer(this.context, this.engine, this.shapes, this.data, this.studies);
 
     this.loading = new LoadingScreen(options.loading_screen, theme.paneBackground);
     this.chartArea.appendChild(this.loading.el);
@@ -129,8 +134,21 @@ export class Widget implements IChartingLibraryWidget {
       },
       createShape: (point, opts) => this.shapes.create(point, opts),
       getShapeById: (id) => this.shapes.adapter(id),
-      removeEntity: (id) => this.shapes.remove(id),
+      removeEntity: (id) => {
+        if (this.studies.remove(id)) return;
+        this.shapes.remove(id);
+      },
       removeAllShapes: () => this.shapes.removeAll(),
+      createStudy: (name, _force, _lock, inputs) => {
+        const kind = StudyStore.parseName(name);
+        if (!kind) return Promise.reject(new Error(`[raze-charts] unknown study: ${name}`));
+        const lengthRaw = inputs?.length ?? inputs?.Length ?? inputs?.periods;
+        const length = typeof lengthRaw === "number" && Number.isFinite(lengthRaw)
+          ? lengthRaw
+          : StudyStore.defaultLength(kind);
+        const color = typeof inputs?.color === "string" ? inputs.color : "";
+        return Promise.resolve(this.studies.add({ kind, length, color }));
+      },
     };
     this.api = new ChartApi(this.context, deps);
 
@@ -169,6 +187,12 @@ export class Widget implements IChartingLibraryWidget {
     this.context.intervalChanged.subscribe(null, ((res: ResolutionString) => {
       this.intervalSelector?.setActive(String(res));
     }) as never);
+
+    // Indicators menu (TV chrome parity) — left of custom app buttons.
+    const indBtn = this.toolbar.createButton({ align: "left", useTradingViewStyle: true, title: "Indicators" });
+    // Move indicators button just after the interval slot.
+    this.toolbar.intervalSlot.parentElement?.insertBefore(indBtn, this.toolbar.intervalSlot.nextSibling);
+    this.indicatorsMenu = new IndicatorsMenu(this.context, this.studies, indBtn);
 
     this.loading?.hide();
     this.loading = null;
@@ -248,7 +272,9 @@ export class Widget implements IChartingLibraryWidget {
     this.renderer.destroy();
     this.engine.destroy();
     this.data.destroy();
+    this.studies.destroy();
     this.intervalSelector?.destroy();
+    this.indicatorsMenu?.destroy();
     this.toolbar.destroy();
     this.loading?.destroy();
     this.chartReady.destroy();

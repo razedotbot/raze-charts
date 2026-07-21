@@ -267,6 +267,13 @@ export interface IChartWidgetApi {
   getShapeById(entityId: EntityId): ILineDataSourceApi;
   removeEntity(entityId: EntityId): void;
   removeAllShapes(): void;
+  /** Add a built-in study (EMA / SMA / RSI). Returns an entity id removable via removeEntity. */
+  createStudy(
+    name: string,
+    forceOverlay?: boolean,
+    lock?: boolean,
+    inputs?: Record<string, unknown>,
+  ): Promise<EntityId>;
   refreshMarks(): void;
   clearMarks(): void;
   resetData(): void;

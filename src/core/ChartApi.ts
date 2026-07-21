@@ -32,6 +32,12 @@ export interface ChartApiDeps {
   getShapeById(id: EntityId): ILineDataSourceApi;
   removeEntity(id: EntityId): void;
   removeAllShapes(): void;
+  createStudy(
+    name: string,
+    forceOverlay?: boolean,
+    lock?: boolean,
+    inputs?: Record<string, unknown>,
+  ): Promise<EntityId>;
 }
 
 export class ChartApi implements IChartWidgetApi {
@@ -124,6 +130,15 @@ export class ChartApi implements IChartWidgetApi {
 
   removeAllShapes(): void {
     this.deps.removeAllShapes();
+  }
+
+  createStudy(
+    name: string,
+    forceOverlay?: boolean,
+    lock?: boolean,
+    inputs?: Record<string, unknown>,
+  ): Promise<EntityId> {
+    return this.deps.createStudy(name, forceOverlay, lock, inputs);
   }
 
   refreshMarks(): void {

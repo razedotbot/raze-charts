@@ -29,8 +29,22 @@ library.
   and CSS custom properties, seconds resolution, autosize, loading screen,
   pan/zoom/fit.
 
-It does **not** (by design, matching the app's usage) implement indicators/
-studies, the full drawing-tool suite, multi-pane layouts, or save/load.
+It does **not** (by design, matching the app's *API* usage) fully implement
+the full drawing-tool suite, multi-pane layouts beyond RSI, or save/load.
+**Indicators (Fase 1, 2026-07-21):** EMA/SMA overlays + RSI sub-pane via toolbar
+"Indicators" menu and `chart.createStudy("EMA"|"SMA"|"RSI", …)`. Roadmap:
+vault `2026-07-21-raze-charts-tv-parity-roadmap`.
+
+## Roadmap (2026-07-21)
+
+| Phase | Focus | Status |
+|-------|--------|--------|
+| 0 | Drop-in freeze, build/sync/smoke `:3111` | baseline |
+| 1 | Indicators: EMA/SMA overlay, RSI pane | **done 2026-07-21** |
+| 2 | Drawings: trend_line, fib, rectangle, text | **next** |
+| 3 | Chart types: line / area / heikin ashi | queued |
+| 4 | UX: keyboard, fit, fullscreen, screenshot | queued |
+| 5 | Close remaining TVChart API stubs | continuous |
 
 ## Build
 

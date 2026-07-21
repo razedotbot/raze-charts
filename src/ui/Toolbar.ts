@@ -31,6 +31,7 @@ export class Toolbar {
       `font-family:${this.context.fontFamily}`,
       "font-size:13px",
       "user-select:none",
+      "overflow:visible",
       "position:relative",
       "z-index:3",
     ].join(";");

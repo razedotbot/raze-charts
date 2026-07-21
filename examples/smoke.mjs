@@ -122,6 +122,14 @@ const adapter = chart.getShapeById(id);
 adapter.setPoints([{ time: Math.floor(Date.now() / 1000), price: 1234 }]);
 assert(adapter.getPoints()[0].price === 1234, "getShapeById().setPoints/getPoints round-trips");
 
+// studies: createStudy EMA/RSI + removeEntity
+const emaId = await chart.createStudy("EMA", false, false, { length: 9 });
+assert(typeof emaId === "string" && emaId.includes("ema"), `createStudy EMA id (${emaId})`);
+const rsiId = await chart.createStudy("RSI", false, false, { length: 14 });
+assert(typeof rsiId === "string" && rsiId.includes("rsi"), `createStudy RSI id (${rsiId})`);
+chart.removeEntity(rsiId);
+assert(true, "removeEntity(study) did not throw");
+
 // drawing_event subscription (drag emits points_changed)
 let drawingEvt = null;
 w.subscribe("drawing_event", (sid, type) => { drawingEvt = { sid, type }; });
