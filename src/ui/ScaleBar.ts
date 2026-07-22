@@ -1,6 +1,7 @@
 // Bottom-right scale toggles: % / log / auto — TV chrome parity.
 
 import type { ChartContext } from "../core/context";
+import { isCoarsePointer } from "./popup";
 
 export class ScaleBar {
   readonly el: HTMLDivElement;
@@ -70,11 +71,12 @@ export class ScaleBar {
     b.style.cssText = [
       "border:0",
       "border-radius:3px",
-      "padding:2px 6px",
+      isCoarsePointer() ? "padding:6px 10px" : "padding:2px 6px",
       "cursor:pointer",
       "background:transparent",
       "color:var(--tv-color-toolbar-button-text, #8b887e)",
       "font:inherit",
+      "touch-action:manipulation",
     ].join(";");
     return b;
   }

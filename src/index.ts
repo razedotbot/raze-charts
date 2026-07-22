@@ -61,7 +61,7 @@ export { DEFAULT_INTERVAL_FAVORITES, IntervalSelector } from "./ui/IntervalSelec
 export { ScaleBar } from "./ui/ScaleBar";
 export { LoadingScreen } from "./ui/LoadingScreen";
 export { closeContextMenu, showContextMenu } from "./ui/ContextMenu";
-export { openPopup, popupRow } from "./ui/popup";
+export { ensureBaseStyles, isCoarsePointer, openPopup, popupRow } from "./ui/popup";
 export type { PopupHandle, PopupOptions } from "./ui/popup";
 
 // ── Utils ───────────────────────────────────────────────────────────────────

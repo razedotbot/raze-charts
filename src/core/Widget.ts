@@ -28,6 +28,7 @@ import { ScaleBar } from "../ui/ScaleBar";
 import { StudyStore } from "../studies/StudyStore";
 import { StudyRegistry } from "../studies/registry";
 import { showContextMenu, closeContextMenu } from "../ui/ContextMenu";
+import { ensureBaseStyles } from "../ui/popup";
 
 const DEFAULT_FONT = "'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
@@ -56,6 +57,7 @@ export class Widget implements IChartingLibraryWidget {
   private subscriptions = new Map<string, Set<(...a: never[]) => void>>();
   private contextMenuCb: ContextMenuCallback | null = null;
   private destroyed = false;
+  private compactRO: ResizeObserver | null = null;
 
   constructor(options: ChartingLibraryWidgetOptions) {
     const containerEl =
@@ -98,6 +100,7 @@ export class Widget implements IChartingLibraryWidget {
       requestPaint: () => {},
     };
 
+    ensureBaseStyles();
     this.root = document.createElement("div");
     this.root.className = "raze-chart-root";
     this.root.style.cssText = [
@@ -229,6 +232,21 @@ export class Widget implements IChartingLibraryWidget {
     this.renderer.attach();
     this.wireContextMenu();
 
+    // Compact mode: below the breakpoint the left sidebar auto-hides so the
+    // plot keeps the width (TV mobile behaviour). 0 disables.
+    const compactBp = raze?.compact_breakpoint ?? 520;
+    if (this.leftSidebar && compactBp > 0 && typeof ResizeObserver !== "undefined") {
+      const sync = (): void => {
+        const w = this.root.clientWidth || 0;
+        if (this.leftSidebar) {
+          this.leftSidebar.el.style.display = w > 0 && w < compactBp ? "none" : "flex";
+        }
+      };
+      this.compactRO = new ResizeObserver(sync);
+      this.compactRO.observe(this.root);
+      sync();
+    }
+
     void this.boot();
   }
 
@@ -338,6 +356,8 @@ export class Widget implements IChartingLibraryWidget {
   remove(): void {
     this.destroyed = true;
     closeContextMenu();
+    this.compactRO?.disconnect();
+    this.compactRO = null;
     this.renderer.destroy();
     this.engine.destroy();
     this.data.destroy();
@@ -355,6 +375,11 @@ export class Widget implements IChartingLibraryWidget {
 
   private wireContextMenu(): void {
     this.chartArea.addEventListener("contextmenu", (e) => {
+      // Touch long-press is the crosshair gesture — suppress the native menu.
+      if (this.renderer.lastPointerType !== "mouse") {
+        e.preventDefault();
+        return;
+      }
       if (!this.contextMenuCb) return;
       e.preventDefault();
       const { unixTime, price } = this.renderer.timePriceAtEvent(e);

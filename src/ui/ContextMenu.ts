@@ -3,7 +3,7 @@
 // of { position, text, click } entries.
 
 import type { ContextMenuItem } from "../types/charting_library";
-import { openPopup, popupRow, type PopupHandle } from "./popup";
+import { isCoarsePointer, openPopup, popupRow, type PopupHandle } from "./popup";
 
 let current: PopupHandle | null = null;
 
@@ -40,7 +40,7 @@ export function showContextMenu(
         /* a handler throwing must not wedge the menu */
       }
     });
-    row.style.padding = "6px 10px";
+    if (!isCoarsePointer()) row.style.padding = "6px 10px";
     row.textContent = item.text; // plain text, never HTML
     popup.el.appendChild(row);
   }

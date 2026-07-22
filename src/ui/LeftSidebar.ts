@@ -9,7 +9,7 @@ import type {
   SidebarItem,
 } from "../types/charting_library";
 import type { ChartContext, DrawingTool } from "../core/context";
-import { openPopup, popupRow, type PopupHandle } from "./popup";
+import { isCoarsePointer, openPopup, popupRow, type PopupHandle } from "./popup";
 
 export const LEFT_SIDEBAR_W = 42;
 
@@ -122,7 +122,10 @@ export class LeftSidebar {
       "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
       "user-select:none",
       "z-index:2",
-      "overflow:visible",
+      // Short containers scroll the toolbar instead of clipping it (the
+      // scrollbar itself is hidden via the injected base stylesheet).
+      "overflow-y:auto",
+      "overflow-x:visible",
       "position:relative",
     ].join(";");
 
@@ -201,12 +204,13 @@ export class LeftSidebar {
     b.type = "button";
     b.title = title;
     b.innerHTML = svg;
+    const size = isCoarsePointer() ? 38 : 32;
     b.style.cssText = [
       "display:flex",
       "align-items:center",
       "justify-content:center",
-      "width:32px",
-      "height:32px",
+      `width:${size}px`,
+      `height:${size}px`,
       "border:0",
       "border-radius:6px",
       "background:transparent",
@@ -214,6 +218,7 @@ export class LeftSidebar {
       "cursor:pointer",
       "padding:0",
       "flex:0 0 auto",
+      "touch-action:manipulation",
     ].join(";");
     b.addEventListener("mouseenter", () => {
       if (b.dataset.active !== "1") b.style.background = "rgba(255,255,255,0.06)";

@@ -373,6 +373,9 @@ export interface IndicatorPreset {
 }
 
 export interface RazeChartsOptions {
+  /** Container width (px) below which the left sidebar auto-hides (mobile).
+   *  Default 520; 0 disables the compact behaviour. */
+  compact_breakpoint?: number;
   /** Left-sidebar layout (builtin ids, "separator", custom buttons). Defaults to the full built-in set. */
   sidebar?: SidebarItem[];
   /** Styles offered by the chart-type picker. Defaults to all four. */

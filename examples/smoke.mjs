@@ -35,7 +35,8 @@ window.Element.prototype.getBoundingClientRect = function () {
   return { width: 800, height: 400, top: 0, left: 0, right: 800, bottom: 400, x: 0, y: 0 };
 };
 // The engine sizes the canvas from clientWidth/Height (0 in jsdom).
-Object.defineProperty(window.HTMLElement.prototype, "clientWidth", { get: () => 800, configurable: true });
+let stubClientW = 800;
+Object.defineProperty(window.HTMLElement.prototype, "clientWidth", { get: () => stubClientW, configurable: true });
 Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { get: () => 400, configurable: true });
 // rAF → manual queue, so the test controls when frames run (no free-running loop).
 let rafId = 0;
@@ -292,5 +293,39 @@ assert(true, "toggling a custom preset did not throw");
 
 w2.remove();
 assert(container2.querySelector(".raze-chart-root") === null, "configured widget remove() cleaned up");
+
+// ── Mobile: compact breakpoint + touch plumbing ─────────────────────────────
+stubClientW = 380; // phone-width container
+const container3 = window.document.createElement("div");
+window.document.body.appendChild(container3);
+const w3 = new widget({
+  symbol: "MOCK", datafeed: makeMockDatafeed({ bars: 200 }), interval: "1",
+  container: container3, library_path: "/", locale: "en", autosize: true,
+});
+await new Promise((r) => w3.onChartReady(r));
+const sb3 = container3.querySelector(".raze-chart-left-sidebar");
+assert(sb3 !== null && sb3.style.display === "none", "compact: sidebar auto-hidden below breakpoint (380px)");
+assert(container3.querySelector("canvas").style.touchAction === "none", "canvas has touch-action:none (gestures owned by the chart)");
+assert(window.document.getElementById("raze-chart-base-css") !== null, "base stylesheet injected (hidden scrollbars)");
+try {
+  flushFrames(3);
+  assert(true, "paint executed at phone width (compact legend path)");
+} catch (e) {
+  assert(false, `paint at 380px threw: ${e.message}`);
+}
+w3.remove();
+
+const container4 = window.document.createElement("div");
+window.document.body.appendChild(container4);
+const w4 = new widget({
+  symbol: "MOCK", datafeed: makeMockDatafeed({ bars: 200 }), interval: "1",
+  container: container4, library_path: "/", locale: "en", autosize: true,
+  raze: { compact_breakpoint: 0 },
+});
+await new Promise((r) => w4.onChartReady(r));
+const sb4 = container4.querySelector(".raze-chart-left-sidebar");
+assert(sb4 !== null && sb4.style.display !== "none", "compact_breakpoint: 0 keeps the sidebar at phone width");
+w4.remove();
+stubClientW = 800;
 
 console.log(process.exitCode ? "\nSMOKE: FAIL" : "\nSMOKE: PASS");

@@ -1,6 +1,6 @@
 {
   "name": "@raze/charts",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Open, dependency-free Canvas-2D financial charting library — drop-in compatible with the TradingView Charting Library widget API.",
   "license": "MIT",
   "type": "module",

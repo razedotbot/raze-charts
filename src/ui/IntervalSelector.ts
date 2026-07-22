@@ -6,7 +6,7 @@
 import type { ResolutionString } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
 import { resolutionLabel } from "../util/resolution";
-import { openPopup, popupRow, type PopupHandle } from "./popup";
+import { isCoarsePointer, openPopup, popupRow, type PopupHandle } from "./popup";
 
 /** Default inline favorites (others go in the dropdown). Overridden by the
  *  TV-compatible `options.favorites.intervals`. */
@@ -78,17 +78,20 @@ export class IntervalSelector {
   }
 
   private btnCss(): string {
+    const coarse = isCoarsePointer();
     return [
       "display:flex",
       "align-items:center",
-      "height:24px",
-      "padding:0 7px",
+      coarse ? "height:30px" : "height:24px",
+      coarse ? "padding:0 10px" : "padding:0 7px",
       "margin:0 1px",
       "border-radius:4px",
       "cursor:pointer",
       "font-size:12px",
       "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
       "background:transparent",
+      "touch-action:manipulation",
+      "flex:0 0 auto",
     ].join(";");
   }
 
@@ -140,7 +143,7 @@ export class IntervalSelector {
     this.dropdown = popup;
     for (const res of rest) {
       const row = popupRow(resolutionLabel(res), () => this.select(res));
-      row.style.padding = "6px 10px";
+      if (!isCoarsePointer()) row.style.padding = "6px 10px";
       popup.el.appendChild(row);
     }
     popup.reposition();

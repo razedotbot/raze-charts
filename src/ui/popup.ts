@@ -27,6 +27,33 @@ export interface PopupHandle {
   reposition: () => void;
 }
 
+/** Coarse pointer (touch device) → bigger tap targets across the chrome.
+ *  maxTouchPoints covers environments where the media query isn't emulated
+ *  (and hybrids, where finger-sized targets are the safe choice). */
+export function isCoarsePointer(): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    if (window.matchMedia?.("(pointer: coarse)").matches) return true;
+    if (window.matchMedia?.("(any-pointer: coarse)").matches) return true;
+    return (navigator.maxTouchPoints ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** One-time stylesheet for bits inline styles can't express (scrollbar hiding). */
+export function ensureBaseStyles(): void {
+  if (typeof document === "undefined" || document.getElementById("raze-chart-base-css")) return;
+  const style = document.createElement("style");
+  style.id = "raze-chart-base-css";
+  style.textContent =
+    ".raze-chart-left-sidebar{scrollbar-width:none}" +
+    ".raze-chart-left-sidebar::-webkit-scrollbar{display:none}" +
+    ".raze-chart-toolbar-scroll{scrollbar-width:none}" +
+    ".raze-chart-toolbar-scroll::-webkit-scrollbar{display:none}";
+  document.head.appendChild(style);
+}
+
 export function openPopup(opts: PopupOptions): PopupHandle {
   const el = document.createElement("div");
   if (opts.className) el.className = opts.className;
@@ -99,7 +126,7 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   return { el, close, reposition };
 }
 
-/** Standard hover-highlighted popup row. */
+/** Standard hover-highlighted popup row. ≥40px tall on touch devices. */
 export function popupRow(html: string, onClick: (e: MouseEvent) => void): HTMLButtonElement {
   const row = document.createElement("button");
   row.type = "button";
@@ -112,13 +139,14 @@ export function popupRow(html: string, onClick: (e: MouseEvent) => void): HTMLBu
     "border:0",
     "background:transparent",
     "color:inherit",
-    "padding:7px 12px",
+    isCoarsePointer() ? "padding:12px 14px" : "padding:7px 12px",
     "cursor:pointer",
     "text-align:left",
     "font:inherit",
     "border-radius:3px",
     "white-space:nowrap",
     "box-sizing:border-box",
+    "touch-action:manipulation",
   ].join(";");
   row.addEventListener("mouseenter", () => {
     row.style.background = "var(--tv-color-popup-element-background-hover, rgba(255,255,255,0.08))";

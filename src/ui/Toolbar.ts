@@ -4,6 +4,7 @@
 
 import type { CreateButtonOptions } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
+import { isCoarsePointer } from "./popup";
 
 export const TOOLBAR_HEIGHT = 38;
 
@@ -42,8 +43,14 @@ export class Toolbar {
       return s;
     };
     this.leftSlot = mkSlot("flex-start");
+    // Narrow screens scroll the left cluster horizontally instead of clipping
+    // (scrollbar hidden by the injected base stylesheet).
+    this.leftSlot.className = "raze-chart-toolbar-scroll";
+    this.leftSlot.style.cssText += ";min-width:0;flex:1 1 auto;overflow-x:auto;overflow-y:hidden;";
     this.rightSlot = mkSlot("flex-end");
+    this.rightSlot.style.flex = "0 0 auto";
     this.intervalSlot = mkSlot("flex-start");
+    this.intervalSlot.style.flex = "0 0 auto";
 
     this.leftSlot.appendChild(this.intervalSlot);
     this.el.appendChild(this.leftSlot);
@@ -59,7 +66,7 @@ export class Toolbar {
       btn.style.cssText = [
         "display:flex",
         "align-items:center",
-        "height:26px",
+        isCoarsePointer() ? "height:32px" : "height:26px",
         "padding:0 8px",
         "margin:0 1px",
         "border-radius:4px",
@@ -67,6 +74,7 @@ export class Toolbar {
         "white-space:nowrap",
         "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
         "background:transparent",
+        "touch-action:manipulation",
       ].join(";");
       btn.addEventListener("mouseenter", () => {
         btn.style.background = "var(--tv-color-toolbar-button-background-hover, rgba(255,255,255,0.06))";

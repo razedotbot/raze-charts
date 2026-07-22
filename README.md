@@ -44,6 +44,12 @@ vendored library without touching consumer code.
   [Configuring the chrome](#configuring-the-chrome).
 - **Theming:** TradingView-style `overrides` keys, `theme: "dark" | "light"`,
   CSS custom properties, custom fonts.
+- **Mobile / touch:** pointer-events native — one-finger pan, pinch-to-zoom,
+  long-press crosshair (persists until the next tap), finger-sized hit targets
+  on shapes/marks, ≥40px tap targets across the chrome on touch devices, and a
+  compact mode that auto-hides the left sidebar below `raze.compact_breakpoint`
+  (default 520px; 0 disables). `touch-action` is managed so chart gestures
+  never scroll the host page.
 
 ## Install
 
@@ -128,6 +134,9 @@ new widget({
   disabled_features: ["scale_bar"],
 
   raze: {
+    // Container width below which the sidebar auto-hides (default 520; 0 = never).
+    compact_breakpoint: 520,
+
     // Sidebar layout: builtin ids, "separator", or your own buttons.
     sidebar: [
       "cursor", "trend_line", "horizontal_line",

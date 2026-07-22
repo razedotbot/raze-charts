@@ -76,6 +76,21 @@ export class ChartRenderer {
     | { kind: "timeScale"; startX: number; startFrom: number; startTo: number } = null;
   private hoverShapeId: string | null = null;
   private hoverMark: Mark | null = null;
+  // Touch gestures (pointer events unify mouse/touch/pen).
+  private activePointers = new Map<number, { x: number; y: number; type: string }>();
+  private pinch: {
+    startSpanPx: number;
+    startFrom: number;
+    startTo: number;
+    anchorIndex: number;
+    anchorFrac: number;
+  } | null = null;
+  private longPressTimer: number | null = null;
+  private longPressStart = { x: 0, y: 0 };
+  /** Long-press mode: the finger drives the crosshair instead of panning. */
+  private touchCrosshair = false;
+  /** Pointer type of the most recent pointerdown ("mouse" | "touch" | "pen"). */
+  lastPointerType = "mouse";
   /** In-progress multipoint drawing (left-toolbar tool). */
   private draft: { tool: DrawingTool; points: ShapePoint[] } | null = null;
   /** Percent-scale base = first visible bar close. */
@@ -84,10 +99,11 @@ export class ChartRenderer {
   private seriesBars: Bar[] = [];
   private onToolDone: ((tool: DrawingTool) => void) | null = null;
 
-  private boundMove: (e: MouseEvent) => void;
-  private boundDown: (e: MouseEvent) => void;
-  private boundUp: (e: MouseEvent) => void;
-  private boundLeave: () => void;
+  private boundMove: (e: PointerEvent) => void;
+  private boundDown: (e: PointerEvent) => void;
+  private boundUp: (e: PointerEvent) => void;
+  private boundCancel: (e: PointerEvent) => void;
+  private boundLeave: (e: PointerEvent) => void;
   private boundWheel: (e: WheelEvent) => void;
   private boundDbl: (e: MouseEvent) => void;
   private boundKey: (e: KeyboardEvent) => void;
@@ -101,10 +117,11 @@ export class ChartRenderer {
     private readonly studies: StudyStore,
   ) {
     this.canvas = engine.canvas;
-    this.boundMove = (e) => this.onMouseMove(e);
-    this.boundDown = (e) => this.onMouseDown(e);
-    this.boundUp = () => this.onMouseUp();
-    this.boundLeave = () => this.onMouseLeave();
+    this.boundMove = (e) => this.onPointerMove(e);
+    this.boundDown = (e) => this.onPointerDown(e);
+    this.boundUp = (e) => this.onPointerUp(e);
+    this.boundCancel = (e) => this.onPointerCancel(e);
+    this.boundLeave = (e) => this.onPointerLeave(e);
     this.boundWheel = (e) => this.onWheel(e);
     this.boundDbl = (e) => this.onDblClick(e);
     this.boundKey = (e) => this.onKeyDown(e);
@@ -119,10 +136,14 @@ export class ChartRenderer {
   attach(): void {
     this.engine.paintHook = (ctx) => this.render(ctx);
     this.context.dataChanged.subscribe(null, this.onData as never);
-    this.canvas.addEventListener("mousemove", this.boundMove);
-    this.canvas.addEventListener("mousedown", this.boundDown);
-    window.addEventListener("mouseup", this.boundUp);
-    this.canvas.addEventListener("mouseleave", this.boundLeave);
+    // Pointer events unify mouse + touch + pen; touch-action:none stops the
+    // browser from turning chart gestures into page scroll / pinch-zoom.
+    this.canvas.style.touchAction = "none";
+    this.canvas.addEventListener("pointermove", this.boundMove);
+    this.canvas.addEventListener("pointerdown", this.boundDown);
+    window.addEventListener("pointerup", this.boundUp);
+    this.canvas.addEventListener("pointercancel", this.boundCancel);
+    this.canvas.addEventListener("pointerleave", this.boundLeave);
     this.canvas.addEventListener("wheel", this.boundWheel, { passive: false });
     this.canvas.addEventListener("dblclick", this.boundDbl);
     window.addEventListener("keydown", this.boundKey);
@@ -132,11 +153,13 @@ export class ChartRenderer {
   }
 
   destroy(): void {
+    this.clearLongPress();
     this.context.dataChanged.unsubscribe(null, this.onData as never);
-    this.canvas.removeEventListener("mousemove", this.boundMove);
-    this.canvas.removeEventListener("mousedown", this.boundDown);
-    window.removeEventListener("mouseup", this.boundUp);
-    this.canvas.removeEventListener("mouseleave", this.boundLeave);
+    this.canvas.removeEventListener("pointermove", this.boundMove);
+    this.canvas.removeEventListener("pointerdown", this.boundDown);
+    window.removeEventListener("pointerup", this.boundUp);
+    this.canvas.removeEventListener("pointercancel", this.boundCancel);
+    this.canvas.removeEventListener("pointerleave", this.boundLeave);
     this.canvas.removeEventListener("wheel", this.boundWheel);
     this.canvas.removeEventListener("dblclick", this.boundDbl);
     window.removeEventListener("keydown", this.boundKey);
@@ -399,6 +422,7 @@ export class ChartRenderer {
         priceMin: this.priceMin, priceMax: this.priceMax,
         firstBarClose: bars[0]?.close, lastBarClose: bars[bars.length - 1]?.close,
         studies: this.studies.list().map((s) => ({ id: s.id, name: s.name, length: s.length })),
+        crosshair: { ...this.crosshair },
       };
     }
 
@@ -1369,9 +1393,13 @@ export class ChartRenderer {
       ctx.fillText(value, x, y);
       x += ctx.measureText(value).width + 9;
     };
-    seg("O", f(bar.open));
-    seg("H", f(bar.high));
-    seg("L", f(bar.low));
+    // Narrow plots (phones) drop O/H/L and keep close + change + studies.
+    const compactLegend = this.plotW < 420;
+    if (!compactLegend) {
+      seg("O", f(bar.open));
+      seg("H", f(bar.high));
+      seg("L", f(bar.low));
+    }
     seg("C", f(bar.close));
     if (bar.open > 0) {
       // Match TV: signed absolute change then (signed percent), e.g. -1,812 (-2.02%)
@@ -1423,14 +1451,43 @@ export class ChartRenderer {
   }
 
   // ── Interaction ─────────────────────────────────────────────────────────────
-  private onMouseMove(e: MouseEvent): void {
+  private onPointerMove(e: PointerEvent): void {
     const { x, y } = this.pointerXY(e);
     const contentBottom = this.timeAxisTop();
-    this.crosshair = {
-      x,
-      y,
-      active: x >= this.plotL && x <= this.plotL + this.plotW && y >= this.plotT && y <= contentBottom,
-    };
+    const tracked = this.activePointers.get(e.pointerId);
+    if (tracked) {
+      tracked.x = x;
+      tracked.y = y;
+    }
+
+    // Two-finger pinch → horizontal (time) zoom around the initial midpoint.
+    if (this.pinch && this.activePointers.size >= 2) {
+      this.updatePinch();
+      this.engine.markDirty();
+      return;
+    }
+
+    // A finger sliding early cancels the pending long-press (it's a pan).
+    if (this.longPressTimer != null
+        && Math.hypot(x - this.longPressStart.x, y - this.longPressStart.y) > 8) {
+      this.clearLongPress();
+    }
+
+    // Long-press mode: the finger drives the crosshair, no pan.
+    if (this.touchCrosshair && tracked) {
+      this.crosshair = { x, y, active: true };
+      this.engine.markDirty();
+      return;
+    }
+
+    // Hover crosshair follows the mouse only — touch shows it via long-press.
+    if (e.pointerType === "mouse") {
+      this.crosshair = {
+        x,
+        y,
+        active: x >= this.plotL && x <= this.plotL + this.plotW && y >= this.plotT && y <= contentBottom,
+      };
+    }
 
     if (this.dragging?.kind === "pan") {
       const dxBars = (x - this.dragging.startX) / this.barSpacing;
@@ -1472,37 +1529,10 @@ export class ChartRenderer {
           }
         }
       }
-    } else {
+    } else if (e.pointerType === "mouse") {
       const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
       const inTimeAxis = y >= contentBottom && x < this.plotL + this.plotW;
-      this.hoverShapeId = null;
-      this.hoverMark = null;
-      if (!inPriceAxis && !inTimeAxis && y <= this.plotT + this.plotH) {
-        for (const m of this.markScreen) {
-          const dx = x - m.x;
-          const dy = y - m.y;
-          if (dx * dx + dy * dy <= (m.r + 2) * (m.r + 2)) {
-            this.hoverMark = m.mark;
-            break;
-          }
-        }
-        if (!this.hoverMark) {
-          for (const { shape, y: sy } of this.shapeScreen) {
-            if (shape.lock || shape.disableSelection) continue;
-            if (shape.shape === "horizontal_line" && Math.abs(sy - y) <= 4 && x <= this.plotL + this.plotW) {
-              this.hoverShapeId = shape.id as unknown as string;
-              break;
-            }
-            if (shape.shape !== "horizontal_line") {
-              const hit = this.hitComplexShape(shape, x, y);
-              if (hit) {
-                this.hoverShapeId = shape.id as unknown as string;
-                break;
-              }
-            }
-          }
-        }
-      }
+      this.hitTestAt(x, y, 1);
       const drawing = this.context.drawingTool !== "cursor";
       // Horizontal lines drag vertically (ns-resize); multipoint shapes move freely.
       const hoverShape = this.hoverShapeId ? this.shapes.get(this.hoverShapeId as never) : undefined;
@@ -1522,14 +1552,49 @@ export class ChartRenderer {
     this.engine.markDirty();
   }
 
-  private hitComplexShape(shape: StoredShape, x: number, y: number): boolean {
+  /** Hit-test marks + shapes at (x,y) into hoverMark / hoverShapeId.
+   *  `tolMul` scales tolerances (2 for touch — finger-sized targets). */
+  private hitTestAt(x: number, y: number, tolMul: number): void {
+    const contentBottom = this.timeAxisTop();
+    const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
+    const inTimeAxis = y >= contentBottom && x < this.plotL + this.plotW;
+    this.hoverShapeId = null;
+    this.hoverMark = null;
+    if (inPriceAxis || inTimeAxis || y > this.plotT + this.plotH) return;
+    for (const m of this.markScreen) {
+      const dx = x - m.x;
+      const dy = y - m.y;
+      const r = m.r + 2 * tolMul;
+      if (dx * dx + dy * dy <= r * r) {
+        this.hoverMark = m.mark;
+        break;
+      }
+    }
+    if (!this.hoverMark) {
+      for (const { shape, y: sy } of this.shapeScreen) {
+        if (shape.lock || shape.disableSelection) continue;
+        if (shape.shape === "horizontal_line" && Math.abs(sy - y) <= 4 * tolMul && x <= this.plotL + this.plotW) {
+          this.hoverShapeId = shape.id as unknown as string;
+          break;
+        }
+        if (shape.shape !== "horizontal_line") {
+          if (this.hitComplexShape(shape, x, y, tolMul)) {
+            this.hoverShapeId = shape.id as unknown as string;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  private hitComplexShape(shape: StoredShape, x: number, y: number, tolMul = 1): boolean {
     const pts = shape.points.map((p) => this.pointXY(p)).filter(Boolean) as { x: number; y: number }[];
     if (pts.length === 0) return false;
     for (const p of pts) {
-      if (Math.abs(p.x - x) <= 6 && Math.abs(p.y - y) <= 6) return true;
+      if (Math.abs(p.x - x) <= 6 * tolMul && Math.abs(p.y - y) <= 6 * tolMul) return true;
     }
     if (shape.shape === "trend_line" && pts.length >= 2) {
-      return distToSegment(x, y, pts[0]!, pts[1]!) <= 5;
+      return distToSegment(x, y, pts[0]!, pts[1]!) <= 5 * tolMul;
     }
     if (shape.shape === "rectangle" && pts.length >= 2) {
       const a = pts[0]!;
@@ -1538,16 +1603,17 @@ export class ChartRenderer {
       const r = Math.max(a.x, b.x);
       const t = Math.min(a.y, b.y);
       const bot = Math.max(a.y, b.y);
+      const tol = 4 * tolMul;
       const nearEdge =
-        (Math.abs(x - l) <= 4 || Math.abs(x - r) <= 4) && y >= t - 4 && y <= bot + 4
-        || (Math.abs(y - t) <= 4 || Math.abs(y - bot) <= 4) && x >= l - 4 && x <= r + 4;
+        (Math.abs(x - l) <= tol || Math.abs(x - r) <= tol) && y >= t - tol && y <= bot + tol
+        || (Math.abs(y - t) <= tol || Math.abs(y - bot) <= tol) && x >= l - tol && x <= r + tol;
       return nearEdge;
     }
     if (shape.shape === "fib_retracement" && pts.length >= 2) {
-      return distToSegment(x, y, pts[0]!, pts[1]!) <= 6;
+      return distToSegment(x, y, pts[0]!, pts[1]!) <= 6 * tolMul;
     }
     if (shape.shape === "text" && pts[0]) {
-      return Math.abs(pts[0].x - x) <= 20 && Math.abs(pts[0].y - y) <= 12;
+      return Math.abs(pts[0].x - x) <= 20 * tolMul && Math.abs(pts[0].y - y) <= 12 * tolMul;
     }
     return false;
   }
@@ -1558,9 +1624,94 @@ export class ChartRenderer {
     return 0;
   }
 
-  private onMouseDown(e: MouseEvent): void {
-    if (e.button !== 0) return;
+  private onPointerDown(e: PointerEvent): void {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     const { x, y } = this.pointerXY(e);
+    this.lastPointerType = e.pointerType || "mouse";
+    this.activePointers.set(e.pointerId, { x, y, type: e.pointerType });
+    try { this.canvas.setPointerCapture?.(e.pointerId); } catch { /* detached/test env */ }
+
+    // Second finger → pinch-zoom takes over the gesture.
+    if (this.activePointers.size === 2) {
+      this.clearLongPress();
+      this.touchCrosshair = false;
+      this.dragging = null;
+      this.startPinch();
+      return;
+    }
+
+    if (e.pointerType !== "mouse") {
+      // Touch has no hover phase: hit-test at the touch point with 2× tolerance
+      // so shapes/marks are draggable by finger.
+      this.hitTestAt(x, y, 2);
+      // A lingering long-press crosshair clears on the next touch.
+      if (this.crosshair.active && !this.touchCrosshair) {
+        this.crosshair.active = false;
+        this.engine.markDirty();
+      }
+      // Long-press (hold ~0.3s without sliding) enters crosshair mode.
+      if (this.context.drawingTool === "cursor" && !this.hoverShapeId) {
+        this.armLongPress(x, y);
+      }
+    }
+
+    this.beginInteraction(x, y);
+  }
+
+  private startPinch(): void {
+    const pts = Array.from(this.activePointers.values());
+    const a = pts[0]!;
+    const b = pts[1]!;
+    const { from, to } = this.context.visibleRange;
+    const span = to - from;
+    const midX = (a.x + b.x) / 2;
+    const anchorIndex = this.indexForX(midX);
+    this.pinch = {
+      // 2D finger distance — real pinches are rarely horizontal.
+      startSpanPx: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)),
+      startFrom: from,
+      startTo: to,
+      anchorIndex,
+      anchorFrac: span > 0 ? (anchorIndex - from) / span : 0.5,
+    };
+  }
+
+  private updatePinch(): void {
+    if (!this.pinch) return;
+    const pts = Array.from(this.activePointers.values());
+    if (pts.length < 2) return;
+    const spanPx = Math.max(10, Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y));
+    const scale = this.pinch.startSpanPx / spanPx; // fingers apart → zoom in
+    const startSpan = this.pinch.startTo - this.pinch.startFrom;
+    const newSpan = Math.max(
+      this.plotW / MAX_BAR_SPACING,
+      Math.min(this.plotW / MIN_BAR_SPACING, startSpan * scale),
+    );
+    const from = this.pinch.anchorIndex - this.pinch.anchorFrac * newSpan;
+    this.context.visibleRange = { from, to: from + newSpan };
+    void this.data.maybeLoadMoreHistory();
+  }
+
+  private armLongPress(x: number, y: number): void {
+    this.clearLongPress();
+    this.longPressStart = { x, y };
+    this.longPressTimer = window.setTimeout(() => {
+      this.longPressTimer = null;
+      this.touchCrosshair = true;
+      this.dragging = null; // the hold wins over the pan that started on down
+      this.crosshair = { x: this.longPressStart.x, y: this.longPressStart.y, active: true };
+      this.engine.markDirty();
+    }, 300);
+  }
+
+  private clearLongPress(): void {
+    if (this.longPressTimer != null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+  }
+
+  private beginInteraction(x: number, y: number): void {
     const contentBottom = this.timeAxisTop();
     const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
     const inTimeAxis = y >= contentBottom && x < this.plotL + this.plotW;
@@ -1663,15 +1814,37 @@ export class ChartRenderer {
     this.engine.markDirty();
   }
 
-  private onMouseUp(): void {
-    if (this.dragging?.kind === "shape") {
-      const id = this.dragging.id;
-      this.context.drawingEvent.fire(id, "points_changed");
+  private onPointerUp(e: PointerEvent): void {
+    this.activePointers.delete(e.pointerId);
+    this.clearLongPress();
+    if (this.pinch && this.activePointers.size < 2) {
+      // Don't let the surviving finger continue as a jumpy pan.
+      this.pinch = null;
+      this.dragging = null;
     }
-    this.dragging = null;
+    if (this.activePointers.size === 0) {
+      if (this.dragging?.kind === "shape") {
+        this.context.drawingEvent.fire(this.dragging.id, "points_changed");
+      }
+      this.dragging = null;
+      // Long-press crosshair persists after the finger lifts (TV-style);
+      // the next touch clears it.
+      this.touchCrosshair = false;
+    }
   }
 
-  private onMouseLeave(): void {
+  private onPointerCancel(e: PointerEvent): void {
+    this.activePointers.delete(e.pointerId);
+    this.clearLongPress();
+    if (this.activePointers.size < 2) this.pinch = null;
+    if (this.activePointers.size === 0) {
+      this.dragging = null;
+      this.touchCrosshair = false;
+    }
+  }
+
+  private onPointerLeave(e: PointerEvent): void {
+    if (e.pointerType !== "mouse") return; // touch crosshair persists after lift
     this.crosshair.active = false;
     this.hoverMark = null;
     if (!this.dragging) this.canvas.style.cursor = "default";
