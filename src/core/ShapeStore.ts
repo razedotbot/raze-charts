@@ -1,6 +1,7 @@
-// Stores chart shapes (the app only uses `horizontal_line`). Holds the data
-// model and hands out ILineDataSourceApi adapters. The engine reads `list()`
-// to render; drag hit-testing (P5) mutates points and fires drawing_event.
+// Stores chart shapes. Programmatic lines from the app use `horizontal_line`;
+// user drawings (left toolbar) add trend_line / fib / rectangle / text.
+// The engine reads `list()` to render; hit-test / drag mutates points and
+// fires drawing_event.
 
 import type {
   CreateShapeOptions,
@@ -10,9 +11,17 @@ import type {
 } from "../types/charting_library";
 import type { ChartContext } from "./context";
 
+export type ShapeKind =
+  | "horizontal_line"
+  | "trend_line"
+  | "fib_retracement"
+  | "rectangle"
+  | "text"
+  | string;
+
 export interface StoredShape {
   id: EntityId;
-  shape: string;
+  shape: ShapeKind;
   points: ShapePoint[];
   text: string;
   lock: boolean;
@@ -30,11 +39,15 @@ export class ShapeStore {
   constructor(private readonly context: ChartContext) {}
 
   create(point: ShapePoint, options: CreateShapeOptions): Promise<EntityId> {
+    return this.createPoints([point], options);
+  }
+
+  createPoints(points: ShapePoint[], options: CreateShapeOptions): Promise<EntityId> {
     const id = nextId();
     const stored: StoredShape = {
       id,
       shape: options.shape ?? "horizontal_line",
-      points: [point],
+      points: points.map((p) => ({ ...p })),
       text: options.text ?? "",
       lock: options.lock ?? false,
       disableSelection: options.disableSelection ?? false,
@@ -43,18 +56,24 @@ export class ShapeStore {
     };
     this.shapes.set(id, stored);
     this.context.requestPaint();
-    // TV resolves on the next frame; mirror that so callers' .then() runs after
-    // the shape is registered.
+    this.context.drawingEvent.fire(id as unknown as string, "create");
     return Promise.resolve(id);
   }
 
   remove(id: EntityId): void {
-    if (this.shapes.delete(id)) this.context.requestPaint();
+    if (this.shapes.delete(id)) {
+      if (this.context.selectedShapeId === (id as unknown as string)) {
+        this.context.selectedShapeId = null;
+      }
+      this.context.drawingEvent.fire(id as unknown as string, "remove");
+      this.context.requestPaint();
+    }
   }
 
   removeAll(): void {
     if (this.shapes.size) {
       this.shapes.clear();
+      this.context.selectedShapeId = null;
       this.context.requestPaint();
     }
   }
@@ -64,7 +83,6 @@ export class ShapeStore {
   }
 
   list(): StoredShape[] {
-    // bottom shapes first so top shapes paint over them
     return Array.from(this.shapes.values()).sort(
       (a, b) => (a.zOrder === "top" ? 1 : 0) - (b.zOrder === "top" ? 1 : 0),
     );

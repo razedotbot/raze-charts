@@ -1,8 +1,7 @@
 // The widget — the top-level object the app constructs via `new widget(opts)`.
 // Owns the DOM tree, the shared context, and the subsystems (data manager,
-// engine, toolbar, shape store). Implements the IChartingLibraryWidget surface
-// the app uses: onChartReady, headerReady, activeChart/chart, createButton,
-// setCSSCustomProperty, subscribe, onContextMenu, remove.
+// engine, toolbar, shape store, left sidebar). Implements the
+// IChartingLibraryWidget surface the app uses.
 
 import type {
   ChartingLibraryWidgetOptions,
@@ -24,6 +23,8 @@ import { Toolbar } from "../ui/Toolbar";
 import { IntervalSelector } from "../ui/IntervalSelector";
 import { LoadingScreen } from "../ui/LoadingScreen";
 import { IndicatorsMenu } from "../ui/IndicatorsMenu";
+import { LeftSidebar, type ChartStyleId } from "../ui/LeftSidebar";
+import { ScaleBar } from "../ui/ScaleBar";
 import { StudyStore } from "../studies/StudyStore";
 import { showContextMenu, closeContextMenu } from "../ui/ContextMenu";
 
@@ -31,13 +32,16 @@ const DEFAULT_FONT = "'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
 export class Widget implements IChartingLibraryWidget {
   private root: HTMLDivElement;
+  private bodyRow: HTMLDivElement;
   private chartArea: HTMLDivElement;
   private context: ChartContext;
   private data: DataManager;
   private shapes: ShapeStore;
   private engine: ChartEngine;
   private renderer: ChartRenderer;
-  private toolbar: Toolbar;
+  private toolbar: Toolbar | null = null;
+  private leftSidebar: LeftSidebar | null = null;
+  private scaleBar: ScaleBar | null = null;
   private intervalSelector: IntervalSelector | null = null;
   private indicatorsMenu: IndicatorsMenu | null = null;
   private loading: LoadingScreen | null;
@@ -51,6 +55,8 @@ export class Widget implements IChartingLibraryWidget {
   private subscriptions = new Map<string, Set<(...a: never[]) => void>>();
   private contextMenuCb: ContextMenuCallback | null = null;
   private destroyed = false;
+  private showHeader: boolean;
+  private showLeftToolbar: boolean;
 
   constructor(options: ChartingLibraryWidgetOptions) {
     const containerEl =
@@ -61,8 +67,10 @@ export class Widget implements IChartingLibraryWidget {
 
     const fontFamily = options.custom_font_family || DEFAULT_FONT;
     const theme = buildTheme(options);
+    const features = buildFeatureSet(options);
+    this.showHeader = !(options.disabled_features ?? []).includes("header_widget");
+    this.showLeftToolbar = !(options.disabled_features ?? []).includes("left_toolbar");
 
-    // ── Shared context ────────────────────────────────────────────────────────
     const initialRange: IndexRange = { from: 0, to: 1 };
     this.context = {
       options,
@@ -73,19 +81,23 @@ export class Widget implements IChartingLibraryWidget {
       resolution: options.interval,
       symbolInfo: null,
       theme,
-      features: buildFeatureSet(options),
+      features,
       bars: [],
       marks: [],
       visibleRange: initialRange,
       autoScalePrice: true,
       priceRange: null,
+      chartStyle: "candles",
+      logScale: false,
+      percentScale: false,
+      drawingTool: "cursor",
+      selectedShapeId: null,
       intervalChanged: new Delegate(),
       dataChanged: new Delegate(),
       drawingEvent: new Delegate(),
       requestPaint: () => {},
     };
 
-    // ── DOM tree: root → toolbar + chartArea(canvas) + loadingScreen ───────────
     this.root = document.createElement("div");
     this.root.className = "raze-chart-root";
     this.root.style.cssText = [
@@ -102,22 +114,64 @@ export class Widget implements IChartingLibraryWidget {
     ].join(";");
     containerEl.appendChild(this.root);
 
-    this.toolbar = new Toolbar(this.context);
-    this.root.appendChild(this.toolbar.el);
+    if (this.showHeader) {
+      this.toolbar = new Toolbar(this.context);
+      this.root.appendChild(this.toolbar.el);
+    }
+
+    this.bodyRow = document.createElement("div");
+    this.bodyRow.style.cssText = "display:flex;flex:1 1 auto;min-height:0;overflow:hidden;position:relative;";
+    this.root.appendChild(this.bodyRow);
+
+    if (this.showLeftToolbar) {
+      this.leftSidebar = new LeftSidebar(this.context, {
+        onTool: (tool) => {
+          this.context.drawingTool = tool;
+          this.renderer.cancelDraft();
+          this.leftSidebar?.setTool(tool);
+          this.context.requestPaint();
+        },
+        onIndicatorsClick: (anchor) => {
+          this.indicatorsMenu?.toggle(anchor);
+        },
+        onFit: () => this.renderer.fitContent(),
+        onScreenshot: () => this.renderer.takeScreenshot(),
+        onFullscreen: () => this.toggleFullscreen(),
+        onChartType: (style: ChartStyleId) => {
+          this.context.chartStyle = style;
+          this.leftSidebar?.setChartStyle(style);
+          this.context.autoScalePrice = true;
+          this.context.priceRange = null;
+          this.context.requestPaint();
+        },
+      });
+      this.bodyRow.appendChild(this.leftSidebar.el);
+    }
 
     this.chartArea = document.createElement("div");
-    this.chartArea.style.cssText = "position:relative;flex:1 1 auto;min-height:0;overflow:hidden;";
-    this.root.appendChild(this.chartArea);
+    this.chartArea.style.cssText = "position:relative;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden;";
+    this.bodyRow.appendChild(this.chartArea);
 
-    // ── Subsystems ─────────────────────────────────────────────────────────────
     this.data = new DataManager(this.context);
     this.shapes = new ShapeStore(this.context);
     this.studies = new StudyStore(this.context);
     this.engine = new ChartEngine(this.chartArea, this.context);
     this.renderer = new ChartRenderer(this.context, this.engine, this.shapes, this.data, this.studies);
+    this.renderer.setToolDoneHandler((tool) => {
+      this.context.drawingTool = tool;
+      this.leftSidebar?.setTool(tool);
+    });
+
+    this.scaleBar = new ScaleBar(this.context, () => {
+      this.scaleBar?.sync();
+      this.context.requestPaint();
+    });
+    this.chartArea.appendChild(this.scaleBar.el);
 
     this.loading = new LoadingScreen(options.loading_screen, theme.paneBackground);
     this.chartArea.appendChild(this.loading.el);
+
+    this.indicatorsMenu = new IndicatorsMenu(this.context, this.studies);
 
     const deps: ChartApiDeps = {
       refreshMarks: () => this.data.refreshMarks(),
@@ -133,6 +187,7 @@ export class Widget implements IChartingLibraryWidget {
         });
       },
       createShape: (point, opts) => this.shapes.create(point, opts),
+      createMultipointShape: (points, opts) => this.shapes.createPoints(points, opts),
       getShapeById: (id) => this.shapes.adapter(id),
       removeEntity: (id) => {
         if (this.studies.remove(id)) return;
@@ -152,12 +207,10 @@ export class Widget implements IChartingLibraryWidget {
     };
     this.api = new ChartApi(this.context, deps);
 
-    // Re-emit drawing events (drag etc.) to widget.subscribe("drawing_event").
     this.context.drawingEvent.subscribe(null, ((id: string, type: string) => {
       this.emit("drawing_event", id, type);
     }) as never);
 
-    // headerReady resolves once the toolbar is mounted (immediately — DOM toolbar).
     this.headerReadyPromise = new Promise<void>((resolve) => {
       this.headerReadyResolve = resolve;
     });
@@ -165,8 +218,16 @@ export class Widget implements IChartingLibraryWidget {
     this.renderer.attach();
     this.wireContextMenu();
 
-    // ── Boot: resolve symbol, load bars, then fire ready ────────────────────────
     void this.boot();
+  }
+
+  private toggleFullscreen(): void {
+    const el = this.root;
+    if (!document.fullscreenElement) {
+      void el.requestFullscreen?.();
+    } else {
+      void document.exitFullscreen?.();
+    }
   }
 
   private async boot(): Promise<void> {
@@ -177,35 +238,26 @@ export class Widget implements IChartingLibraryWidget {
     }
     if (this.destroyed) return;
 
-    // Mount the header interval selector now that supported_resolutions is known.
-    this.intervalSelector = new IntervalSelector(
-      this.context,
-      this.toolbar.intervalSlot,
-      (res) => { void this.data.changeResolution(res); },
-    );
-    // Keep the selector's highlight in sync with programmatic resolution changes.
-    this.context.intervalChanged.subscribe(null, ((res: ResolutionString) => {
-      this.intervalSelector?.setActive(String(res));
-    }) as never);
-
-    // Indicators menu (TV chrome parity) — left of custom app buttons.
-    const indBtn = this.toolbar.createButton({ align: "left", useTradingViewStyle: true, title: "Indicators" });
-    // Move indicators button just after the interval slot.
-    this.toolbar.intervalSlot.parentElement?.insertBefore(indBtn, this.toolbar.intervalSlot.nextSibling);
-    this.indicatorsMenu = new IndicatorsMenu(this.context, this.studies, indBtn);
+    if (this.toolbar) {
+      this.intervalSelector = new IntervalSelector(
+        this.context,
+        this.toolbar.intervalSlot,
+        (res) => { void this.data.changeResolution(res); },
+      );
+      this.context.intervalChanged.subscribe(null, ((res: ResolutionString) => {
+        this.intervalSelector?.setActive(String(res));
+      }) as never);
+    }
 
     this.loading?.hide();
     this.loading = null;
-    // headerReady fires first (the app mounts buttons), then onChartReady.
     this.headerReadyResolve();
     this.isChartReady = true;
     this.chartReady.fire();
   }
 
-  // ── IChartingLibraryWidget ──────────────────────────────────────────────────
   onChartReady(callback: () => void): void {
     if (this.isChartReady) {
-      // Defer to mimic TV's async ready callback.
       queueMicrotask(callback);
     } else {
       this.chartReady.subscribe(null, callback as never, true);
@@ -225,6 +277,11 @@ export class Widget implements IChartingLibraryWidget {
   }
 
   createButton(options?: CreateButtonOptions): HTMLElement {
+    if (!this.toolbar) {
+      // Chrome-less: return a detached button so callers don't crash.
+      const btn = document.createElement("div");
+      return btn;
+    }
     return this.toolbar.createButton(options);
   }
 
@@ -275,14 +332,15 @@ export class Widget implements IChartingLibraryWidget {
     this.studies.destroy();
     this.intervalSelector?.destroy();
     this.indicatorsMenu?.destroy();
-    this.toolbar.destroy();
+    this.leftSidebar?.destroy();
+    this.scaleBar?.destroy();
+    this.toolbar?.destroy();
     this.loading?.destroy();
     this.chartReady.destroy();
     this.subscriptions.clear();
     this.root.remove();
   }
 
-  // ── Right-click → onContextMenu callback ────────────────────────────────────
   private wireContextMenu(): void {
     this.chartArea.addEventListener("contextmenu", (e) => {
       if (!this.contextMenuCb) return;

@@ -12,14 +12,15 @@
 //   │ time axis (bottom)                  │
 //   └─────────────────────────────────────┘
 
-import type { Mark, MarkCustomColor } from "../types/charting_library";
-import type { ChartContext } from "../core/context";
+import type { Bar, Mark, MarkCustomColor, ShapePoint } from "../types/charting_library";
+import type { ChartContext, DrawingTool } from "../core/context";
 import type { ChartEngine } from "./ChartEngine";
 import type { ShapeStore, StoredShape } from "../core/ShapeStore";
 import type { DataManager } from "../data/DataManager";
 import type { StudyStore } from "../studies/StudyStore";
 import { resolutionToMs, parseResolution } from "../util/resolution";
 import { decimalsFromPricescale, formatPrice, formatVolume } from "../util/format";
+import { heikinAshi } from "../util/heikinAshi";
 
 const PRICE_AXIS_W_DEFAULT = 64;
 const PRICE_AXIS_W_MIN = 56;
@@ -65,10 +66,18 @@ export class ChartRenderer {
   private dragging:
     | null
     | { kind: "pan"; startX: number; startFrom: number; startTo: number }
-    | { kind: "shape"; id: string; startY: number }
+    | { kind: "shape"; id: string; startY: number; pointIndex: number }
     | { kind: "priceScale"; startY: number; startMin: number; startMax: number }
     | { kind: "timeScale"; startX: number; startFrom: number; startTo: number } = null;
   private hoverShapeId: string | null = null;
+  private hoverMark: Mark | null = null;
+  /** In-progress multipoint drawing (left-toolbar tool). */
+  private draft: { tool: DrawingTool; points: ShapePoint[] } | null = null;
+  /** Percent-scale base = first visible bar close. */
+  private pctBase = 1;
+  /** Cached series for HA / OHLC used this frame. */
+  private seriesBars: Bar[] = [];
+  private onToolDone: ((tool: DrawingTool) => void) | null = null;
 
   private boundMove: (e: MouseEvent) => void;
   private boundDown: (e: MouseEvent) => void;
@@ -76,6 +85,7 @@ export class ChartRenderer {
   private boundLeave: () => void;
   private boundWheel: (e: WheelEvent) => void;
   private boundDbl: (e: MouseEvent) => void;
+  private boundKey: (e: KeyboardEvent) => void;
   private onData: () => void;
 
   constructor(
@@ -92,7 +102,13 @@ export class ChartRenderer {
     this.boundLeave = () => this.onMouseLeave();
     this.boundWheel = (e) => this.onWheel(e);
     this.boundDbl = (e) => this.onDblClick(e);
+    this.boundKey = (e) => this.onKeyDown(e);
     this.onData = () => this.engine.markDirty();
+  }
+
+  /** Called by Widget when the left-sidebar tool resets after a finished draw. */
+  setToolDoneHandler(fn: (tool: DrawingTool) => void): void {
+    this.onToolDone = fn;
   }
 
   attach(): void {
@@ -104,6 +120,10 @@ export class ChartRenderer {
     this.canvas.addEventListener("mouseleave", this.boundLeave);
     this.canvas.addEventListener("wheel", this.boundWheel, { passive: false });
     this.canvas.addEventListener("dblclick", this.boundDbl);
+    window.addEventListener("keydown", this.boundKey);
+    // Allow keyboard focus for shortcuts.
+    this.canvas.tabIndex = 0;
+    this.canvas.style.outline = "none";
   }
 
   destroy(): void {
@@ -114,7 +134,45 @@ export class ChartRenderer {
     this.canvas.removeEventListener("mouseleave", this.boundLeave);
     this.canvas.removeEventListener("wheel", this.boundWheel);
     this.canvas.removeEventListener("dblclick", this.boundDbl);
+    window.removeEventListener("keydown", this.boundKey);
     this.engine.paintHook = null;
+  }
+
+  /** Fit visible range to recent bars + reset price autoscale. */
+  fitContent(): void {
+    const n = this.context.bars.length;
+    this.context.priceRange = null;
+    this.context.autoScalePrice = true;
+    if (n) {
+      const count = Math.min(n, 120);
+      this.context.visibleRange = {
+        from: n - count,
+        to: n - 1 + Math.max(2, Math.floor(count * 0.08)),
+      };
+    }
+    this.engine.markDirty();
+  }
+
+  /** PNG download of the current canvas. */
+  takeScreenshot(): void {
+    try {
+      this.canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `raze-chart-${Date.now()}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, "image/png");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  cancelDraft(): void {
+    this.draft = null;
+    this.engine.markDirty();
   }
 
   // ── Geometry helpers ────────────────────────────────────────────────────────
@@ -135,13 +193,44 @@ export class ChartRenderer {
   }
 
   private yForPrice(p: number): number {
+    const d = this.toDisplay(p);
     const r = this.priceMax - this.priceMin || 1;
-    return this.plotT + (this.priceMax - p) / r * this.plotH;
+    return this.plotT + (this.priceMax - d) / r * this.plotH;
   }
 
   private priceForY(y: number): number {
     const r = this.priceMax - this.priceMin || 1;
-    return this.priceMax - (y - this.plotT) / this.plotH * r;
+    const d = this.priceMax - (y - this.plotT) / this.plotH * r;
+    return this.fromDisplay(d);
+  }
+
+  private toDisplay(price: number): number {
+    if (this.context.percentScale) {
+      return this.pctBase > 0 ? ((price - this.pctBase) / this.pctBase) * 100 : 0;
+    }
+    if (this.context.logScale) {
+      return price > 0 ? Math.log10(price) : Math.log10(Number.MIN_VALUE);
+    }
+    return price;
+  }
+
+  private fromDisplay(d: number): number {
+    if (this.context.percentScale) {
+      return this.pctBase * (1 + d / 100);
+    }
+    if (this.context.logScale) {
+      return Math.pow(10, d);
+    }
+    return d;
+  }
+
+  private formatAxisPrice(price: number, pricescale: number): string {
+    if (this.context.percentScale) {
+      const pct = this.toDisplay(price);
+      const sign = pct >= 0 ? "+" : "";
+      return `${sign}${pct.toFixed(2)}%`;
+    }
+    return formatPrice(price, pricescale);
   }
 
   /** Top of the time-axis strip (below main plot, or below RSI when present). */
@@ -149,19 +238,18 @@ export class ChartRenderer {
     return this.rsiH > 0 ? this.rsiT + this.rsiH : this.plotT + this.plotH;
   }
 
-  /** Public: time (unix seconds) + price under a canvas pixel — for onContextMenu. */
+  /** Public: time (unix seconds) + price under a canvas pixel — for onContextMenu
+   *  and drawing placement. Uses a *fractional* bar index so click→store→render
+   *  round-trips to the same X (no snap-to-candle-centre). */
   timePriceAt(x: number, y: number): { unixTime: number; price: number } {
     const bars = this.context.bars;
-    const idx = Math.round(this.indexForX(x));
     let unixTime = 0;
     if (bars.length) {
-      const clamped = Math.max(0, Math.min(bars.length - 1, idx));
-      const bar = bars[clamped];
-      if (bar) {
-        // Extrapolate beyond the last bar so right-side clicks still map to time.
-        const resMs = resolutionToMs(this.context.resolution);
-        unixTime = Math.floor((bar.time + (idx - clamped) * resMs) / 1000);
-      }
+      const resMs = resolutionToMs(this.context.resolution);
+      // Fractional index — Math.round here made trend/fib handles jump to bar
+      // centres while the crosshair stayed on the cursor (off-centre drawing).
+      const idx = this.indexForX(x);
+      unixTime = (bars[0]!.time + idx * resMs) / 1000;
     }
     return { unixTime, price: this.priceForY(y) };
   }
@@ -174,18 +262,24 @@ export class ChartRenderer {
 
   // ── Visible-price computation (auto-fit) ────────────────────────────────────
   private computePriceRange(): void {
-    if (this.context.priceRange && !this.context.autoScalePrice) {
-      this.priceMin = this.context.priceRange.min;
-      this.priceMax = this.context.priceRange.max;
-      return;
-    }
-    const bars = this.context.bars;
+    const bars = this.seriesBars.length ? this.seriesBars : this.context.bars;
     const { from, to } = this.context.visibleRange;
     const start = Math.max(0, Math.floor(from));
     const end = Math.min(bars.length - 1, Math.ceil(to));
 
-    // Track the candle BODY envelope (open/close) separately from the full
-    // high/low extent. The scale fits the bodies; wicks get bounded extra room.
+    // Percent base = first visible close (TV-style).
+    const baseBar = bars[start] ?? bars[0];
+    this.pctBase = baseBar && baseBar.close > 0 ? baseBar.close : 1;
+
+    if (this.context.priceRange && !this.context.autoScalePrice) {
+      this.priceMin = this.toDisplay(this.context.priceRange.min);
+      this.priceMax = this.toDisplay(this.context.priceRange.max);
+      if (this.priceMin >= this.priceMax) {
+        this.priceMax = this.priceMin + 1;
+      }
+      return;
+    }
+
     let bodyHi = -Infinity;
     let bodyLo = Infinity;
     let hi = -Infinity;
@@ -202,17 +296,11 @@ export class ChartRenderer {
       const low = b.low > 0 ? b.low : bL;
       if (low > 0 && low < lo) lo = low;
     }
-    // NOTE: horizontal-line shapes (limit/avg/ATH lines) are deliberately NOT
-    // folded into the auto-fit — off-range lines clip at the edges (TV behaviour).
     if (!Number.isFinite(bodyHi) || !Number.isFinite(bodyLo) || bodyHi <= 0) {
       this.priceMin = 0;
       this.priceMax = 1;
       return;
     }
-    // Bodies are always fully visible; wicks may extend up to `wickRoom` beyond
-    // the body envelope. An isolated extreme wick (common on a token's first
-    // bars) then clips instead of stretching the whole axis and leaving the
-    // candles squashed against one edge with a wall of empty space.
     const bodyRange = Math.max(0, bodyHi - bodyLo);
     const wickRoom = Math.max(bodyRange, bodyHi * 0.06);
     hi = Math.min(hi, bodyHi + wickRoom);
@@ -221,9 +309,25 @@ export class ChartRenderer {
       lo = bodyLo * 0.99;
       hi = bodyHi * 1.01;
     }
-    const pad = (hi - lo) * 0.08;
-    this.priceMin = Math.max(0, lo - pad);
-    this.priceMax = hi + pad;
+    if (this.context.logScale) {
+      lo = Math.max(lo, hi * 1e-6, Number.MIN_VALUE);
+    }
+    const dHi = this.toDisplay(hi);
+    const dLo = this.toDisplay(lo);
+    const pad = (dHi - dLo) * 0.08;
+    this.priceMin = dLo - pad;
+    this.priceMax = dHi + pad;
+    if (this.priceMin >= this.priceMax) {
+      this.priceMax = this.priceMin + 1;
+    }
+  }
+
+  private refreshSeriesBars(): void {
+    if (this.context.chartStyle === "heikin_ashi") {
+      this.seriesBars = heikinAshi(this.context.bars);
+    } else {
+      this.seriesBars = this.context.bars;
+    }
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -243,6 +347,7 @@ export class ChartRenderer {
     this.rsiT = this.plotT + this.plotH + paneGap;
     this.rsiH = rsiPane;
 
+    this.refreshSeriesBars();
     this.computePriceRange();
 
     const t = this.context.theme;
@@ -255,9 +360,10 @@ export class ChartRenderer {
 
     this.drawGrid(ctx, priceTicks, timeTicks);
     this.drawVolume(ctx);
-    this.drawCandles(ctx);
+    this.drawSeries(ctx);
     this.drawOverlayStudies(ctx);
     this.drawShapes(ctx);
+    this.drawDraft(ctx);
     this.drawMarks(ctx);
     this.drawPriceAxis(ctx, priceTicks);
     if (hasRsi) this.drawRsiPane(ctx, timeTicks);
@@ -265,6 +371,7 @@ export class ChartRenderer {
     this.drawLastPrice(ctx);
     this.drawCrosshair(ctx);
     this.drawLegend(ctx);
+    this.drawMarkTooltip(ctx);
 
     // Opt-in debug snapshot for QA (window.__RAZE_DEBUG = true).
     if ((window as unknown as { __RAZE_DEBUG?: boolean }).__RAZE_DEBUG) {
@@ -423,8 +530,78 @@ export class ChartRenderer {
     ctx.stroke();
   }
 
-  private drawCandles(ctx: CanvasRenderingContext2D): void {
-    const bars = this.context.bars;
+  private drawSeries(ctx: CanvasRenderingContext2D): void {
+    const style = this.context.chartStyle;
+    if (style === "line" || style === "area") {
+      this.drawLineArea(ctx, style === "area");
+      return;
+    }
+    this.drawCandles(ctx, this.seriesBars);
+  }
+
+  private drawLineArea(ctx: CanvasRenderingContext2D, fill: boolean): void {
+    const bars = this.seriesBars;
+    if (!bars.length) return;
+    const t = this.context.theme;
+    const { from, to } = this.context.visibleRange;
+    const start = Math.max(0, Math.floor(from) - 1);
+    const end = Math.min(bars.length - 1, Math.ceil(to) + 1);
+    const color = t.candleUp;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.plotL, this.plotT, this.plotW, this.plotH);
+    ctx.clip();
+
+    ctx.beginPath();
+    let started = false;
+    let firstX = 0;
+    let lastX = 0;
+    for (let i = start; i <= end; i++) {
+      const b = bars[i];
+      if (!b || !(b.close > 0)) {
+        started = false;
+        continue;
+      }
+      const x = this.xForIndex(i);
+      const y = this.yForPrice(b.close);
+      if (!started) {
+        ctx.moveTo(x, y);
+        firstX = x;
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+      lastX = x;
+    }
+    if (fill && started) {
+      ctx.lineTo(lastX, this.plotT + this.plotH);
+      ctx.lineTo(firstX, this.plotT + this.plotH);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.18;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      // Restroke the line on top.
+      ctx.beginPath();
+      started = false;
+      for (let i = start; i <= end; i++) {
+        const b = bars[i];
+        if (!b || !(b.close > 0)) { started = false; continue; }
+        const x = this.xForIndex(i);
+        const y = this.yForPrice(b.close);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      }
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawCandles(ctx: CanvasRenderingContext2D, bars: Bar[]): void {
     if (!bars.length) return;
     const t = this.context.theme;
     const spacing = this.barSpacing;
@@ -591,34 +768,58 @@ export class ChartRenderer {
     }
   }
 
-  // ── Shapes (P5): horizontal lines ───────────────────────────────────────────
-  private shapeScreen: { shape: StoredShape; y: number }[] = [];
+  // ── Shapes: horizontal_line + drawings (trend/fib/rect/text) ─────────────────
+  private shapeScreen: { shape: StoredShape; y: number; hit: "body" | "p0" | "p1" }[] = [];
 
   private drawShapes(ctx: CanvasRenderingContext2D): void {
     this.shapeScreen = [];
     const pricescale = this.context.symbolInfo?.pricescale ?? 100;
+    // First pass: horizontal lines collect label Y for declutter.
+    const hLines: { shape: StoredShape; price: number; y: number; labelY: number }[] = [];
+
     for (const s of this.shapes.list()) {
-      if (s.shape !== "horizontal_line") continue;
-      const price = s.points[0]?.price;
-      if (typeof price !== "number" || !Number.isFinite(price)) continue;
-      const y = this.yForPrice(price);
+      if (s.shape === "horizontal_line") {
+        const price = s.points[0]?.price;
+        if (typeof price !== "number" || !Number.isFinite(price)) continue;
+        const y = this.yForPrice(price);
+        hLines.push({ shape: s, price, y, labelY: y });
+        continue;
+      }
+      this.drawComplexShape(ctx, s);
+    }
+
+    // Declutter overlapping horizontal-line text labels (stack when close).
+    hLines.sort((a, b) => a.y - b.y);
+    const minGap = 14;
+    for (let i = 1; i < hLines.length; i++) {
+      const prev = hLines[i - 1]!;
+      const cur = hLines[i]!;
+      if (cur.labelY - prev.labelY < minGap) {
+        cur.labelY = prev.labelY + minGap;
+      }
+    }
+
+    for (const h of hLines) {
+      const s = h.shape;
+      const y = h.y;
       if (y < this.plotT - 40 || y > this.plotT + this.plotH + 40) {
-        this.shapeScreen.push({ shape: s, y });
+        this.shapeScreen.push({ shape: s, y, hit: "body" });
         continue;
       }
       const o = s.overrides;
       const color = (o.linecolor as string) ?? "#2962ff";
       const width = (o.linewidth as number) ?? 1;
-      const style = (o.linestyle as number) ?? 0; // 0 solid, 2 dashed
+      const style = (o.linestyle as number) ?? 0;
       const textColor = (o.textcolor as string) ?? color;
       const fontsize = (o.fontsize as number) ?? 11;
       const showPrice = o.showPrice !== false;
       const bold = o.bold === true;
       const italic = o.italic === true;
+      const selected = this.context.selectedShapeId === (s.id as unknown as string);
 
       ctx.save();
       ctx.strokeStyle = color;
-      ctx.lineWidth = width;
+      ctx.lineWidth = selected ? width + 0.5 : width;
       ctx.setLineDash(style === 2 ? [5, 4] : style === 1 ? [2, 3] : []);
       const yy = Math.round(y) + 0.5;
       ctx.beginPath();
@@ -627,23 +828,195 @@ export class ChartRenderer {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Text label (above the line, right-aligned to match the app's overrides).
       if (s.text) {
         ctx.font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${fontsize}px ${this.context.fontFamily}`;
         ctx.fillStyle = textColor;
         ctx.textAlign = "right";
         ctx.textBaseline = "bottom";
-        ctx.fillText(s.text, this.plotL + this.plotW - 6, yy - 3);
+        const ly = Math.round(h.labelY) - 3;
+        // Soft background when label was offset from the line.
+        if (Math.abs(h.labelY - y) > 2) {
+          const tw = ctx.measureText(s.text).width;
+          ctx.fillStyle = "rgba(24,22,21,0.72)";
+          ctx.fillRect(this.plotL + this.plotW - 8 - tw, ly - fontsize, tw + 4, fontsize + 4);
+          ctx.fillStyle = textColor;
+        }
+        ctx.fillText(s.text, this.plotL + this.plotW - 6, ly);
       }
 
-      // Price tag on the axis.
       if (showPrice) {
-        const label = formatPrice(price, pricescale);
-        this.drawAxisTag(ctx, yy - 0.5, label, color, "#ffffff");
+        this.drawAxisTag(ctx, yy - 0.5, this.formatAxisPrice(h.price, pricescale), color, "#ffffff");
       }
       ctx.restore();
-      this.shapeScreen.push({ shape: s, y });
+      this.shapeScreen.push({ shape: s, y, hit: "body" });
     }
+  }
+
+  private pointXY(p: ShapePoint): { x: number; y: number } | null {
+    if (typeof p.price !== "number" || !Number.isFinite(p.price)) return null;
+    const bars = this.context.bars;
+    if (!bars.length) return null;
+    const resMs = resolutionToMs(this.context.resolution);
+    const idx = (p.time * 1000 - bars[0]!.time) / resMs;
+    return { x: this.xForIndex(idx), y: this.yForPrice(p.price) };
+  }
+
+  private drawComplexShape(ctx: CanvasRenderingContext2D, s: StoredShape): void {
+    const o = s.overrides;
+    const color = (o.linecolor as string) ?? (o.color as string) ?? "#2962ff";
+    const width = (o.linewidth as number) ?? 1;
+    const selected = this.context.selectedShapeId === (s.id as unknown as string);
+    const pts = s.points.map((p) => this.pointXY(p)).filter(Boolean) as { x: number; y: number }[];
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = selected ? width + 0.75 : width;
+
+    if (s.shape === "trend_line" && pts.length >= 2) {
+      const a = pts[0]!;
+      const b = pts[1]!;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      this.drawHandle(ctx, a.x, a.y, color);
+      this.drawHandle(ctx, b.x, b.y, color);
+      this.shapeScreen.push({ shape: s, y: (a.y + b.y) / 2, hit: "body" });
+    } else if (s.shape === "rectangle" && pts.length >= 2) {
+      const a = pts[0]!;
+      const b = pts[1]!;
+      const x = Math.min(a.x, b.x);
+      const y = Math.min(a.y, b.y);
+      const w = Math.abs(b.x - a.x);
+      const h = Math.abs(b.y - a.y);
+      ctx.globalAlpha = 0.12;
+      ctx.fillRect(x, y, w, h);
+      ctx.globalAlpha = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+      this.drawHandle(ctx, a.x, a.y, color);
+      this.drawHandle(ctx, b.x, b.y, color);
+      this.shapeScreen.push({ shape: s, y: y + h / 2, hit: "body" });
+    } else if (s.shape === "fib_retracement" && pts.length >= 2) {
+      const a = pts[0]!;
+      const b = pts[1]!;
+      const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+      const top = Math.min(a.y, b.y);
+      const bot = Math.max(a.y, b.y);
+      const left = Math.min(a.x, b.x);
+      const right = Math.max(a.x, this.plotL + this.plotW - 4);
+      ctx.font = `10px ${this.context.fontFamily}`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      for (const lv of levels) {
+        const y = a.y + (b.y - a.y) * lv;
+        const yy = Math.round(y) + 0.5;
+        ctx.globalAlpha = lv === 0 || lv === 1 ? 0.9 : 0.55;
+        ctx.setLineDash(lv === 0.5 ? [4, 3] : []);
+        ctx.beginPath();
+        ctx.moveTo(left, yy);
+        ctx.lineTo(right, yy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.85;
+        const price = this.priceForY(y);
+        const pricescale = this.context.symbolInfo?.pricescale ?? 100;
+        ctx.fillText(`${(lv * 100).toFixed(1)}%  ${this.formatAxisPrice(price, pricescale)}`, left + 4, yy - 2);
+      }
+      ctx.globalAlpha = 1;
+      // Vertical guide
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(a.x) + 0.5, top);
+      ctx.lineTo(Math.round(a.x) + 0.5, bot);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      this.drawHandle(ctx, a.x, a.y, color);
+      this.drawHandle(ctx, b.x, b.y, color);
+      this.shapeScreen.push({ shape: s, y: (a.y + b.y) / 2, hit: "body" });
+    } else if (s.shape === "text" && pts.length >= 1) {
+      const a = pts[0]!;
+      const label = s.text || "Text";
+      ctx.font = `12px ${this.context.fontFamily}`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(24,22,21,0.75)";
+      ctx.fillRect(a.x - 2, a.y - 14, tw + 6, 16);
+      ctx.fillStyle = color;
+      ctx.fillText(label, a.x, a.y);
+      this.drawHandle(ctx, a.x, a.y, color);
+      this.shapeScreen.push({ shape: s, y: a.y, hit: "body" });
+    }
+    ctx.restore();
+  }
+
+  private drawHandle(ctx: CanvasRenderingContext2D, x: number, y: number, color: string): void {
+    ctx.fillStyle = "#181615";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.rect(x - 3.5, y - 3.5, 7, 7);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  private drawDraft(ctx: CanvasRenderingContext2D): void {
+    if (!this.draft || this.draft.points.length === 0) return;
+    const ghost: StoredShape = {
+      id: "draft" as never,
+      shape: this.draft.tool === "cursor" ? "trend_line" : this.draft.tool,
+      points: this.draft.points,
+      text: this.draft.tool === "text" ? "…" : "",
+      lock: true,
+      disableSelection: true,
+      zOrder: "top",
+      overrides: { linecolor: "#66d89e", linewidth: 1, linestyle: 2 },
+    };
+    // Preview second point at crosshair if only one placed.
+    if (this.draft.points.length === 1 && this.crosshair.active && this.draft.tool !== "horizontal_line" && this.draft.tool !== "text") {
+      const { unixTime, price } = this.timePriceAt(this.crosshair.x, this.crosshair.y);
+      ghost.points = [...this.draft.points, { time: unixTime, price }];
+    }
+    if (ghost.shape === "horizontal_line" && ghost.points[0]) {
+      const y = this.yForPrice(ghost.points[0].price!);
+      ctx.save();
+      ctx.strokeStyle = "#66d89e";
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(this.plotL, Math.round(y) + 0.5);
+      ctx.lineTo(this.plotL + this.plotW, Math.round(y) + 0.5);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+    this.drawComplexShape(ctx, ghost);
+  }
+
+  private drawMarkTooltip(ctx: CanvasRenderingContext2D): void {
+    if (!this.hoverMark) return;
+    const hit = this.markScreen.find((m) => m.mark === this.hoverMark);
+    if (!hit) return;
+    const text = this.hoverMark.text || this.hoverMark.label || "";
+    if (!text) return;
+    ctx.font = `11px ${this.context.fontFamily}`;
+    const pad = 6;
+    const lines = text.split("\n").slice(0, 4);
+    const tw = Math.max(...lines.map((l) => ctx.measureText(l).width), 40);
+    const th = lines.length * 14 + pad * 2;
+    let x = hit.x + hit.r + 8;
+    let y = hit.y - th / 2;
+    if (x + tw + pad * 2 > this.plotL + this.plotW) x = hit.x - hit.r - 8 - tw - pad * 2;
+    if (y < this.plotT) y = this.plotT + 4;
+    ctx.fillStyle = "rgba(24,22,21,0.92)";
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    this.roundRect(ctx, x, y, tw + pad * 2, th, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#f4eee1";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    lines.forEach((l, i) => ctx.fillText(l, x + pad, y + pad + i * 14));
   }
 
   // ── Axes ──────────────────────────────────────────────────────────────────
@@ -651,13 +1024,16 @@ export class ChartRenderer {
     const target = Math.max(2, Math.floor(this.plotH / 56));
     const range = this.priceMax - this.priceMin;
     if (range <= 0) return [];
+    // Ticks are in display space; convert back to price for labeling.
     const raw = range / target;
-    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const mag = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-12))));
     const norm = raw / mag;
     const step = (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag;
     const first = Math.ceil(this.priceMin / step) * step;
     const ticks: number[] = [];
-    for (let p = first; p <= this.priceMax; p += step) ticks.push(p);
+    for (let d = first; d <= this.priceMax; d += step) {
+      ticks.push(this.fromDisplay(d));
+    }
     return ticks;
   }
 
@@ -694,12 +1070,12 @@ export class ChartRenderer {
     ctx.font = `11px ${this.context.fontFamily}`;
     let widest = 0;
     const consider = (v: number): void => {
-      const w = ctx.measureText(formatPrice(v, pricescale)).width;
+      const w = ctx.measureText(this.formatAxisPrice(v, pricescale)).width;
       if (w > widest) widest = w;
     };
     for (const p of ticks) consider(p);
-    consider(this.priceMax);
-    consider(this.priceMin);
+    consider(this.fromDisplay(this.priceMax));
+    consider(this.fromDisplay(this.priceMin));
     const last = this.context.bars[this.context.bars.length - 1];
     if (last) consider(last.close);
     const desired = Math.round(
@@ -724,7 +1100,7 @@ export class ChartRenderer {
     for (const p of ticks) {
       const y = this.yForPrice(p);
       if (y < this.plotT + 6 || y > this.plotT + this.plotH - 2) continue;
-      ctx.fillText(formatPrice(p, pricescale), rightEdge, y);
+      ctx.fillText(this.formatAxisPrice(p, pricescale), rightEdge, y);
     }
   }
 
@@ -822,7 +1198,7 @@ export class ChartRenderer {
     }
     // Always show the price pill, clamped into the axis even when off-screen.
     const cy = Math.max(this.plotT + 8, Math.min(this.plotT + this.plotH - 8, y));
-    this.drawAxisTag(ctx, cy, formatPrice(price, pricescale), color, "#10100e", true);
+    this.drawAxisTag(ctx, cy, this.formatAxisPrice(price, pricescale), color, "#10100e", true);
   }
 
   /** Neutral pill background/foreground for crosshair tags (theme-aware). */
@@ -835,16 +1211,16 @@ export class ChartRenderer {
   private drawCrosshair(ctx: CanvasRenderingContext2D): void {
     if (!this.crosshair.active) return;
     const t = this.context.theme;
-    const { y } = this.crosshair;
-    let { x } = this.crosshair;
+    const { x, y } = this.crosshair;
     const contentBottom = this.timeAxisTop();
     if (x < this.plotL || x > this.plotL + this.plotW || y < this.plotT || y > contentBottom) return;
 
-    // Snap the vertical line to the hovered bar's centre for a precise feel.
+    // Nearest bar for legend / time pill only — crosshair lines follow the
+    // pointer exactly. Snapping the vertical line to bar centres made the
+    // intersection sit beside the OS cursor (looked like a pointer offset bug).
     const bars = this.context.bars;
     const idx = Math.round(this.indexForX(x));
     const snapBar = bars[Math.max(0, Math.min(bars.length - 1, idx))];
-    if (snapBar && idx >= 0 && idx < bars.length) x = this.xForIndex(idx);
 
     const inMainPane = y <= this.plotT + this.plotH;
     ctx.save();
@@ -852,7 +1228,7 @@ export class ChartRenderer {
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    // Vertical through main + RSI panes.
+    // Vertical through main + RSI panes — at the actual pointer X.
     ctx.moveTo(Math.round(x) + 0.5, this.plotT);
     ctx.lineTo(Math.round(x) + 0.5, contentBottom);
     // Horizontal only in the pane under the cursor.
@@ -870,9 +1246,9 @@ export class ChartRenderer {
     const pill = this.neutralPill();
     const pricescale = this.context.symbolInfo?.pricescale ?? 100;
     if (t.showPriceScaleCrosshairLabel && inMainPane) {
-      this.drawAxisTag(ctx, y, formatPrice(this.priceForY(y), pricescale), pill.bg, pill.fg);
+      this.drawAxisTag(ctx, y, this.formatAxisPrice(this.priceForY(y), pricescale), pill.bg, pill.fg);
     }
-    if (t.showTimeScaleCrosshairLabel && snapBar) {
+    if (t.showTimeScaleCrosshairLabel && snapBar && idx >= 0 && idx < bars.length) {
       const label = this.formatCrosshairTime(snapBar.time, parseResolution(this.context.resolution).kind);
       ctx.font = `11px ${this.context.fontFamily}`;
       const w = ctx.measureText(label).width + 14;
@@ -962,15 +1338,19 @@ export class ChartRenderer {
     }
   }
 
-  /** Map a mouse event into canvas CSS-pixel space. Required under AppZoom's
-   *  CSS `zoom` — `offsetX`/`offsetY` diverge from the layout box we draw in. */
+  /** Map a mouse event into the same CSS-pixel space the renderer paints in
+   *  (`engine.cssWidth` × `cssHeight`). Under AppZoom CSS `zoom`,
+   *  getBoundingClientRect is visual (× zoom); scaling by css/rect converts
+   *  viewport mouse coords into layout/draw space. */
   private pointerXY(e: MouseEvent): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
     const rw = rect.width || 1;
     const rh = rect.height || 1;
+    const cw = this.engine.cssWidth || this.canvas.clientWidth || 1;
+    const ch = this.engine.cssHeight || this.canvas.clientHeight || 1;
     return {
-      x: (e.clientX - rect.left) * (this.engine.cssWidth / rw),
-      y: (e.clientY - rect.top) * (this.engine.cssHeight / rh),
+      x: (e.clientX - rect.left) * (cw / rw),
+      y: (e.clientY - rect.top) * (ch / rh),
     };
   }
 
@@ -992,18 +1372,16 @@ export class ChartRenderer {
       };
       void this.data.maybeLoadMoreHistory();
     } else if (this.dragging?.kind === "priceScale") {
-      // Drag the price axis vertically to rescale price: down = zoom out
-      // (wider range), up = zoom in. Pivots around the range centre captured at
-      // mousedown so the scaling is stable across the whole drag.
       const dy = y - this.dragging.startY;
       const factor = Math.min(20, Math.max(0.05, 1 + dy / (this.plotH * 0.5)));
       const center = (this.dragging.startMin + this.dragging.startMax) / 2;
       const half = ((this.dragging.startMax - this.dragging.startMin) / 2) * factor;
       this.context.autoScalePrice = false;
-      this.context.priceRange = { min: Math.max(0, center - half), max: center + half };
+      this.context.priceRange = {
+        min: this.fromDisplay(center - half),
+        max: this.fromDisplay(center + half),
+      };
     } else if (this.dragging?.kind === "timeScale") {
-      // Drag the time axis horizontally to change bar spacing: left = zoom out
-      // (more bars), right = zoom in. Anchored on the right edge.
       const dx = x - this.dragging.startX;
       const span = this.dragging.startTo - this.dragging.startFrom;
       const factor = Math.min(20, Math.max(0.05, 1 - dx / (this.plotW * 0.5)));
@@ -1014,31 +1392,99 @@ export class ChartRenderer {
       void this.data.maybeLoadMoreHistory();
     } else if (this.dragging?.kind === "shape") {
       const s = this.shapes.get(this.dragging.id as never);
-      if (s && s.points[0]) {
-        s.points[0].price = this.priceForY(y);
-      }
-    } else {
-      // Hover cursor: axes get resize affordances, unlocked shapes too.
-      const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
-      const inTimeAxis = y >= contentBottom && x < this.plotL + this.plotW;
-      this.hoverShapeId = null;
-      if (!inPriceAxis && !inTimeAxis && y <= this.plotT + this.plotH) {
-        for (const { shape, y: sy } of this.shapeScreen) {
-          if (!shape.lock && Math.abs(sy - y) <= 4 && x <= this.plotL + this.plotW) {
-            this.hoverShapeId = shape.id as unknown as string;
-            break;
+      if (s) {
+        const pt = s.points[this.dragging.pointIndex];
+        if (pt) {
+          const tp = this.timePriceAt(x, y);
+          if (s.shape === "horizontal_line") {
+            pt.price = tp.price;
+          } else {
+            pt.price = tp.price;
+            pt.time = tp.unixTime;
           }
         }
       }
+    } else {
+      const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
+      const inTimeAxis = y >= contentBottom && x < this.plotL + this.plotW;
+      this.hoverShapeId = null;
+      this.hoverMark = null;
+      if (!inPriceAxis && !inTimeAxis && y <= this.plotT + this.plotH) {
+        for (const m of this.markScreen) {
+          const dx = x - m.x;
+          const dy = y - m.y;
+          if (dx * dx + dy * dy <= (m.r + 2) * (m.r + 2)) {
+            this.hoverMark = m.mark;
+            break;
+          }
+        }
+        if (!this.hoverMark) {
+          for (const { shape, y: sy } of this.shapeScreen) {
+            if (shape.lock || shape.disableSelection) continue;
+            if (shape.shape === "horizontal_line" && Math.abs(sy - y) <= 4 && x <= this.plotL + this.plotW) {
+              this.hoverShapeId = shape.id as unknown as string;
+              break;
+            }
+            if (shape.shape !== "horizontal_line") {
+              const hit = this.hitComplexShape(shape, x, y);
+              if (hit) {
+                this.hoverShapeId = shape.id as unknown as string;
+                break;
+              }
+            }
+          }
+        }
+      }
+      const drawing = this.context.drawingTool !== "cursor";
       this.canvas.style.cursor = inPriceAxis
         ? "ns-resize"
         : inTimeAxis
           ? "ew-resize"
           : this.hoverShapeId
             ? "ns-resize"
-            : "crosshair";
+            : drawing
+              ? "crosshair"
+              : this.hoverMark
+                ? "pointer"
+                : "crosshair";
     }
     this.engine.markDirty();
+  }
+
+  private hitComplexShape(shape: StoredShape, x: number, y: number): boolean {
+    const pts = shape.points.map((p) => this.pointXY(p)).filter(Boolean) as { x: number; y: number }[];
+    if (pts.length === 0) return false;
+    for (const p of pts) {
+      if (Math.abs(p.x - x) <= 6 && Math.abs(p.y - y) <= 6) return true;
+    }
+    if (shape.shape === "trend_line" && pts.length >= 2) {
+      return distToSegment(x, y, pts[0]!, pts[1]!) <= 5;
+    }
+    if (shape.shape === "rectangle" && pts.length >= 2) {
+      const a = pts[0]!;
+      const b = pts[1]!;
+      const l = Math.min(a.x, b.x);
+      const r = Math.max(a.x, b.x);
+      const t = Math.min(a.y, b.y);
+      const bot = Math.max(a.y, b.y);
+      const nearEdge =
+        (Math.abs(x - l) <= 4 || Math.abs(x - r) <= 4) && y >= t - 4 && y <= bot + 4
+        || (Math.abs(y - t) <= 4 || Math.abs(y - bot) <= 4) && x >= l - 4 && x <= r + 4;
+      return nearEdge;
+    }
+    if (shape.shape === "fib_retracement" && pts.length >= 2) {
+      return distToSegment(x, y, pts[0]!, pts[1]!) <= 6;
+    }
+    if (shape.shape === "text" && pts[0]) {
+      return Math.abs(pts[0].x - x) <= 20 && Math.abs(pts[0].y - y) <= 12;
+    }
+    return false;
+  }
+
+  private neededPoints(tool: DrawingTool): number {
+    if (tool === "horizontal_line" || tool === "text") return 1;
+    if (tool === "trend_line" || tool === "rectangle" || tool === "fib_retracement") return 2;
+    return 0;
   }
 
   private onMouseDown(e: MouseEvent): void {
@@ -1047,16 +1493,50 @@ export class ChartRenderer {
     const contentBottom = this.timeAxisTop();
     const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
     const inTimeAxis = y >= contentBottom && x < this.plotL + this.plotW;
+    const inPlot = x <= this.plotL + this.plotW && y >= this.plotT && y <= this.plotT + this.plotH;
+
+    // Drawing tool placement takes priority over pan.
+    const tool = this.context.drawingTool;
+    if (tool !== "cursor" && inPlot && !inPriceAxis && !inTimeAxis) {
+      const tp = this.timePriceAt(x, y);
+      const point: ShapePoint = { time: tp.unixTime, price: tp.price };
+      if (!this.draft || this.draft.tool !== tool) {
+        this.draft = { tool, points: [point] };
+      } else {
+        this.draft.points.push(point);
+      }
+      const need = this.neededPoints(tool);
+      if (this.draft.points.length >= need) {
+        this.finishDraft();
+      }
+      this.engine.markDirty();
+      return;
+    }
 
     if (this.hoverShapeId) {
-      this.dragging = { kind: "shape", id: this.hoverShapeId, startY: y };
+      const s = this.shapes.get(this.hoverShapeId as never);
+      let pointIndex = 0;
+      if (s && s.shape !== "horizontal_line") {
+        const pts = s.points.map((p) => this.pointXY(p));
+        let best = Infinity;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i];
+          if (!p) continue;
+          const d = Math.hypot(p.x - x, p.y - y);
+          if (d < best) { best = d; pointIndex = i; }
+        }
+      }
+      this.context.selectedShapeId = this.hoverShapeId;
+      this.dragging = { kind: "shape", id: this.hoverShapeId, startY: y, pointIndex };
       return;
     }
     if (inPriceAxis) {
-      // Snapshot the currently-displayed range so the drag scales from here.
       this.dragging = { kind: "priceScale", startY: y, startMin: this.priceMin, startMax: this.priceMax };
       this.context.autoScalePrice = false;
-      this.context.priceRange = { min: this.priceMin, max: this.priceMax };
+      this.context.priceRange = {
+        min: this.fromDisplay(this.priceMin),
+        max: this.fromDisplay(this.priceMax),
+      };
       return;
     }
     if (inTimeAxis) {
@@ -1068,6 +1548,7 @@ export class ChartRenderer {
       };
       return;
     }
+    this.context.selectedShapeId = null;
     if (x <= this.plotL + this.plotW && y <= this.plotT + this.plotH) {
       this.dragging = {
         kind: "pan",
@@ -1078,9 +1559,41 @@ export class ChartRenderer {
     }
   }
 
+  private finishDraft(): void {
+    if (!this.draft) return;
+    const { tool, points } = this.draft;
+    this.draft = null;
+    let text = "";
+    if (tool === "text") {
+      text = window.prompt("Label text", "Note") ?? "";
+      if (!text.trim()) {
+        this.onToolDone?.("cursor");
+        this.context.drawingTool = "cursor";
+        this.engine.markDirty();
+        return;
+      }
+    }
+    const defaults: Record<string, unknown> = {
+      linecolor: tool === "fib_retracement" ? "#f5a623" : "#66d89e",
+      linewidth: 1,
+      linestyle: tool === "horizontal_line" ? 2 : 0,
+      showPrice: tool === "horizontal_line",
+    };
+    void this.shapes.createPoints(points, {
+      shape: tool,
+      text,
+      lock: false,
+      overrides: defaults,
+    }).then((id) => {
+      this.context.selectedShapeId = id as unknown as string;
+    });
+    this.context.drawingTool = "cursor";
+    this.onToolDone?.("cursor");
+    this.engine.markDirty();
+  }
+
   private onMouseUp(): void {
     if (this.dragging?.kind === "shape") {
-      // Fire points_changed so the app's drawing_event handler reacts to drags.
       const id = this.dragging.id;
       this.context.drawingEvent.fire(id, "points_changed");
     }
@@ -1089,6 +1602,7 @@ export class ChartRenderer {
 
   private onMouseLeave(): void {
     this.crosshair.active = false;
+    this.hoverMark = null;
     if (!this.dragging) this.canvas.style.cursor = "default";
     this.engine.markDirty();
   }
@@ -1099,7 +1613,6 @@ export class ChartRenderer {
     const span = to - from;
     const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
     const newSpan = Math.max(this.plotW / MAX_BAR_SPACING, Math.min(this.plotW / MIN_BAR_SPACING, span * factor));
-    // Zoom around the cursor's bar index.
     const { x } = this.pointerXY(e);
     const pivot = this.indexForX(x);
     const leftFrac = (pivot - from) / span;
@@ -1114,19 +1627,80 @@ export class ChartRenderer {
   private onDblClick(e: MouseEvent): void {
     const { x, y } = this.pointerXY(e);
     const inPriceAxis = x > this.plotL + this.plotW && y < this.plotT + this.plotH;
-    // Double-clicking the price axis resets ONLY the price scale to auto-fit
-    // (keeps the time view); anywhere else resets the whole view.
     this.context.priceRange = null;
     this.context.autoScalePrice = true;
-    if (!inPriceAxis) {
-      const n = this.context.bars.length;
-      if (n) {
-        const count = Math.min(n, 120);
-        this.context.visibleRange = { from: n - count, to: n - 1 + Math.max(2, Math.floor(count * 0.06)) };
-      }
-    }
-    this.engine.markDirty();
+    if (!inPriceAxis) this.fitContent();
+    else this.engine.markDirty();
   }
+
+  private onKeyDown(e: KeyboardEvent): void {
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement | null)?.isContentEditable) return;
+
+    const { from, to } = this.context.visibleRange;
+    const span = to - from;
+    if (e.key === "Escape") {
+      this.draft = null;
+      this.context.drawingTool = "cursor";
+      this.context.selectedShapeId = null;
+      this.onToolDone?.("cursor");
+      this.engine.markDirty();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (this.context.selectedShapeId) {
+        this.shapes.remove(this.context.selectedShapeId as never);
+        this.engine.markDirty();
+        e.preventDefault();
+      }
+      return;
+    }
+    if (e.key === "f" || e.key === "F") {
+      this.fitContent();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "+" || e.key === "=") {
+      const newSpan = Math.max(this.plotW / MAX_BAR_SPACING, span / 1.15);
+      this.context.visibleRange = { from: to - newSpan, to };
+      this.engine.markDirty();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "-" || e.key === "_") {
+      const newSpan = Math.min(this.plotW / MIN_BAR_SPACING, span * 1.15);
+      this.context.visibleRange = { from: to - newSpan, to };
+      void this.data.maybeLoadMoreHistory();
+      this.engine.markDirty();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const dir = e.key === "ArrowLeft" ? -1 : 1;
+      const shift = span * 0.08 * dir;
+      this.context.visibleRange = { from: from + shift, to: to + shift };
+      void this.data.maybeLoadMoreHistory();
+      this.engine.markDirty();
+      e.preventDefault();
+    }
+  }
+}
+
+function distToSegment(
+  px: number,
+  py: number,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy || 1;
+  let t = ((px - a.x) * dx + (py - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const qx = a.x + t * dx;
+  const qy = a.y + t * dy;
+  return Math.hypot(px - qx, py - qy);
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

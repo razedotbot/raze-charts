@@ -29,6 +29,7 @@ export interface ChartApiDeps {
   setSymbol(symbol: string, cb?: () => void): void;
   /** Shape store. */
   createShape(point: ShapePoint, options: CreateShapeOptions): Promise<EntityId>;
+  createMultipointShape(points: ShapePoint[], options: CreateShapeOptions): Promise<EntityId>;
   getShapeById(id: EntityId): ILineDataSourceApi;
   removeEntity(id: EntityId): void;
   removeAllShapes(): void;
@@ -117,7 +118,7 @@ export class ChartApi implements IChartWidgetApi {
     points: ShapePoint[],
     options: CreateShapeOptions<TOverrides>,
   ): Promise<EntityId> {
-    return this.deps.createShape(points[0] ?? { time: 0 }, options as CreateShapeOptions);
+    return this.deps.createMultipointShape(points, options as CreateShapeOptions);
   }
 
   getShapeById(entityId: EntityId): ILineDataSourceApi {

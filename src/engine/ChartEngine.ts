@@ -11,6 +11,7 @@ export class ChartEngine {
   private rafId = 0;
   private dirty = true;
   private destroyed = false;
+  private onWinResize: () => void;
   cssWidth = 0;
   cssHeight = 0;
   dpr = 1;
@@ -26,8 +27,11 @@ export class ChartEngine {
     if (!c2d) throw new Error("[raze-charts] 2D canvas context unavailable");
     this.ctx2d = c2d;
 
+    this.onWinResize = () => this.resize();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(host);
+    // AppZoom dispatches window `resize` on zoom change; RO alone can miss it.
+    window.addEventListener("resize", this.onWinResize);
     this.resize();
 
     this.context.requestPaint = () => this.markDirty();
@@ -40,10 +44,14 @@ export class ChartEngine {
   }
 
   private resize(): void {
-    const rect = this.host.getBoundingClientRect();
+    // Layout box (clientWidth/Height), NOT getBoundingClientRect.
+    // Under Shell AppZoom CSS `zoom`, getBoundingClientRect returns the *visual*
+    // size (layout × zoom) while the canvas CSS box is the layout size — mixing
+    // them desyncs the bitmap from pointer space. clientWidth stays in the same
+    // coordinate system we draw in; pointerXY converts mouse via rect ratio.
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const w = Math.max(0, Math.floor(rect.width));
-    const h = Math.max(0, Math.floor(rect.height));
+    const w = Math.max(0, Math.floor(this.host.clientWidth));
+    const h = Math.max(0, Math.floor(this.host.clientHeight));
     if (w === this.cssWidth && h === this.cssHeight && dpr === this.dpr) return;
     this.cssWidth = w;
     this.cssHeight = h;
@@ -82,6 +90,7 @@ export class ChartEngine {
     cancelAnimationFrame(this.rafId);
     this.ro?.disconnect();
     this.ro = null;
+    window.removeEventListener("resize", this.onWinResize);
     this.canvas.remove();
   }
 }

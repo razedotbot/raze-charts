@@ -112,6 +112,16 @@ await new Promise((r) => setTimeout(r, 20));
 assert(chart.resolution() === "1", "clicking the 1m interval button changed resolution");
 assert(intervalFired === "1", "user interval click fired onIntervalChanged");
 
+// Left sidebar (drawings + indicators) — Phase 2 chrome
+const sidebar = container.querySelector(".raze-chart-left-sidebar");
+assert(sidebar !== null, "left sidebar mounted");
+assert(sidebar.querySelectorAll("button").length >= 8, "left sidebar has drawing/action tools");
+assert(container.querySelector(".raze-chart-scale-bar") !== null, "scale bar (%/log/auto) mounted");
+// Indicators no longer in the header toolbar
+const headerInd = [...container.querySelectorAll(".raze-chart-toolbar-btn")]
+  .find((d) => d.textContent === "Indicators");
+assert(!headerInd, "Indicators removed from header toolbar");
+
 // shapes: createShape → getShapeById → setPoints/getPoints → removeEntity
 const id = await chart.createShape({ time: Math.floor(Date.now() / 1000), price: 1000 }, {
   shape: "horizontal_line", lock: false, text: "Limit ↕",
@@ -121,6 +131,16 @@ assert(typeof id === "string", "createShape resolved an EntityId");
 const adapter = chart.getShapeById(id);
 adapter.setPoints([{ time: Math.floor(Date.now() / 1000), price: 1234 }]);
 assert(adapter.getPoints()[0].price === 1234, "getShapeById().setPoints/getPoints round-trips");
+
+// multipoint: trend_line
+const now = Math.floor(Date.now() / 1000);
+const trendId = await chart.createMultipointShape(
+  [{ time: now - 600, price: 900 }, { time: now, price: 1100 }],
+  { shape: "trend_line", overrides: { linecolor: "#66d89e" } },
+);
+assert(typeof trendId === "string", "createMultipointShape trend_line resolved");
+assert(chart.getShapeById(trendId).getPoints().length === 2, "trend_line keeps 2 points");
+chart.removeEntity(trendId);
 
 // studies: createStudy EMA/RSI + removeEntity
 const emaId = await chart.createStudy("EMA", false, false, { length: 9 });

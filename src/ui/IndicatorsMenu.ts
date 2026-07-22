@@ -1,5 +1,5 @@
-// Toolbar "Indicators" dropdown — add/remove EMA/SMA/RSI without calling
-// createStudy from the host app (TV chrome parity).
+// Floating "Indicators" panel — opened from the left sidebar (not the header).
+// Add/remove EMA/SMA/RSI without calling createStudy from the host app.
 
 import type { ChartContext } from "../core/context";
 import type { StudyStore, StudyKind } from "../studies/StudyStore";
@@ -20,57 +20,61 @@ const PRESETS: Preset[] = [
 ];
 
 export class IndicatorsMenu {
-  private btn: HTMLElement;
   private panel: HTMLDivElement | null = null;
   private onDoc: ((e: MouseEvent) => void) | null = null;
+  private anchor: HTMLElement | null = null;
 
   constructor(
     private readonly context: ChartContext,
     private readonly studies: StudyStore,
-    hostBtn: HTMLElement,
-  ) {
-    this.btn = hostBtn;
-    this.btn.textContent = "Indicators";
-    this.btn.title = "Add / remove indicators";
-    this.btn.style.cssText += [
-      "display:flex",
-      "align-items:center",
-      "height:26px",
-      "padding:0 10px",
-      "margin:0 1px",
-      "border-radius:4px",
-      "cursor:pointer",
-      "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
-      "font-size:12px",
-      "letter-spacing:0.02em",
-    ].join(";");
-    this.btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (this.panel) this.close();
-      else this.open();
-    });
+  ) {}
+
+  /** Toggle the panel anchored to a sidebar (or any) button. */
+  toggle(anchor: HTMLElement): void {
+    if (this.panel && this.anchor === anchor) {
+      this.close();
+      return;
+    }
+    this.close();
+    this.open(anchor);
   }
 
-  private open(): void {
+  open(anchor: HTMLElement): void {
+    this.anchor = anchor;
     const panel = document.createElement("div");
     panel.className = "raze-chart-indicators-menu";
     panel.style.cssText = [
-      "position:absolute",
-      "top:100%",
-      "left:0",
-      "margin-top:4px",
-      "min-width:160px",
+      "position:fixed",
+      "min-width:168px",
       "padding:6px 0",
       "border-radius:6px",
       "border:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
       "background:var(--tv-color-pane-background, #181615)",
       "box-shadow:0 8px 24px rgba(0,0,0,0.45)",
-      "z-index:20",
+      "z-index:10000",
       `font-family:${this.context.fontFamily}`,
       "font-size:12px",
       "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
     ].join(";");
 
+    this.renderRows(panel);
+
+    document.body.appendChild(panel);
+    this.panel = panel;
+    this.position(anchor);
+
+    this.onDoc = (ev: MouseEvent) => {
+      if (!this.panel) return;
+      if (ev.target instanceof Node && (this.panel.contains(ev.target) || anchor.contains(ev.target))) {
+        return;
+      }
+      this.close();
+    };
+    setTimeout(() => document.addEventListener("click", this.onDoc!), 0);
+  }
+
+  private renderRows(panel: HTMLDivElement): void {
+    panel.replaceChildren();
     const activeKey = new Set(
       this.studies.list().map((s) => `${s.kind}:${s.length}`),
     );
@@ -95,7 +99,7 @@ export class IndicatorsMenu {
         on ? "font-weight:600" : "font-weight:400",
       ].join(";");
       const swatch = document.createElement("span");
-      swatch.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};`;
+      swatch.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};flex:0 0 auto;`;
       row.prepend(swatch);
       row.addEventListener("mouseenter", () => {
         row.style.background = "rgba(255,255,255,0.06)";
@@ -112,8 +116,7 @@ export class IndicatorsMenu {
         } else {
           this.studies.add({ kind: p.kind, length: p.length, color: p.color });
         }
-        this.close();
-        this.open(); // refresh checkmarks
+        this.renderRows(panel);
       });
       panel.appendChild(row);
     }
@@ -129,25 +132,25 @@ export class IndicatorsMenu {
       this.close();
     });
     panel.appendChild(clear);
-
-    // Position relative to button's offsetParent (toolbar).
-    this.btn.style.position = "relative";
-    this.btn.appendChild(panel);
-    this.panel = panel;
-
-    this.onDoc = (ev: MouseEvent) => {
-      if (!this.panel) return;
-      if (ev.target instanceof Node && (this.btn.contains(ev.target) || this.panel.contains(ev.target))) {
-        return;
-      }
-      this.close();
-    };
-    setTimeout(() => document.addEventListener("click", this.onDoc!), 0);
   }
 
-  private close(): void {
+  private position(anchor: HTMLElement): void {
+    if (!this.panel) return;
+    const r = anchor.getBoundingClientRect();
+    const pw = this.panel.offsetWidth || 168;
+    const ph = this.panel.offsetHeight || 200;
+    let left = r.right + 6;
+    let top = r.top;
+    if (left + pw > window.innerWidth - 8) left = Math.max(8, r.left - pw - 6);
+    if (top + ph > window.innerHeight - 8) top = Math.max(8, window.innerHeight - ph - 8);
+    this.panel.style.left = `${left}px`;
+    this.panel.style.top = `${top}px`;
+  }
+
+  close(): void {
     this.panel?.remove();
     this.panel = null;
+    this.anchor = null;
     if (this.onDoc) {
       document.removeEventListener("click", this.onDoc);
       this.onDoc = null;

@@ -38,6 +38,18 @@ export interface IndexRange {
   to: number;
 }
 
+/** Active drawing tool (left sidebar). `cursor` = pan / select. */
+export type DrawingTool =
+  | "cursor"
+  | "trend_line"
+  | "horizontal_line"
+  | "fib_retracement"
+  | "rectangle"
+  | "text";
+
+/** Main series render style. */
+export type ChartStyle = "candles" | "line" | "area" | "heikin_ashi";
+
 export interface ChartContext {
   readonly options: ChartingLibraryWidgetOptions;
   readonly datafeed: IBasicDataFeed;
@@ -63,6 +75,17 @@ export interface ChartContext {
   autoScalePrice: boolean;
   /** Manual price range override (set when the user drags the price axis). */
   priceRange: { min: number; max: number } | null;
+
+  /** Main series style (candles / line / area / heikin ashi). */
+  chartStyle: ChartStyle;
+  /** Logarithmic price scale. */
+  logScale: boolean;
+  /** Percent scale (relative to first visible close). */
+  percentScale: boolean;
+  /** Active left-toolbar drawing tool. */
+  drawingTool: DrawingTool;
+  /** Currently selected shape entity id (for delete / highlight), or null. */
+  selectedShapeId: string | null;
 
   /** Fired (resolution, timeframeObj) when the interval changes. */
   readonly intervalChanged: Delegate<[ResolutionString, unknown]>;
