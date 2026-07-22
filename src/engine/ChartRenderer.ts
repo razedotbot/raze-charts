@@ -19,8 +19,9 @@ import type { ShapeStore, StoredShape } from "../core/ShapeStore";
 import type { DataManager } from "../data/DataManager";
 import type { StudyStore } from "../studies/StudyStore";
 import { resolutionToMs, parseResolution } from "../util/resolution";
-import { decimalsFromPricescale, formatPrice, formatVolume } from "../util/format";
+import { formatCompact, formatPrice, formatVolume } from "../util/format";
 import { heikinAshi } from "../util/heikinAshi";
+import { isLightColor } from "../core/theme";
 
 const PRICE_AXIS_W_DEFAULT = 64;
 const PRICE_AXIS_W_MIN = 56;
@@ -33,6 +34,8 @@ const SUB_PANE_FRACTION = 0.22; // of full canvas height per study sub-pane (RSI
 const SUB_PANES_MAX_FRACTION = 0.45; // all sub-panes together never squeeze the main plot below ~55%
 const SUB_PANE_GAP = 3;
 const CANDLE_MAX_WIDTH = 18;  // cap so few-bar charts don't render giant blocks
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Round time-step boundaries (ms) for time-axis gridlines, ascending.
 const SEC = 1000, MIN_MS = 60_000, HR = 3_600_000, DAY_MS = 86_400_000;
@@ -587,7 +590,7 @@ export class ChartRenderer {
     const { from, to } = this.context.visibleRange;
     const start = Math.max(0, Math.floor(from) - 1);
     const end = Math.min(bars.length - 1, Math.ceil(to) + 1);
-    const color = t.candleUp;
+    const color = t.lineColor ?? t.candleUp;
 
     ctx.save();
     ctx.beginPath();
@@ -946,6 +949,7 @@ export class ChartRenderer {
       const bot = Math.max(a.y, b.y);
       const left = Math.min(a.x, b.x);
       const right = Math.max(a.x, this.plotL + this.plotW - 4);
+      const pricescale = this.context.symbolInfo?.pricescale ?? 100;
       ctx.font = `10px ${this.context.fontFamily}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
@@ -960,9 +964,7 @@ export class ChartRenderer {
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.globalAlpha = 0.85;
-        const price = this.priceForY(y);
-        const pricescale = this.context.symbolInfo?.pricescale ?? 100;
-        ctx.fillText(`${(lv * 100).toFixed(1)}%  ${this.formatAxisPrice(price, pricescale)}`, left + 4, yy - 2);
+        ctx.fillText(`${(lv * 100).toFixed(1)}%  ${this.formatAxisPrice(this.priceForY(y), pricescale)}`, left + 4, yy - 2);
       }
       ctx.globalAlpha = 1;
       // Vertical guide
@@ -1180,11 +1182,21 @@ export class ChartRenderer {
     return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
   }
 
-  /** Rounded price-axis pill (crosshair value, last price, shape levels). */
-  private drawAxisTag(ctx: CanvasRenderingContext2D, y: number, text: string, bg: string, fg: string, bold = false): void {
+  /** Rounded price-axis pill (crosshair value, last price, shape levels).
+   *  Clamps into the main plot unless explicit bounds are given (sub-panes). */
+  private drawAxisTag(
+    ctx: CanvasRenderingContext2D,
+    y: number,
+    text: string,
+    bg: string,
+    fg: string,
+    bold = false,
+    clampTop = this.plotT,
+    clampBot = this.plotT + this.plotH,
+  ): void {
     const x0 = this.plotL + this.plotW;
     const h = 16;
-    const top = Math.max(this.plotT, Math.min(this.plotT + this.plotH - h, y - h / 2));
+    const top = Math.max(clampTop, Math.min(clampBot - h, y - h / 2));
     ctx.fillStyle = bg;
     this.roundRect(ctx, x0 + 3, top, this.priceAxisW - 5, h, 3);
     ctx.fill();
@@ -1244,8 +1256,9 @@ export class ChartRenderer {
 
   /** Neutral pill background/foreground for crosshair tags (theme-aware). */
   private neutralPill(): { bg: string; fg: string } {
-    const light = this.context.theme.paneBackground.toLowerCase() === "#ffffff";
-    return light ? { bg: "#131722", fg: "#ffffff" } : { bg: "#3a3833", fg: "#f4eee1" };
+    return isLightColor(this.context.theme.paneBackground)
+      ? { bg: "#131722", fg: "#ffffff" }
+      : { bg: "#3a3833", fg: "#f4eee1" };
   }
 
   // ── Crosshair + legend ──────────────────────────────────────────────────────
@@ -1285,6 +1298,18 @@ export class ChartRenderer {
     const pricescale = this.context.symbolInfo?.pricescale ?? 100;
     if (t.showPriceScaleCrosshairLabel && inMainPane) {
       this.drawAxisTag(ctx, y, this.formatAxisPrice(this.priceForY(y), pricescale), pill.bg, pill.fg);
+    } else if (t.showPriceScaleCrosshairLabel && !inMainPane) {
+      // Sub-pane: show the study value under the cursor on the pane's axis.
+      const pane = this.subPanes.find((p) => y >= p.top && y <= p.top + p.h);
+      if (pane) {
+        const v = pane.max - ((y - pane.top) / Math.max(1, pane.h)) * (pane.max - pane.min);
+        const label = pane.def.formatValue
+          ? pane.def.formatValue(v)
+          : Math.abs(v) >= 1000
+            ? formatCompact(v)
+            : v.toFixed(1);
+        this.drawAxisTag(ctx, y, label, pill.bg, pill.fg, false, pane.top, pane.top + pane.h);
+      }
     }
     if (t.showTimeScaleCrosshairLabel && snapBar && idx >= 0 && idx < bars.length) {
       const label = this.formatCrosshairTime(snapBar.time, parseResolution(this.context.resolution).kind);
@@ -1479,12 +1504,15 @@ export class ChartRenderer {
         }
       }
       const drawing = this.context.drawingTool !== "cursor";
+      // Horizontal lines drag vertically (ns-resize); multipoint shapes move freely.
+      const hoverShape = this.hoverShapeId ? this.shapes.get(this.hoverShapeId as never) : undefined;
+      const shapeCursor = hoverShape?.shape === "horizontal_line" ? "ns-resize" : "move";
       this.canvas.style.cursor = inPriceAxis
         ? "ns-resize"
         : inTimeAxis
           ? "ew-resize"
           : this.hoverShapeId
-            ? "ns-resize"
+            ? shapeCursor
             : drawing
               ? "crosshair"
               : this.hoverMark
@@ -1679,6 +1707,10 @@ export class ChartRenderer {
   private onKeyDown(e: KeyboardEvent): void {
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement | null)?.isContentEditable) return;
+    // Only react while the pointer is over this chart (or the canvas has focus):
+    // a page-level listener must not hijack keys meant for the host app, and
+    // multiple widgets on one page must not all respond.
+    if (!this.crosshair.active && document.activeElement !== this.canvas) return;
 
     const { from, to } = this.context.visibleRange;
     const span = to - from;
@@ -1746,7 +1778,3 @@ function distToSegment(
   return Math.hypot(px - qx, py - qy);
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-// Keep imports used (decimalsFromPricescale reserved for future tick precision).
-void decimalsFromPricescale;

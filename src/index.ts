@@ -28,7 +28,7 @@ export { ChartApi } from "./core/ChartApi";
 export type { ChartApiDeps } from "./core/ChartApi";
 export { ShapeStore } from "./core/ShapeStore";
 export type { ShapeKind, StoredShape } from "./core/ShapeStore";
-export { buildTheme, withAlpha } from "./core/theme";
+export { buildTheme, isLightColor, withAlpha } from "./core/theme";
 export { buildFeatureSet } from "./core/context";
 export type {
   ChartContext,
@@ -61,6 +61,8 @@ export { DEFAULT_INTERVAL_FAVORITES, IntervalSelector } from "./ui/IntervalSelec
 export { ScaleBar } from "./ui/ScaleBar";
 export { LoadingScreen } from "./ui/LoadingScreen";
 export { closeContextMenu, showContextMenu } from "./ui/ContextMenu";
+export { openPopup, popupRow } from "./ui/popup";
+export type { PopupHandle, PopupOptions } from "./ui/popup";
 
 // ── Utils ───────────────────────────────────────────────────────────────────
 export { Delegate } from "./util/delegate";

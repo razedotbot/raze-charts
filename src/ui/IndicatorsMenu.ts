@@ -7,6 +7,7 @@ import type { IndicatorPreset, RazeChartsOptions } from "../types/charting_libra
 import type { ChartContext } from "../core/context";
 import type { StudyStore } from "../studies/StudyStore";
 import type { StudyRegistry } from "../studies/registry";
+import { openPopup, popupRow, type PopupHandle } from "./popup";
 
 /** A preset with every field resolved against its study definition. */
 export interface ResolvedIndicatorPreset {
@@ -53,8 +54,7 @@ export function resolveIndicatorPresets(
 }
 
 export class IndicatorsMenu {
-  private panel: HTMLDivElement | null = null;
-  private onDoc: ((e: MouseEvent) => void) | null = null;
+  private popup: PopupHandle | null = null;
   private anchor: HTMLElement | null = null;
   private readonly presets: ResolvedIndicatorPreset[];
 
@@ -68,7 +68,7 @@ export class IndicatorsMenu {
 
   /** Toggle the panel anchored to a sidebar (or any) button. */
   toggle(anchor: HTMLElement): void {
-    if (this.panel && this.anchor === anchor) {
+    if (this.popup && this.anchor === anchor) {
       this.close();
       return;
     }
@@ -78,36 +78,23 @@ export class IndicatorsMenu {
 
   open(anchor: HTMLElement): void {
     this.anchor = anchor;
-    const panel = document.createElement("div");
-    panel.className = "raze-chart-indicators-menu";
-    panel.style.cssText = [
-      "position:fixed",
-      "min-width:168px",
-      "padding:6px 0",
-      "border-radius:6px",
-      "border:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
-      "background:var(--tv-color-pane-background, #181615)",
-      "box-shadow:0 8px 24px rgba(0,0,0,0.45)",
-      "z-index:10000",
-      `font-family:${this.context.fontFamily}`,
-      "font-size:12px",
-      "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
-    ].join(";");
-
-    this.renderRows(panel);
-
-    document.body.appendChild(panel);
-    this.panel = panel;
-    this.position(anchor);
-
-    this.onDoc = (ev: MouseEvent) => {
-      if (!this.panel) return;
-      if (ev.target instanceof Node && (this.panel.contains(ev.target) || anchor.contains(ev.target))) {
-        return;
-      }
-      this.close();
-    };
-    setTimeout(() => document.addEventListener("click", this.onDoc!), 0);
+    const popup = openPopup({
+      fontFamily: this.context.fontFamily,
+      className: "raze-chart-indicators-menu",
+      minWidth: 168,
+      padding: "6px 0",
+      anchor,
+      place: "right-start",
+      onClose: () => {
+        if (this.popup === popup) {
+          this.popup = null;
+          this.anchor = null;
+        }
+      },
+    });
+    this.popup = popup;
+    this.renderRows(popup.el);
+    popup.reposition();
   }
 
   private renderRows(panel: HTMLDivElement): void {
@@ -117,35 +104,8 @@ export class IndicatorsMenu {
     );
 
     for (const p of this.presets) {
-      const row = document.createElement("button");
-      row.type = "button";
-      const key = `${p.name}:${p.length}`;
-      const on = activeKey.has(key);
-      row.textContent = on ? `✓ ${p.label}` : p.label;
-      row.style.cssText = [
-        "display:flex",
-        "align-items:center",
-        "gap:8px",
-        "width:100%",
-        "border:0",
-        "background:transparent",
-        "color:inherit",
-        "padding:7px 12px",
-        "cursor:pointer",
-        "text-align:left",
-        on ? "font-weight:600" : "font-weight:400",
-      ].join(";");
-      const swatch = document.createElement("span");
-      swatch.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};flex:0 0 auto;`;
-      row.prepend(swatch);
-      row.addEventListener("mouseenter", () => {
-        row.style.background = "rgba(255,255,255,0.06)";
-      });
-      row.addEventListener("mouseleave", () => {
-        row.style.background = "transparent";
-      });
-      row.addEventListener("click", (e) => {
-        e.stopPropagation();
+      const on = activeKey.has(`${p.name}:${p.length}`);
+      const row = popupRow("", () => {
         if (on) {
           for (const s of this.studies.list()) {
             if (s.name === p.name && s.length === p.length) this.studies.remove(s.id);
@@ -155,43 +115,25 @@ export class IndicatorsMenu {
         }
         this.renderRows(panel);
       });
+      row.style.fontWeight = on ? "600" : "400";
+      const swatch = document.createElement("span");
+      swatch.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};flex:0 0 auto;`;
+      row.append(swatch, document.createTextNode(on ? `✓ ${p.label}` : p.label));
       panel.appendChild(row);
     }
 
-    const clear = document.createElement("button");
-    clear.type = "button";
-    clear.textContent = "Clear all";
-    clear.style.cssText =
-      "display:block;width:100%;border:0;border-top:1px solid #363a45;background:transparent;color:#8b887e;padding:8px 12px;cursor:pointer;text-align:left;margin-top:4px;";
-    clear.addEventListener("click", (e) => {
-      e.stopPropagation();
+    const clear = popupRow("Clear all", () => {
       this.studies.clear();
       this.close();
     });
+    clear.style.cssText += "border-top:1px solid var(--tv-color-toolbar-divider-background, #363a45);border-radius:0;color:#8b887e;margin-top:4px;padding:8px 12px;";
     panel.appendChild(clear);
   }
 
-  private position(anchor: HTMLElement): void {
-    if (!this.panel) return;
-    const r = anchor.getBoundingClientRect();
-    const pw = this.panel.offsetWidth || 168;
-    const ph = this.panel.offsetHeight || 200;
-    let left = r.right + 6;
-    let top = r.top;
-    if (left + pw > window.innerWidth - 8) left = Math.max(8, r.left - pw - 6);
-    if (top + ph > window.innerHeight - 8) top = Math.max(8, window.innerHeight - ph - 8);
-    this.panel.style.left = `${left}px`;
-    this.panel.style.top = `${top}px`;
-  }
-
   close(): void {
-    this.panel?.remove();
-    this.panel = null;
+    this.popup?.close();
+    this.popup = null;
     this.anchor = null;
-    if (this.onDoc) {
-      document.removeEventListener("click", this.onDoc);
-      this.onDoc = null;
-    }
   }
 
   destroy(): void {

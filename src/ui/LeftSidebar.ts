@@ -9,6 +9,7 @@ import type {
   SidebarItem,
 } from "../types/charting_library";
 import type { ChartContext, DrawingTool } from "../core/context";
+import { openPopup, popupRow, type PopupHandle } from "./popup";
 
 export const LEFT_SIDEBAR_W = 42;
 
@@ -90,10 +91,9 @@ export class LeftSidebar {
   readonly el: HTMLDivElement;
   private toolBtns = new Map<string, HTMLButtonElement>();
   private styleBtn: HTMLButtonElement | null = null;
-  private stylePanel: HTMLDivElement | null = null;
+  private stylePanel: PopupHandle | null = null;
   private activeTool: DrawingTool = "cursor";
   private chartStyle: ChartStyleId = "candles";
-  private onDoc: ((e: MouseEvent) => void) | null = null;
   private readonly chartStyles: typeof ALL_CHART_STYLES;
 
   constructor(
@@ -255,55 +255,37 @@ export class LeftSidebar {
   }
 
   private openStylePanel(): void {
-    const panel = document.createElement("div");
-    panel.style.cssText = [
-      "position:absolute",
-      "left:100%",
-      "bottom:8px",
-      "margin-left:6px",
-      "min-width:140px",
-      "padding:6px 0",
-      "border-radius:6px",
-      "border:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
-      "background:var(--tv-color-pane-background, #181615)",
-      "box-shadow:0 8px 24px rgba(0,0,0,0.45)",
-      "z-index:30",
-      `font-family:${this.context.fontFamily}`,
-      "font-size:12px",
-      "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
-    ].join(";");
+    if (!this.styleBtn) return;
+    const popup = openPopup({
+      fontFamily: this.context.fontFamily,
+      className: "raze-chart-style-menu",
+      minWidth: 140,
+      padding: "6px 0",
+      anchor: this.styleBtn,
+      place: "right-start",
+      onClose: () => {
+        if (this.stylePanel === popup) this.stylePanel = null;
+      },
+    });
+    this.stylePanel = popup;
     for (const s of this.chartStyles) {
-      const row = document.createElement("button");
-      row.type = "button";
       const on = s.id === this.chartStyle;
-      row.innerHTML = `<span style="display:inline-flex;width:18px;margin-right:8px;color:${on ? "#66d89e" : "inherit"}">${s.svg}</span>${on ? "✓ " : ""}${s.title}`;
-      row.style.cssText = "display:flex;align-items:center;width:100%;border:0;background:transparent;color:inherit;padding:7px 12px;cursor:pointer;text-align:left;";
-      row.addEventListener("mouseenter", () => { row.style.background = "rgba(255,255,255,0.06)"; });
-      row.addEventListener("mouseleave", () => { row.style.background = "transparent"; });
-      row.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.setChartStyle(s.id);
-        this.cbs.onChartType(s.id);
-        this.closeStylePanel();
-      });
-      panel.appendChild(row);
+      const row = popupRow(
+        `<span style="display:inline-flex;width:18px;color:${on ? "#66d89e" : "inherit"}">${s.svg}</span>${on ? "✓ " : ""}${s.title}`,
+        () => {
+          this.setChartStyle(s.id);
+          this.cbs.onChartType(s.id);
+          this.closeStylePanel();
+        },
+      );
+      popup.el.appendChild(row);
     }
-    this.el.appendChild(panel);
-    this.stylePanel = panel;
-    this.onDoc = (ev: MouseEvent) => {
-      if (ev.target instanceof Node && (this.el.contains(ev.target))) return;
-      this.closeStylePanel();
-    };
-    setTimeout(() => document.addEventListener("click", this.onDoc!), 0);
+    popup.reposition();
   }
 
   private closeStylePanel(): void {
-    this.stylePanel?.remove();
+    this.stylePanel?.close();
     this.stylePanel = null;
-    if (this.onDoc) {
-      document.removeEventListener("click", this.onDoc);
-      this.onDoc = null;
-    }
   }
 
   destroy(): void {

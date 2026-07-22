@@ -6,6 +6,7 @@
 import type { ResolutionString } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
 import { resolutionLabel } from "../util/resolution";
+import { openPopup, popupRow, type PopupHandle } from "./popup";
 
 /** Default inline favorites (others go in the dropdown). Overridden by the
  *  TV-compatible `options.favorites.intervals`. */
@@ -14,7 +15,7 @@ export const DEFAULT_INTERVAL_FAVORITES = ["1S", "1", "5", "15", "60", "240", "1
 export class IntervalSelector {
   private buttons = new Map<string, HTMLDivElement>();
   private active: string;
-  private dropdown: HTMLDivElement | null = null;
+  private dropdown: PopupHandle | null = null;
   private readonly favorites: string[];
 
   constructor(
@@ -125,46 +126,28 @@ export class IntervalSelector {
 
   private toggleDropdown(anchor: HTMLElement, rest: string[]): void {
     if (this.dropdown) { this.closeDropdown(); return; }
-    const menu = document.createElement("div");
-    menu.style.cssText = [
-      "position:fixed",
-      "min-width:80px",
-      "background:var(--tv-color-popup-background, #1e222d)",
-      "border:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
-      "border-radius:4px",
-      "box-shadow:0 12px 24px -10px rgba(0,0,0,0.6)",
-      "padding:4px",
-      "z-index:2147483640",
-      `font-family:${this.context.fontFamily}`,
-      "font-size:12px",
-      "display:flex",
-      "flex-direction:column",
-    ].join(";");
+    const popup = openPopup({
+      fontFamily: this.context.fontFamily,
+      className: "raze-chart-interval-menu",
+      minWidth: 80,
+      padding: "4px",
+      anchor,
+      place: "below-start",
+      onClose: () => {
+        if (this.dropdown === popup) this.dropdown = null;
+      },
+    });
+    this.dropdown = popup;
     for (const res of rest) {
-      const row = document.createElement("div");
-      row.textContent = resolutionLabel(res);
-      row.style.cssText = "padding:6px 10px;cursor:pointer;border-radius:3px;color:var(--tv-color-popup-element-text,#d1d4dc);";
-      row.addEventListener("mouseenter", () => { row.style.background = "var(--tv-color-popup-element-background-hover, rgba(255,255,255,0.08))"; });
-      row.addEventListener("mouseleave", () => { row.style.background = "transparent"; });
-      row.addEventListener("click", () => this.select(res));
-      menu.appendChild(row);
+      const row = popupRow(resolutionLabel(res), () => this.select(res));
+      row.style.padding = "6px 10px";
+      popup.el.appendChild(row);
     }
-    const rect = anchor.getBoundingClientRect();
-    menu.style.left = `${rect.left}px`;
-    menu.style.top = `${rect.bottom + 4}px`;
-    document.body.appendChild(menu);
-    this.dropdown = menu;
-    window.setTimeout(() => {
-      const away = (e: MouseEvent): void => {
-        if (!menu.contains(e.target as Node)) { this.closeDropdown(); }
-        else document.addEventListener("mousedown", away, { once: true });
-      };
-      document.addEventListener("mousedown", away, { once: true });
-    }, 0);
+    popup.reposition();
   }
 
   private closeDropdown(): void {
-    this.dropdown?.remove();
+    this.dropdown?.close();
     this.dropdown = null;
   }
 

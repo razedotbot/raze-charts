@@ -72,6 +72,11 @@ export function buildTheme(opts: ChartingLibraryWidgetOptions): ThemeColors {
   theme.wickUp = s(cs + "wickUpColor") ?? theme.wickUp;
   theme.wickDown = s(cs + "wickDownColor") ?? theme.wickDown;
 
+  // Line/area series colour; falls back to candleUp at draw time when unset.
+  theme.lineColor = s("mainSeriesProperties.lineStyle.color")
+    ?? s("mainSeriesProperties.areaStyle.linecolor")
+    ?? theme.lineColor;
+
   // Volume colours derive from candle colours unless explicitly overridden.
   theme.volUp = s("mainSeriesProperties.volumeStyle.upColor") ?? withAlpha(theme.candleUp, 0.5);
   theme.volDown = s("mainSeriesProperties.volumeStyle.downColor") ?? withAlpha(theme.candleDown, 0.5);
@@ -79,17 +84,30 @@ export function buildTheme(opts: ChartingLibraryWidgetOptions): ThemeColors {
   return theme;
 }
 
+/** Parse a #rgb / #rrggbb colour into channels, or null for other formats. */
+function parseHex(color: string): { r: number; g: number; b: number } | null {
+  const hex = color.trim().match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (!hex) return null;
+  let h = hex[1]!;
+  if (h.length === 3) h = h.split("").map((x) => x + x).join("");
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
 /** Convert a #rrggbb / #rgb colour to an rgba() string with the given alpha. */
 export function withAlpha(color: string, alpha: number): string {
-  const c = color.trim();
-  const hex = c.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
-  if (hex) {
-    let h = hex[1]!;
-    if (h.length === 3) h = h.split("").map((x) => x + x).join("");
-    const r = parseInt(h.slice(0, 2), 16);
-    const g = parseInt(h.slice(2, 4), 16);
-    const bl = parseInt(h.slice(4, 6), 16);
-    return `rgba(${r},${g},${bl},${alpha})`;
-  }
-  return c; // already rgba/named — return as-is
+  const c = parseHex(color);
+  if (c) return `rgba(${c.r},${c.g},${c.b},${alpha})`;
+  return color.trim(); // already rgba/named — return as-is
+}
+
+/** True when the colour reads as a light background (hex only; others → dark). */
+export function isLightColor(color: string): boolean {
+  const c = parseHex(color);
+  if (!c) return false;
+  // Rec. 601 luma — good enough to pick a contrasting pill colour.
+  return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b > 160;
 }

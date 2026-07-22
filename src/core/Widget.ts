@@ -56,8 +56,6 @@ export class Widget implements IChartingLibraryWidget {
   private subscriptions = new Map<string, Set<(...a: never[]) => void>>();
   private contextMenuCb: ContextMenuCallback | null = null;
   private destroyed = false;
-  private showHeader: boolean;
-  private showLeftToolbar: boolean;
 
   constructor(options: ChartingLibraryWidgetOptions) {
     const containerEl =
@@ -70,8 +68,8 @@ export class Widget implements IChartingLibraryWidget {
     const theme = buildTheme(options);
     const features = buildFeatureSet(options);
     const raze = options.raze;
-    this.showHeader = features.has("header_widget");
-    this.showLeftToolbar = features.has("left_toolbar");
+    const showHeader = features.has("header_widget");
+    const showLeftToolbar = features.has("left_toolbar");
 
     const initialRange: IndexRange = { from: 0, to: 1 };
     this.context = {
@@ -116,7 +114,7 @@ export class Widget implements IChartingLibraryWidget {
     ].join(";");
     containerEl.appendChild(this.root);
 
-    if (this.showHeader) {
+    if (showHeader) {
       this.toolbar = new Toolbar(this.context);
       this.root.appendChild(this.toolbar.el);
     }
@@ -125,7 +123,7 @@ export class Widget implements IChartingLibraryWidget {
     this.bodyRow.style.cssText = "display:flex;flex:1 1 auto;min-height:0;overflow:hidden;position:relative;";
     this.root.appendChild(this.bodyRow);
 
-    if (this.showLeftToolbar) {
+    if (showLeftToolbar) {
       this.leftSidebar = new LeftSidebar(
         this.context,
         {

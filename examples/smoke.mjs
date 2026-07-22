@@ -248,9 +248,12 @@ assert(customClicked, "custom sidebar button onClick fired");
 
 const styleBtn2 = [...sb2.querySelectorAll("button")].find((b) => b.title.startsWith("Chart type"));
 styleBtn2?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-const styleRows = [...sb2.querySelectorAll("button")].filter((b) => /Candles|Line|Area|Heikin/.test(b.textContent));
+const styleRows = [...window.document.querySelectorAll(".raze-chart-style-menu button")]
+  .filter((b) => /Candles|Line|Area|Heikin/.test(b.textContent));
 assert(styleRows.length === 2, `chart_types whitelist respected (${styleRows.length} of 4 styles)`);
-styleBtn2?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 5)); // let the popup arm its dismiss listeners
+window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+assert(window.document.querySelector(".raze-chart-style-menu") === null, "Esc closes the chart-type popup");
 
 assert(container2.querySelector(".raze-chart-scale-bar") === null, "disabled_features scale_bar hides the scale bar");
 

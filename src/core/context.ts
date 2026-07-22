@@ -28,6 +28,8 @@ export interface ThemeColors {
   wickDown: string;
   volUp: string;
   volDown: string;
+  /** Line/area series colour; falls back to candleUp when unset. */
+  lineColor?: string;
   showPriceScaleCrosshairLabel: boolean;
   showTimeScaleCrosshairLabel: boolean;
 }
