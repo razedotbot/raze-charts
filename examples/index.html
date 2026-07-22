@@ -45,6 +45,37 @@
         "mainSeriesProperties.candleStyle.wickUpColor": "#66d89e",
         "mainSeriesProperties.candleStyle.wickDownColor": "#e57359",
       },
+      // TV-compatible: which intervals sit inline in the header.
+      favorites: { intervals: ["1S", "5S", "1", "5", "15"] },
+      // Raze-charts chrome configuration — everything is composable: sidebar
+      // items (incl. custom buttons), chart types, indicator presets, and
+      // fully custom studies (overlay or own sub-pane).
+      raze: {
+        custom_studies: [
+          {
+            name: "HL2",
+            pane: "overlay",
+            defaults: { length: 1, color: "#8ecae6" },
+            compute: (bars) => bars.map((b) => (b.high + b.low) / 2),
+          },
+        ],
+        sidebar: [
+          "cursor", "trend_line", "horizontal_line", "fib_retracement", "rectangle", "text",
+          "separator",
+          "indicators",
+          "separator",
+          {
+            id: "hello",
+            title: "Custom button (demo)",
+            icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="9" r="1.6" fill="currentColor"/></svg>',
+            onClick: () => alert("Custom sidebar button — wire this to anything."),
+          },
+          "separator",
+          "fit", "screenshot", "fullscreen",
+          "separator",
+          "chart_type",
+        ],
+      },
     });
 
     w.headerReady().then(() => {

@@ -40,8 +40,8 @@ vendored library without touching consumer code.
 - **Chrome:** left sidebar (drawing tools, indicators, fit / screenshot /
   fullscreen, chart type), header interval selector, bottom `%` / `log` /
   `auto` scale bar. Keyboard: arrows pan, `+`/`-` zoom, `f` fit, `Esc` cancel,
-  `Delete` remove selection. Chrome hides via `disabled_features`
-  (`left_toolbar`, `header_widget`).
+  `Delete` remove selection. **Fully composable** — see
+  [Configuring the chrome](#configuring-the-chrome).
 - **Theming:** TradingView-style `overrides` keys, `theme: "dark" | "light"`,
   CSS custom properties, custom fonts.
 
@@ -110,6 +110,69 @@ config.plugins.push(
 at the TradingView `charting_library.d.ts` superset or at the bundled drop-in
 `.d.ts` — both compile.
 
+## Configuring the chrome
+
+Every visible piece — options, buttons, sidebar, indicators — is data-driven.
+The defaults reproduce the stock chrome; each knob below is optional and typed
+(`RazeChartsOptions` in the bundled `.d.ts`).
+
+```ts
+new widget({
+  // ...standard TradingView options...
+
+  // TV-compatible: which intervals sit inline in the header row.
+  favorites: { intervals: ["1S", "1", "5", "15"] as ResolutionString[] },
+
+  // TV-compatible granular hiding (all default-on):
+  //   header_widget · header_resolutions · left_toolbar · legend_widget · scale_bar
+  disabled_features: ["scale_bar"],
+
+  raze: {
+    // Sidebar layout: builtin ids, "separator", or your own buttons.
+    sidebar: [
+      "cursor", "trend_line", "horizontal_line",
+      "separator",
+      "indicators",
+      { id: "alerts", title: "Alerts", icon: "<svg…>", onClick: () => openAlerts() },
+      "separator",
+      "fit", "screenshot", "fullscreen", "chart_type",
+    ],
+
+    // Chart-type picker whitelist (default: all four).
+    chart_types: ["candles", "line"],
+
+    // Rows of the Indicators panel (default: EMA 9/21, SMA 20/50, RSI 14,
+    // plus one row per custom study).
+    indicator_presets: [
+      { name: "EMA", length: 9 },
+      { name: "EMA", length: 21, color: "#26a69a" },
+      { label: "Momentum", name: "MOM", length: 10 },
+    ],
+
+    // Register your own indicators — same shape as the built-ins. `pane:
+    // "overlay"` draws on the price pane; `pane: "pane"` gets its own
+    // sub-pane with optional fixed range, guide levels and label.
+    custom_studies: [
+      {
+        name: "MOM",
+        pane: "pane",
+        defaults: { length: 10, color: "#8ecae6" },
+        levels: [{ value: 0, dashed: true, axisLabel: true }],
+        compute: (bars, { length }) =>
+          bars.map((b, i) => (i < length ? null : b.close - bars[i - length].close)),
+      },
+    ],
+  },
+});
+```
+
+Custom studies are first-class: `createStudy("MOM")` resolves them, the
+Indicators panel lists them, the legend shows their values, and pane studies
+render with auto-fit or fixed ranges. Sidebar items, interval favorites,
+built-in study catalogue (`BUILTIN_STUDIES`, `StudyRegistry`) and preset
+defaults (`DEFAULT_SIDEBAR_ITEMS`, `DEFAULT_INDICATOR_PRESETS`,
+`DEFAULT_INTERVAL_FAVORITES`) are all exported for composition.
+
 ## Modular API
 
 Everything the widget is made of is exported à la carte, fully typed:
@@ -147,9 +210,10 @@ checks against that page.
 ## Scope
 
 Implemented: the API surface above. **Not** implemented (by design, PRs
-welcome): the full ~70 TradingView drawing-tool set, the full studies library,
-multi-pane beyond the RSI pane, compare/multi-symbol, save/load layouts,
-study templates. Where TradingView types are enormous unions, the bundled
+welcome): the full ~70 TradingView drawing-tool set, TradingView's built-in
+studies library (bring your own via `raze.custom_studies` — each pane study
+gets its own sub-pane), compare/multi-symbol, save/load layouts, study
+templates. Where TradingView types are enormous unions, the bundled
 `.d.ts` uses permissive index signatures so existing consumer code
 type-checks without enumerating thousands of keys.
 

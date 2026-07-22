@@ -268,7 +268,7 @@ export interface IChartWidgetApi {
   getShapeById(entityId: EntityId): ILineDataSourceApi;
   removeEntity(entityId: EntityId): void;
   removeAllShapes(): void;
-  /** Add a built-in study (EMA / SMA / RSI). Returns an entity id removable via removeEntity. */
+  /** Add a study — built-in (EMA / SMA / RSI) or registered via `raze.custom_studies`. Returns an entity id removable via removeEntity. */
   createStudy(
     name: string,
     forceOverlay?: boolean,
@@ -312,6 +312,77 @@ export interface LoadingScreenOptions {
 // `overrides` and `studies_overrides` are open maps in TV; keep them permissive.
 export type ChartOverrides = Record<string, string | number | boolean>;
 
+// ── Raze chrome configuration (library-specific; unknown to TradingView) ────
+export type SidebarToolId =
+  | "cursor"
+  | "trend_line"
+  | "horizontal_line"
+  | "fib_retracement"
+  | "rectangle"
+  | "text";
+export type SidebarActionId = "indicators" | "fit" | "screenshot" | "fullscreen" | "chart_type";
+export interface SidebarCustomItem {
+  id: string;
+  title: string;
+  /** Inline SVG (or any HTML) rendered inside the 32×32 button. */
+  icon: string;
+  onClick: () => void;
+}
+export type SidebarItem = SidebarToolId | SidebarActionId | "separator" | SidebarCustomItem;
+
+export type ChartStyleName = "candles" | "line" | "area" | "heikin_ashi";
+
+export interface StudyPaneLevel {
+  value: number;
+  /** Draw the guide dashed (e.g. the RSI 50 midline). */
+  dashed?: boolean;
+  /** Show the value on the sub-pane's right axis. */
+  axisLabel?: boolean;
+}
+
+/** A pluggable indicator: built-ins (EMA/SMA/RSI) and `raze.custom_studies` share this shape. */
+export interface StudyDefinition {
+  /** Canonical name — matched case-insensitively by createStudy(); shown in the legend. */
+  name: string;
+  /** Exact-match lookup aliases (e.g. "moving average exponential"). */
+  aliases?: string[];
+  /** Loose substrings that also match (e.g. "exponential" → EMA). */
+  keywords?: string[];
+  /** "overlay" plots on the price pane; "pane" renders in its own sub-pane. */
+  pane: "overlay" | "pane";
+  defaults?: { length?: number; color?: string };
+  /** Fixed sub-pane value range (e.g. RSI 0–100). Auto-fits to visible values when omitted. */
+  range?: { min: number; max: number };
+  /** Horizontal guide levels drawn in the sub-pane. */
+  levels?: StudyPaneLevel[];
+  /** Sub-pane corner label; defaults to `name`. */
+  label?: string;
+  /** Legend value formatter; defaults to price formatting (overlay) or 1 decimal (pane). */
+  formatValue?: (value: number) => string;
+  /** Values aligned 1:1 with `bars`; null = warm-up gap. Must be pure. */
+  compute: (bars: Bar[], inputs: { length: number }) => (number | null)[];
+}
+
+export interface IndicatorPreset {
+  /** Row label; defaults to `"<name> <length>"`. */
+  label?: string;
+  /** Study name resolved against built-ins + `custom_studies`. */
+  name: string;
+  length?: number;
+  color?: string;
+}
+
+export interface RazeChartsOptions {
+  /** Left-sidebar layout (builtin ids, "separator", custom buttons). Defaults to the full built-in set. */
+  sidebar?: SidebarItem[];
+  /** Styles offered by the chart-type picker. Defaults to all four. */
+  chart_types?: ChartStyleName[];
+  /** Rows of the Indicators panel. Defaults to EMA 9/21, SMA 20/50, RSI 14 + one row per custom study. */
+  indicator_presets?: IndicatorPreset[];
+  /** Extra studies available to createStudy() and the Indicators panel. */
+  custom_studies?: StudyDefinition[];
+}
+
 export interface ChartingLibraryWidgetOptions {
   symbol: string;
   datafeed: IBasicDataFeed;
@@ -334,6 +405,10 @@ export interface ChartingLibraryWidgetOptions {
   width?: number;
   height?: number;
   toolbar_bg?: string;
+  /** TV-compatible favorites; `intervals` drives the header interval row. */
+  favorites?: { intervals?: ResolutionString[]; [key: string]: unknown };
+  /** Raze-charts chrome configuration (ignored by the real TradingView library). */
+  raze?: RazeChartsOptions;
   [key: string]: unknown;
 }
 

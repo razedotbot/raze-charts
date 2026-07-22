@@ -12,7 +12,7 @@
 //   │ time axis (bottom)                  │
 //   └─────────────────────────────────────┘
 
-import type { Bar, Mark, MarkCustomColor, ShapePoint } from "../types/charting_library";
+import type { Bar, Mark, MarkCustomColor, ShapePoint, StudyDefinition } from "../types/charting_library";
 import type { ChartContext, DrawingTool } from "../core/context";
 import type { ChartEngine } from "./ChartEngine";
 import type { ShapeStore, StoredShape } from "../core/ShapeStore";
@@ -29,7 +29,9 @@ const TIME_AXIS_H = 22;
 const MIN_BAR_SPACING = 1.5;
 const MAX_BAR_SPACING = 64;
 const VOLUME_FRACTION = 0.16; // bottom 16% of the main plot reserved for volume bars
-const RSI_PANE_FRACTION = 0.22; // of full canvas height when RSI is active
+const SUB_PANE_FRACTION = 0.22; // of full canvas height per study sub-pane (RSI, custom panes)
+const SUB_PANES_MAX_FRACTION = 0.45; // all sub-panes together never squeeze the main plot below ~55%
+const SUB_PANE_GAP = 3;
 const CANDLE_MAX_WIDTH = 18;  // cap so few-bar charts don't render giant blocks
 
 // Round time-step boundaries (ms) for time-axis gridlines, ascending.
@@ -56,8 +58,8 @@ export class ChartRenderer {
   private plotT = 0;
   private plotW = 0;
   private plotH = 0;
-  private rsiT = 0;
-  private rsiH = 0;
+  /** One entry per active pane-study definition, top-to-bottom below the main plot. */
+  private subPanes: { def: StudyDefinition; top: number; h: number; min: number; max: number }[] = [];
   private priceAxisW = PRICE_AXIS_W_DEFAULT; // widened to fit the widest label
   private priceMin = 0;
   private priceMax = 1;
@@ -233,9 +235,10 @@ export class ChartRenderer {
     return formatPrice(price, pricescale);
   }
 
-  /** Top of the time-axis strip (below main plot, or below RSI when present). */
+  /** Top of the time-axis strip (below main plot, or below the last sub-pane). */
   private timeAxisTop(): number {
-    return this.rsiH > 0 ? this.rsiT + this.rsiH : this.plotT + this.plotH;
+    const last = this.subPanes[this.subPanes.length - 1];
+    return last ? last.top + last.h : this.plotT + this.plotH;
   }
 
   /** Public: time (unix seconds) + price under a canvas pixel — for onContextMenu
@@ -336,16 +339,23 @@ export class ChartRenderer {
     const H = this.engine.cssHeight;
     if (W <= 0 || H <= 0) return;
 
-    const hasRsi = this.studies.hasRsi();
-    const rsiPane = hasRsi ? Math.max(48, Math.floor(H * RSI_PANE_FRACTION)) : 0;
-    const paneGap = hasRsi ? 3 : 0;
+    const paneDefs = this.studies.paneDefs();
+    const nPanes = paneDefs.length;
+    const paneFrac = nPanes ? Math.min(SUB_PANE_FRACTION, SUB_PANES_MAX_FRACTION / nPanes) : 0;
+    const paneH = nPanes ? Math.max(48, Math.floor(H * paneFrac)) : 0;
+    const panesTotal = nPanes * (paneH + SUB_PANE_GAP);
 
     this.plotL = 0;
     this.plotT = 0;
     this.plotW = Math.max(1, W - this.priceAxisW);
-    this.plotH = Math.max(1, H - TIME_AXIS_H - rsiPane - paneGap);
-    this.rsiT = this.plotT + this.plotH + paneGap;
-    this.rsiH = rsiPane;
+    this.plotH = Math.max(1, H - TIME_AXIS_H - panesTotal);
+    this.subPanes = paneDefs.map((def, i) => ({
+      def,
+      top: this.plotT + this.plotH + SUB_PANE_GAP + i * (paneH + SUB_PANE_GAP),
+      h: paneH,
+      min: 0,
+      max: 1,
+    }));
 
     this.refreshSeriesBars();
     this.computePriceRange();
@@ -366,7 +376,7 @@ export class ChartRenderer {
     this.drawDraft(ctx);
     this.drawMarks(ctx);
     this.drawPriceAxis(ctx, priceTicks);
-    if (hasRsi) this.drawRsiPane(ctx, timeTicks);
+    this.drawSubPanes(ctx, timeTicks);
     this.drawTimeAxis(ctx, timeTicks);
     this.drawLastPrice(ctx);
     this.drawCrosshair(ctx);
@@ -385,7 +395,7 @@ export class ChartRenderer {
         visibleRange: { ...this.context.visibleRange },
         priceMin: this.priceMin, priceMax: this.priceMax,
         firstBarClose: bars[0]?.close, lastBarClose: bars[bars.length - 1]?.close,
-        studies: this.studies.list().map((s) => ({ id: s.id, kind: s.kind, length: s.length })),
+        studies: this.studies.list().map((s) => ({ id: s.id, name: s.name, length: s.length })),
       };
     }
 
@@ -394,71 +404,102 @@ export class ChartRenderer {
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(this.plotL + this.plotW + 0.5, 0);
-    ctx.lineTo(this.plotL + this.plotW + 0.5, this.plotT + this.plotH + this.rsiH + paneGap);
+    ctx.lineTo(this.plotL + this.plotW + 0.5, this.timeAxisTop());
     ctx.moveTo(0, this.plotT + this.plotH + 0.5);
     ctx.lineTo(W, this.plotT + this.plotH + 0.5);
-    if (hasRsi) {
-      ctx.moveTo(0, this.rsiT + this.rsiH + 0.5);
-      ctx.lineTo(W, this.rsiT + this.rsiH + 0.5);
+    for (const p of this.subPanes) {
+      ctx.moveTo(0, p.top + p.h + 0.5);
+      ctx.lineTo(W, p.top + p.h + 0.5);
     }
     ctx.stroke();
   }
 
   private drawOverlayStudies(ctx: CanvasRenderingContext2D): void {
     for (const s of this.studies.list()) {
-      if (s.pane !== "overlay") continue;
+      if (s.def.pane !== "overlay") continue;
       this.strokeStudyLine(ctx, s.values, s.color, (v) => this.yForPrice(v), this.plotT, this.plotT + this.plotH);
     }
   }
 
-  private drawRsiPane(
+  /** Value range of a sub-pane: the definition's fixed range, or auto-fit to
+   *  the visible values of its studies. */
+  private subPaneRange(def: StudyDefinition): { min: number; max: number } {
+    if (def.range) return def.range;
+    const { from, to } = this.context.visibleRange;
+    const start = Math.max(0, Math.floor(from) - 1);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const s of this.studies.paneStudies(def)) {
+      const end = Math.min(s.values.length - 1, Math.ceil(to) + 1);
+      for (let i = start; i <= end; i++) {
+        const v = s.values[i];
+        if (v == null || !Number.isFinite(v)) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { min: 0, max: 1 };
+    if (lo === hi) return { min: lo - 1, max: hi + 1 };
+    const pad = (hi - lo) * 0.1;
+    return { min: lo - pad, max: hi + pad };
+  }
+
+  private drawSubPanes(
     ctx: CanvasRenderingContext2D,
     timeTicks: { index: number; time: number }[],
   ): void {
-    if (this.rsiH <= 0) return;
     const t = this.context.theme;
-    const yForRsi = (v: number): number => {
-      const clamped = Math.max(0, Math.min(100, v));
-      return this.rsiT + (100 - clamped) / 100 * this.rsiH;
-    };
+    for (const pane of this.subPanes) {
+      const { def } = pane;
+      const range = this.subPaneRange(def);
+      pane.min = range.min;
+      pane.max = range.max;
+      const span = Math.max(1e-12, range.max - range.min);
+      const yFor = (v: number): number => {
+        const clamped = Math.max(range.min, Math.min(range.max, v));
+        return pane.top + ((range.max - clamped) / span) * pane.h;
+      };
 
-    ctx.fillStyle = t.paneBackground;
-    ctx.fillRect(this.plotL, this.rsiT, this.plotW, this.rsiH);
-    ctx.strokeStyle = t.horzGrid;
-    ctx.lineWidth = 1;
-    for (const level of [30, 50, 70]) {
-      const y = Math.round(yForRsi(level)) + 0.5;
+      ctx.fillStyle = t.paneBackground;
+      ctx.fillRect(this.plotL, pane.top, this.plotW, pane.h);
+
+      const levels = def.levels ?? [];
+      ctx.strokeStyle = t.horzGrid;
+      ctx.lineWidth = 1;
+      for (const level of levels) {
+        const y = Math.round(yFor(level.value)) + 0.5;
+        ctx.beginPath();
+        ctx.setLineDash(level.dashed ? [3, 3] : []);
+        ctx.moveTo(this.plotL, y);
+        ctx.lineTo(this.plotL + this.plotW, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.strokeStyle = t.vertGrid;
       ctx.beginPath();
-      ctx.setLineDash(level === 50 ? [3, 3] : []);
-      ctx.moveTo(this.plotL, y);
-      ctx.lineTo(this.plotL + this.plotW, y);
+      for (const tk of timeTicks) {
+        const x = Math.round(this.xForIndex(tk.index)) + 0.5;
+        if (x < this.plotL || x > this.plotL + this.plotW) continue;
+        ctx.moveTo(x, pane.top);
+        ctx.lineTo(x, pane.top + pane.h);
+      }
       ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    ctx.strokeStyle = t.vertGrid;
-    ctx.beginPath();
-    for (const tk of timeTicks) {
-      const x = Math.round(this.xForIndex(tk.index)) + 0.5;
-      if (x < this.plotL || x > this.plotL + this.plotW) continue;
-      ctx.moveTo(x, this.rsiT);
-      ctx.lineTo(x, this.rsiT + this.rsiH);
-    }
-    ctx.stroke();
 
-    for (const s of this.studies.list()) {
-      if (s.pane !== "rsi") continue;
-      this.strokeStudyLine(ctx, s.values, s.color, yForRsi, this.rsiT, this.rsiT + this.rsiH);
-    }
+      for (const s of this.studies.paneStudies(def)) {
+        this.strokeStudyLine(ctx, s.values, s.color, yFor, pane.top, pane.top + pane.h);
+      }
 
-    ctx.fillStyle = t.scaleText;
-    ctx.font = `10px ${this.context.fontFamily}`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    for (const level of [30, 70]) {
-      ctx.fillText(String(level), this.plotL + this.plotW + 6, yForRsi(level));
+      ctx.fillStyle = t.scaleText;
+      ctx.font = `10px ${this.context.fontFamily}`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      for (const level of levels) {
+        if (!level.axisLabel) continue;
+        ctx.fillText(String(level.value), this.plotL + this.plotW + 6, yFor(level.value));
+      }
+      ctx.textBaseline = "top";
+      ctx.fillText(def.label ?? def.name, this.plotL + 6, pane.top + 4);
     }
-    ctx.textBaseline = "top";
-    ctx.fillText("RSI", this.plotL + 6, this.rsiT + 4);
   }
 
   private strokeStudyLine(
@@ -1228,14 +1269,11 @@ export class ChartRenderer {
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    // Vertical through main + RSI panes — at the actual pointer X.
+    // Vertical through main + study sub-panes — at the actual pointer X.
     ctx.moveTo(Math.round(x) + 0.5, this.plotT);
     ctx.lineTo(Math.round(x) + 0.5, contentBottom);
     // Horizontal only in the pane under the cursor.
-    if (inMainPane) {
-      ctx.moveTo(this.plotL, Math.round(y) + 0.5);
-      ctx.lineTo(this.plotL + this.plotW, Math.round(y) + 0.5);
-    } else if (this.rsiH > 0 && y >= this.rsiT) {
+    if (inMainPane || this.subPanes.some((p) => y >= p.top && y <= p.top + p.h)) {
       ctx.moveTo(this.plotL, Math.round(y) + 0.5);
       ctx.lineTo(this.plotL + this.plotW, Math.round(y) + 0.5);
     }
@@ -1275,6 +1313,7 @@ export class ChartRenderer {
   }
 
   private drawLegend(ctx: CanvasRenderingContext2D): void {
+    if (!this.context.features.has("legend_widget")) return;
     const bars = this.context.bars;
     if (!bars.length) return;
     const idx = this.crosshair.active
@@ -1322,8 +1361,12 @@ export class ChartRenderer {
     for (const s of this.studies.list()) {
       const v = s.values[idx];
       if (v == null || !Number.isFinite(v)) continue;
-      const label = `${s.kind}${s.length}`;
-      const value = s.kind === "RSI" ? v.toFixed(1) : f(v);
+      const label = `${s.name}${s.length}`;
+      const value = s.def.formatValue
+        ? s.def.formatValue(v)
+        : s.def.pane === "pane"
+          ? v.toFixed(1)
+          : f(v);
       ctx.fillStyle = dim;
       ctx.fillText(label, x, y);
       x += ctx.measureText(label).width + 3;

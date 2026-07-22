@@ -22,10 +22,11 @@ import { ChartRenderer } from "../engine/ChartRenderer";
 import { Toolbar } from "../ui/Toolbar";
 import { IntervalSelector } from "../ui/IntervalSelector";
 import { LoadingScreen } from "../ui/LoadingScreen";
-import { IndicatorsMenu } from "../ui/IndicatorsMenu";
-import { LeftSidebar, type ChartStyleId } from "../ui/LeftSidebar";
+import { IndicatorsMenu, resolveIndicatorPresets } from "../ui/IndicatorsMenu";
+import { DEFAULT_SIDEBAR_ITEMS, LeftSidebar, type ChartStyleId } from "../ui/LeftSidebar";
 import { ScaleBar } from "../ui/ScaleBar";
 import { StudyStore } from "../studies/StudyStore";
+import { StudyRegistry } from "../studies/registry";
 import { showContextMenu, closeContextMenu } from "../ui/ContextMenu";
 
 const DEFAULT_FONT = "'Trebuchet MS', Roboto, Ubuntu, sans-serif";
@@ -68,8 +69,9 @@ export class Widget implements IChartingLibraryWidget {
     const fontFamily = options.custom_font_family || DEFAULT_FONT;
     const theme = buildTheme(options);
     const features = buildFeatureSet(options);
-    this.showHeader = !(options.disabled_features ?? []).includes("header_widget");
-    this.showLeftToolbar = !(options.disabled_features ?? []).includes("left_toolbar");
+    const raze = options.raze;
+    this.showHeader = features.has("header_widget");
+    this.showLeftToolbar = features.has("left_toolbar");
 
     const initialRange: IndexRange = { from: 0, to: 1 };
     this.context = {
@@ -124,27 +126,32 @@ export class Widget implements IChartingLibraryWidget {
     this.root.appendChild(this.bodyRow);
 
     if (this.showLeftToolbar) {
-      this.leftSidebar = new LeftSidebar(this.context, {
-        onTool: (tool) => {
-          this.context.drawingTool = tool;
-          this.renderer.cancelDraft();
-          this.leftSidebar?.setTool(tool);
-          this.context.requestPaint();
+      this.leftSidebar = new LeftSidebar(
+        this.context,
+        {
+          onTool: (tool) => {
+            this.context.drawingTool = tool;
+            this.renderer.cancelDraft();
+            this.leftSidebar?.setTool(tool);
+            this.context.requestPaint();
+          },
+          onIndicatorsClick: (anchor) => {
+            this.indicatorsMenu?.toggle(anchor);
+          },
+          onFit: () => this.renderer.fitContent(),
+          onScreenshot: () => this.renderer.takeScreenshot(),
+          onFullscreen: () => this.toggleFullscreen(),
+          onChartType: (style: ChartStyleId) => {
+            this.context.chartStyle = style;
+            this.leftSidebar?.setChartStyle(style);
+            this.context.autoScalePrice = true;
+            this.context.priceRange = null;
+            this.context.requestPaint();
+          },
         },
-        onIndicatorsClick: (anchor) => {
-          this.indicatorsMenu?.toggle(anchor);
-        },
-        onFit: () => this.renderer.fitContent(),
-        onScreenshot: () => this.renderer.takeScreenshot(),
-        onFullscreen: () => this.toggleFullscreen(),
-        onChartType: (style: ChartStyleId) => {
-          this.context.chartStyle = style;
-          this.leftSidebar?.setChartStyle(style);
-          this.context.autoScalePrice = true;
-          this.context.priceRange = null;
-          this.context.requestPaint();
-        },
-      });
+        raze?.sidebar ?? DEFAULT_SIDEBAR_ITEMS,
+        raze?.chart_types,
+      );
       this.bodyRow.appendChild(this.leftSidebar.el);
     }
 
@@ -154,7 +161,9 @@ export class Widget implements IChartingLibraryWidget {
 
     this.data = new DataManager(this.context);
     this.shapes = new ShapeStore(this.context);
-    this.studies = new StudyStore(this.context);
+    const registry = new StudyRegistry();
+    for (const def of raze?.custom_studies ?? []) registry.register(def);
+    this.studies = new StudyStore(this.context, registry);
     this.engine = new ChartEngine(this.chartArea, this.context);
     this.renderer = new ChartRenderer(this.context, this.engine, this.shapes, this.data, this.studies);
     this.renderer.setToolDoneHandler((tool) => {
@@ -162,16 +171,22 @@ export class Widget implements IChartingLibraryWidget {
       this.leftSidebar?.setTool(tool);
     });
 
-    this.scaleBar = new ScaleBar(this.context, () => {
-      this.scaleBar?.sync();
-      this.context.requestPaint();
-    });
-    this.chartArea.appendChild(this.scaleBar.el);
+    if (features.has("scale_bar")) {
+      this.scaleBar = new ScaleBar(this.context, () => {
+        this.scaleBar?.sync();
+        this.context.requestPaint();
+      });
+      this.chartArea.appendChild(this.scaleBar.el);
+    }
 
     this.loading = new LoadingScreen(options.loading_screen, theme.paneBackground);
     this.chartArea.appendChild(this.loading.el);
 
-    this.indicatorsMenu = new IndicatorsMenu(this.context, this.studies);
+    this.indicatorsMenu = new IndicatorsMenu(
+      this.context,
+      this.studies,
+      resolveIndicatorPresets(raze, registry),
+    );
 
     const deps: ChartApiDeps = {
       refreshMarks: () => this.data.refreshMarks(),
@@ -195,14 +210,12 @@ export class Widget implements IChartingLibraryWidget {
       },
       removeAllShapes: () => this.shapes.removeAll(),
       createStudy: (name, _force, _lock, inputs) => {
-        const kind = StudyStore.parseName(name);
-        if (!kind) return Promise.reject(new Error(`[raze-charts] unknown study: ${name}`));
         const lengthRaw = inputs?.length ?? inputs?.Length ?? inputs?.periods;
-        const length = typeof lengthRaw === "number" && Number.isFinite(lengthRaw)
-          ? lengthRaw
-          : StudyStore.defaultLength(kind);
+        const length = typeof lengthRaw === "number" && Number.isFinite(lengthRaw) ? lengthRaw : 0;
         const color = typeof inputs?.color === "string" ? inputs.color : "";
-        return Promise.resolve(this.studies.add({ kind, length, color }));
+        const id = this.studies.add({ name, length, color });
+        if (!id) return Promise.reject(new Error(`[raze-charts] unknown study: ${name}`));
+        return Promise.resolve(id);
       },
     };
     this.api = new ChartApi(this.context, deps);
@@ -238,11 +251,12 @@ export class Widget implements IChartingLibraryWidget {
     }
     if (this.destroyed) return;
 
-    if (this.toolbar) {
+    if (this.toolbar && this.context.features.has("header_resolutions")) {
       this.intervalSelector = new IntervalSelector(
         this.context,
         this.toolbar.intervalSlot,
         (res) => { void this.data.changeResolution(res); },
+        this.context.options.favorites?.intervals?.map(String),
       );
       this.context.intervalChanged.subscribe(null, ((res: ResolutionString) => {
         this.intervalSelector?.setActive(String(res));

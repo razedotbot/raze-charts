@@ -47,15 +47,17 @@ export { ChartRenderer } from "./engine/ChartRenderer";
 
 // ── Studies (indicator math is pure and dependency-free) ────────────────────
 export { closesFromBars, ema, rsi, sma } from "./studies/calc";
+export { BUILTIN_STUDIES, StudyRegistry } from "./studies/registry";
 export { StudyStore } from "./studies/StudyStore";
 export type { StudyInstance, StudyKind, StudySpec } from "./studies/StudyStore";
 
 // ── UI chrome ───────────────────────────────────────────────────────────────
 export { Toolbar, TOOLBAR_HEIGHT } from "./ui/Toolbar";
-export { LeftSidebar, LEFT_SIDEBAR_W } from "./ui/LeftSidebar";
+export { DEFAULT_SIDEBAR_ITEMS, LeftSidebar, LEFT_SIDEBAR_W } from "./ui/LeftSidebar";
 export type { ChartStyleId, LeftSidebarCallbacks } from "./ui/LeftSidebar";
-export { IndicatorsMenu } from "./ui/IndicatorsMenu";
-export { IntervalSelector } from "./ui/IntervalSelector";
+export { DEFAULT_INDICATOR_PRESETS, IndicatorsMenu, resolveIndicatorPresets } from "./ui/IndicatorsMenu";
+export type { ResolvedIndicatorPreset } from "./ui/IndicatorsMenu";
+export { DEFAULT_INTERVAL_FAVORITES, IntervalSelector } from "./ui/IntervalSelector";
 export { ScaleBar } from "./ui/ScaleBar";
 export { LoadingScreen } from "./ui/LoadingScreen";
 export { closeContextMenu, showContextMenu } from "./ui/ContextMenu";

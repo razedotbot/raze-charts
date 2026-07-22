@@ -3,9 +3,11 @@
 
 import type {
   ChartingLibraryWidgetOptions,
+  ChartStyleName,
   IBasicDataFeed,
   LibrarySymbolInfo,
   ResolutionString,
+  SidebarToolId,
 } from "../types/charting_library";
 import { Delegate } from "../util/delegate";
 import type { Bar, Mark } from "../types/charting_library";
@@ -39,16 +41,10 @@ export interface IndexRange {
 }
 
 /** Active drawing tool (left sidebar). `cursor` = pan / select. */
-export type DrawingTool =
-  | "cursor"
-  | "trend_line"
-  | "horizontal_line"
-  | "fib_retracement"
-  | "rectangle"
-  | "text";
+export type DrawingTool = SidebarToolId;
 
 /** Main series render style. */
-export type ChartStyle = "candles" | "line" | "area" | "heikin_ashi";
+export type ChartStyle = ChartStyleName;
 
 export interface ChartContext {
   readonly options: ChartingLibraryWidgetOptions;
@@ -98,7 +94,14 @@ export interface ChartContext {
   requestPaint(): void;
 }
 
-const FEATURE_DEFAULTS_ON = new Set<string>([]);
+/** Chrome featuresets that are ON unless listed in `disabled_features`. */
+const FEATURE_DEFAULTS_ON = new Set<string>([
+  "header_widget",
+  "header_resolutions",
+  "left_toolbar",
+  "legend_widget",
+  "scale_bar",
+]);
 
 export function buildFeatureSet(opts: ChartingLibraryWidgetOptions): Set<string> {
   const set = new Set<string>(FEATURE_DEFAULTS_ON);

@@ -1,8 +1,14 @@
-// Left drawing toolbar — TV chrome parity. Hosts tool picker + Indicators
-// trigger. Hidden when `left_toolbar` is in disabled_features (minimal/chrome-less).
+// Left toolbar — TV chrome parity, fully composable. The item list comes from
+// `options.raze.sidebar` (builtin ids, "separator", custom buttons); the
+// chart-type picker honours `options.raze.chart_types`. Hidden entirely when
+// `left_toolbar` is in disabled_features (minimal/chrome-less).
 
-import type { ChartContext } from "../core/context";
-import type { DrawingTool } from "../core/context";
+import type {
+  ChartStyleName,
+  SidebarCustomItem,
+  SidebarItem,
+} from "../types/charting_library";
+import type { ChartContext, DrawingTool } from "../core/context";
 
 export const LEFT_SIDEBAR_W = 42;
 
@@ -15,14 +21,7 @@ export interface LeftSidebarCallbacks {
   onChartType(style: ChartStyleId): void;
 }
 
-export type ChartStyleId = "candles" | "line" | "area" | "heikin_ashi";
-
-interface ToolDef {
-  id: DrawingTool | "indicators" | "fit" | "screenshot" | "fullscreen";
-  title: string;
-  svg: string;
-  group: "tools" | "studies" | "actions";
-}
+export type ChartStyleId = ChartStyleName;
 
 const ICON = {
   cursor: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 2.5L4 14.5L7.2 11.2L9.1 15.5L11 14.7L9.1 10.4L13.5 10.4L4 2.5Z" fill="currentColor"/></svg>`,
@@ -38,20 +37,37 @@ const ICON = {
   candles: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M5 3V15M5 6H7V12H3V6H5ZM13 3V15M13 5H15V11H11V5H13Z" fill="currentColor"/></svg>`,
 };
 
-const TOOLS: ToolDef[] = [
-  { id: "cursor", title: "Cursor / pan", svg: ICON.cursor, group: "tools" },
-  { id: "trend_line", title: "Trend line", svg: ICON.trend, group: "tools" },
-  { id: "horizontal_line", title: "Horizontal line", svg: ICON.hline, group: "tools" },
-  { id: "fib_retracement", title: "Fib retracement", svg: ICON.fib, group: "tools" },
-  { id: "rectangle", title: "Rectangle", svg: ICON.rect, group: "tools" },
-  { id: "text", title: "Text", svg: ICON.text, group: "tools" },
-  { id: "indicators", title: "Indicators", svg: ICON.indicators, group: "studies" },
-  { id: "fit", title: "Fit content (F)", svg: ICON.fit, group: "actions" },
-  { id: "screenshot", title: "Screenshot", svg: ICON.camera, group: "actions" },
-  { id: "fullscreen", title: "Fullscreen", svg: ICON.fullscreen, group: "actions" },
+const TOOL_IDS: ReadonlySet<string> = new Set([
+  "cursor", "trend_line", "horizontal_line", "fib_retracement", "rectangle", "text",
+]);
+
+/** Builtin item id → button title + icon. */
+const BUILTIN: Record<string, { title: string; svg: string }> = {
+  cursor: { title: "Cursor / pan", svg: ICON.cursor },
+  trend_line: { title: "Trend line", svg: ICON.trend },
+  horizontal_line: { title: "Horizontal line", svg: ICON.hline },
+  fib_retracement: { title: "Fib retracement", svg: ICON.fib },
+  rectangle: { title: "Rectangle", svg: ICON.rect },
+  text: { title: "Text", svg: ICON.text },
+  indicators: { title: "Indicators", svg: ICON.indicators },
+  fit: { title: "Fit content (F)", svg: ICON.fit },
+  screenshot: { title: "Screenshot", svg: ICON.camera },
+  fullscreen: { title: "Fullscreen", svg: ICON.fullscreen },
+  chart_type: { title: "Chart type", svg: ICON.candles },
+};
+
+/** The stock layout — what you get with no `raze.sidebar` option. */
+export const DEFAULT_SIDEBAR_ITEMS: SidebarItem[] = [
+  "cursor", "trend_line", "horizontal_line", "fib_retracement", "rectangle", "text",
+  "separator",
+  "indicators",
+  "separator",
+  "fit", "screenshot", "fullscreen",
+  "separator",
+  "chart_type",
 ];
 
-const CHART_STYLES: { id: ChartStyleId; title: string; svg: string }[] = [
+const ALL_CHART_STYLES: { id: ChartStyleId; title: string; svg: string }[] = [
   { id: "candles", title: "Candles", svg: ICON.candles },
   {
     id: "line",
@@ -73,16 +89,23 @@ const CHART_STYLES: { id: ChartStyleId; title: string; svg: string }[] = [
 export class LeftSidebar {
   readonly el: HTMLDivElement;
   private toolBtns = new Map<string, HTMLButtonElement>();
-  private styleBtn: HTMLButtonElement;
+  private styleBtn: HTMLButtonElement | null = null;
   private stylePanel: HTMLDivElement | null = null;
   private activeTool: DrawingTool = "cursor";
   private chartStyle: ChartStyleId = "candles";
   private onDoc: ((e: MouseEvent) => void) | null = null;
+  private readonly chartStyles: typeof ALL_CHART_STYLES;
 
   constructor(
     private readonly context: ChartContext,
     private readonly cbs: LeftSidebarCallbacks,
+    items: SidebarItem[] = DEFAULT_SIDEBAR_ITEMS,
+    chartTypes?: ChartStyleName[],
   ) {
+    this.chartStyles = chartTypes
+      ? ALL_CHART_STYLES.filter((s) => chartTypes.includes(s.id))
+      : ALL_CHART_STYLES;
+
     this.el = document.createElement("div");
     this.el.className = "raze-chart-left-sidebar";
     this.el.style.cssText = [
@@ -103,86 +126,114 @@ export class LeftSidebar {
       "position:relative",
     ].join(";");
 
-    const mkBtn = (title: string, svg: string): HTMLButtonElement => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.title = title;
-      b.innerHTML = svg;
-      b.style.cssText = [
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "width:32px",
-        "height:32px",
-        "border:0",
-        "border-radius:6px",
-        "background:transparent",
-        "color:inherit",
-        "cursor:pointer",
-        "padding:0",
-        "flex:0 0 auto",
-      ].join(";");
-      b.addEventListener("mouseenter", () => {
-        if (b.dataset.active !== "1") b.style.background = "rgba(255,255,255,0.06)";
-      });
-      b.addEventListener("mouseleave", () => {
-        if (b.dataset.active !== "1") b.style.background = "transparent";
-      });
-      return b;
-    };
-
-    const addSep = (): void => {
-      const s = document.createElement("div");
-      s.style.cssText = "width:22px;height:1px;background:var(--tv-color-toolbar-divider-background,#363a45);margin:4px 0;";
-      this.el.appendChild(s);
-    };
-
-    let lastGroup: string | null = null;
-    for (const t of TOOLS) {
-      if (lastGroup && lastGroup !== t.group) addSep();
-      lastGroup = t.group;
-      const b = mkBtn(t.title, t.svg);
-      this.toolBtns.set(t.id, b);
-      if (t.id === "indicators") {
-        b.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this.cbs.onIndicatorsClick(b);
-        });
-      } else if (t.id === "fit") {
-        b.addEventListener("click", (e) => { e.stopPropagation(); this.cbs.onFit(); });
-      } else if (t.id === "screenshot") {
-        b.addEventListener("click", (e) => { e.stopPropagation(); this.cbs.onScreenshot(); });
-      } else if (t.id === "fullscreen") {
-        b.addEventListener("click", (e) => { e.stopPropagation(); this.cbs.onFullscreen(); });
-      } else {
-        b.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this.setTool(t.id as DrawingTool);
-          this.cbs.onTool(t.id as DrawingTool);
-        });
-      }
-      this.el.appendChild(b);
+    for (const item of items) {
+      this.appendItem(item);
     }
-
-    addSep();
-    this.styleBtn = mkBtn("Chart type", ICON.candles);
-    this.styleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (this.stylePanel) this.closeStylePanel();
-      else this.openStylePanel();
-    });
-    this.el.appendChild(this.styleBtn);
 
     this.setTool("cursor");
     this.setChartStyle("candles");
   }
 
+  private appendItem(item: SidebarItem): void {
+    if (item === "separator") {
+      this.addSep();
+      return;
+    }
+    if (typeof item !== "string") {
+      this.appendCustom(item);
+      return;
+    }
+    const def = BUILTIN[item];
+    if (!def) {
+      console.warn(`[raze-charts] unknown sidebar item: ${item}`);
+      return;
+    }
+    if (item === "chart_type") {
+      this.styleBtn = this.mkBtn(def.title, def.svg);
+      this.styleBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (this.stylePanel) this.closeStylePanel();
+        else this.openStylePanel();
+      });
+      this.el.appendChild(this.styleBtn);
+      return;
+    }
+    const b = this.mkBtn(def.title, def.svg);
+    this.toolBtns.set(item, b);
+    if (item === "indicators") {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.cbs.onIndicatorsClick(b);
+      });
+    } else if (item === "fit") {
+      b.addEventListener("click", (e) => { e.stopPropagation(); this.cbs.onFit(); });
+    } else if (item === "screenshot") {
+      b.addEventListener("click", (e) => { e.stopPropagation(); this.cbs.onScreenshot(); });
+    } else if (item === "fullscreen") {
+      b.addEventListener("click", (e) => { e.stopPropagation(); this.cbs.onFullscreen(); });
+    } else {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.setTool(item as DrawingTool);
+        this.cbs.onTool(item as DrawingTool);
+      });
+    }
+    this.el.appendChild(b);
+  }
+
+  private appendCustom(item: SidebarCustomItem): void {
+    const b = this.mkBtn(item.title, item.icon);
+    b.dataset.customId = item.id;
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      try {
+        item.onClick();
+      } catch (err) {
+        console.warn(`[raze-charts] sidebar item "${item.id}" onClick failed`, err);
+      }
+    });
+    this.toolBtns.set(item.id, b);
+    this.el.appendChild(b);
+  }
+
+  private mkBtn(title: string, svg: string): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.title = title;
+    b.innerHTML = svg;
+    b.style.cssText = [
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "width:32px",
+      "height:32px",
+      "border:0",
+      "border-radius:6px",
+      "background:transparent",
+      "color:inherit",
+      "cursor:pointer",
+      "padding:0",
+      "flex:0 0 auto",
+    ].join(";");
+    b.addEventListener("mouseenter", () => {
+      if (b.dataset.active !== "1") b.style.background = "rgba(255,255,255,0.06)";
+    });
+    b.addEventListener("mouseleave", () => {
+      if (b.dataset.active !== "1") b.style.background = "transparent";
+    });
+    return b;
+  }
+
+  private addSep(): void {
+    const s = document.createElement("div");
+    s.style.cssText = "width:22px;height:1px;background:var(--tv-color-toolbar-divider-background,#363a45);margin:4px 0;";
+    this.el.appendChild(s);
+  }
+
   setTool(tool: DrawingTool): void {
     this.activeTool = tool;
     for (const [id, b] of this.toolBtns) {
-      const isTool = id === "cursor" || id === "trend_line" || id === "horizontal_line"
-        || id === "fib_retracement" || id === "rectangle" || id === "text";
-      if (!isTool) continue;
+      if (!TOOL_IDS.has(id)) continue;
       const on = id === tool;
       b.dataset.active = on ? "1" : "0";
       b.style.background = on ? "rgba(102,216,158,0.18)" : "transparent";
@@ -196,7 +247,9 @@ export class LeftSidebar {
 
   setChartStyle(style: ChartStyleId): void {
     this.chartStyle = style;
-    const def = CHART_STYLES.find((s) => s.id === style) ?? CHART_STYLES[0]!;
+    if (!this.styleBtn) return;
+    const def = this.chartStyles.find((s) => s.id === style) ?? ALL_CHART_STYLES.find((s) => s.id === style);
+    if (!def) return;
     this.styleBtn.innerHTML = def.svg;
     this.styleBtn.title = `Chart type: ${def.title}`;
   }
@@ -219,7 +272,7 @@ export class LeftSidebar {
       "font-size:12px",
       "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
     ].join(";");
-    for (const s of CHART_STYLES) {
+    for (const s of this.chartStyles) {
       const row = document.createElement("button");
       row.type = "button";
       const on = s.id === this.chartStyle;

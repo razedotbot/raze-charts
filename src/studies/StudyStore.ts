@@ -1,41 +1,51 @@
-// Active studies on a chart. Recomputes when bars change; overlays (EMA/SMA)
-// share the price pane, RSI gets a dedicated sub-pane.
+// Active studies on a chart. Recomputes when bars change; overlay studies
+// share the price pane, pane studies render in per-definition sub-panes.
+// Which studies exist at all is the StudyRegistry's business — this store only
+// tracks live instances.
 
-import type { EntityId } from "../types/charting_library";
+import type { EntityId, StudyDefinition } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
-import { closesFromBars, ema, rsi, sma } from "./calc";
+import { StudyRegistry } from "./registry";
 
-export type StudyKind = "SMA" | "EMA" | "RSI";
+/** @deprecated Studies are registry-driven; any registered name is valid. */
+export type StudyKind = string;
 
 export interface StudySpec {
-  kind: StudyKind;
+  /** Study name resolved against the registry (built-ins + custom). */
+  name: string;
+  /** 0 / absent → the definition's default length. */
+  length?: number;
+  /** "" / absent → the definition's default color. */
+  color?: string;
+}
+
+export interface StudyInstance {
+  id: EntityId;
+  def: StudyDefinition;
+  /** Canonical definition name (legend label prefix). */
+  name: string;
   length: number;
   color: string;
-}
-
-export interface StudyInstance extends StudySpec {
-  id: EntityId;
   /** Values aligned with context.bars; null during warm-up. */
   values: (number | null)[];
-  pane: "overlay" | "rsi";
 }
 
-const DEFAULT_COLORS: Record<StudyKind, string> = {
-  EMA: "#f5a623",
-  SMA: "#2962ff",
-  RSI: "#7E57C2",
-};
+const FALLBACK_COLORS = ["#f5a623", "#26a69a", "#2962ff", "#e040fb", "#7E57C2"];
 
 let seq = 0;
-function nextId(kind: StudyKind): EntityId {
+function nextId(name: string): EntityId {
   seq += 1;
-  return `study_${kind.toLowerCase()}_${seq}` as EntityId;
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  return `study_${slug}_${seq}` as EntityId;
 }
 
 export class StudyStore {
   private items = new Map<EntityId, StudyInstance>();
 
-  constructor(private readonly context: ChartContext) {
+  constructor(
+    private readonly context: ChartContext,
+    readonly registry: StudyRegistry = new StudyRegistry(),
+  ) {
     this.context.dataChanged.subscribe(null, (() => this.recomputeAll()) as never);
   }
 
@@ -43,22 +53,33 @@ export class StudyStore {
     return Array.from(this.items.values());
   }
 
-  hasRsi(): boolean {
-    for (const s of this.items.values()) if (s.kind === "RSI") return true;
-    return false;
+  /** Distinct definitions of active sub-pane studies, in insertion order. */
+  paneDefs(): StudyDefinition[] {
+    const out: StudyDefinition[] = [];
+    for (const s of this.items.values()) {
+      if (s.def.pane === "pane" && !out.includes(s.def)) out.push(s.def);
+    }
+    return out;
   }
 
-  add(spec: StudySpec): EntityId {
-    const id = nextId(spec.kind);
-    const color = spec.color || DEFAULT_COLORS[spec.kind];
-    const pane = spec.kind === "RSI" ? "rsi" : "overlay";
+  /** Instances rendered in the sub-pane of `def`. */
+  paneStudies(def: StudyDefinition): StudyInstance[] {
+    return this.list().filter((s) => s.def === def);
+  }
+
+  /** Returns the new study id, or null when `spec.name` is not in the registry. */
+  add(spec: StudySpec): EntityId | null {
+    const def = this.registry.resolve(spec.name);
+    if (!def) return null;
+    const id = nextId(def.name);
+    const rawLength = spec.length || def.defaults?.length || 14;
     const study: StudyInstance = {
       id,
-      kind: spec.kind,
-      length: Math.max(1, Math.floor(spec.length)),
-      color,
+      def,
+      name: def.name,
+      length: Math.max(1, Math.floor(rawLength)),
+      color: spec.color || def.defaults?.color || FALLBACK_COLORS[this.items.size % FALLBACK_COLORS.length]!,
       values: [],
-      pane,
     };
     this.recompute(study);
     this.items.set(id, study);
@@ -82,29 +103,19 @@ export class StudyStore {
     return this.items.has(id);
   }
 
-  /** Map TV study names / short aliases → kind. */
-  static parseName(name: string): StudyKind | null {
-    const n = name.trim().toLowerCase();
-    if (n === "ema" || n.includes("exponential") || n === "moving average exponential") return "EMA";
-    if (n === "sma" || n === "ma" || n === "moving average" || n.includes("simple moving")) return "SMA";
-    if (n === "rsi" || n.includes("relative strength")) return "RSI";
-    return null;
-  }
-
-  static defaultLength(kind: StudyKind): number {
-    return kind === "RSI" ? 14 : kind === "EMA" ? 9 : 20;
-  }
-
   private recomputeAll(): void {
     for (const s of this.items.values()) this.recompute(s);
     this.context.requestPaint();
   }
 
   private recompute(study: StudyInstance): void {
-    const closes = closesFromBars(this.context.bars);
-    if (study.kind === "SMA") study.values = sma(closes, study.length);
-    else if (study.kind === "EMA") study.values = ema(closes, study.length);
-    else study.values = rsi(closes, study.length);
+    try {
+      const values = study.def.compute(this.context.bars, { length: study.length });
+      study.values = Array.isArray(values) ? values : [];
+    } catch (e) {
+      console.warn(`[raze-charts] study "${study.name}" compute failed`, e);
+      study.values = [];
+    }
   }
 
   destroy(): void {

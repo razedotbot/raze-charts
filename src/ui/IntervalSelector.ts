@@ -7,19 +7,23 @@ import type { ResolutionString } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
 import { resolutionLabel } from "../util/resolution";
 
-/** Inline favorites shown directly in the header (others go in the dropdown). */
-const FAVORITES = ["1S", "1", "5", "15", "60", "240", "1D"];
+/** Default inline favorites (others go in the dropdown). Overridden by the
+ *  TV-compatible `options.favorites.intervals`. */
+export const DEFAULT_INTERVAL_FAVORITES = ["1S", "1", "5", "15", "60", "240", "1D"];
 
 export class IntervalSelector {
   private buttons = new Map<string, HTMLDivElement>();
   private active: string;
   private dropdown: HTMLDivElement | null = null;
+  private readonly favorites: string[];
 
   constructor(
     private readonly context: ChartContext,
     private readonly mount: HTMLElement,
     private readonly onSelect: (res: ResolutionString) => void,
+    favorites?: string[],
   ) {
+    this.favorites = favorites && favorites.length ? favorites.map(String) : DEFAULT_INTERVAL_FAVORITES;
     this.active = String(context.resolution);
     this.render();
   }
@@ -27,15 +31,15 @@ export class IntervalSelector {
   private supported(): string[] {
     const sr = this.context.symbolInfo?.supported_resolutions;
     if (sr && sr.length) return sr.map(String);
-    return FAVORITES;
+    return this.favorites;
   }
 
   private render(): void {
     this.mount.innerHTML = "";
     this.buttons.clear();
     const supported = this.supported();
-    const favorites = supported.filter((r) => FAVORITES.includes(r));
-    const rest = supported.filter((r) => !FAVORITES.includes(r));
+    const favorites = supported.filter((r) => this.favorites.includes(r));
+    const rest = supported.filter((r) => !this.favorites.includes(r));
     // Ensure the active resolution is always directly visible.
     if (!favorites.includes(this.active) && supported.includes(this.active)) {
       favorites.push(this.active);
