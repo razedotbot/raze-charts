@@ -1,4 +1,4 @@
-// Maps the subset of TradingView `overrides` keys that app.raze.bot sets onto
+// Maps the subset of TradingView `overrides` keys that host apps commonly set onto
 // our internal ThemeColors. Unknown override keys are ignored (no-op), matching
 // TV's behaviour of silently accepting any override string.
 

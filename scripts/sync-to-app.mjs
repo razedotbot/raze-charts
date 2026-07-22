@@ -1,18 +1,26 @@
-// Copies the built raze-charts ESM bundle into app.raze.bot's public dir so the
-// Next webpack alias (NEXT_PUBLIC_CHART_ENGINE=raze) can swap it in for the
-// vendored TradingView library without touching any consumer imports.
+// Vendors the built bundle into a host app's static dir, so a bundler alias
+// (e.g. webpack NormalModuleReplacementPlugin — see README "Drop-in") can swap
+// it in for a vendored TradingView Charting Library without touching any
+// consumer imports.
 //
-//   node scripts/sync-to-app.mjs [/path/to/app.raze.bot]
+//   node scripts/sync-to-app.mjs [appDir] [subdir]
 //
-// Default app path: /home/debian/raze/app.raze.bot (sibling of this package).
+//   appDir  host app root   default: $RAZE_CHARTS_APP_DIR, else the
+//                           ../app.raze.bot sibling of this package
+//   subdir  dir under appDir to copy into
+//                           default: $RAZE_CHARTS_APP_SUBDIR, else
+//                           public/static/raze_charts
 
 import { copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const appDir = process.argv[2] ?? "/home/debian/raze/app.raze.bot";
-const destDir = resolve(appDir, "public/static/raze_charts");
+const appDir =
+  process.argv[2] ?? process.env.RAZE_CHARTS_APP_DIR ?? resolve(root, "..", "app.raze.bot");
+const subdir =
+  process.argv[3] ?? process.env.RAZE_CHARTS_APP_SUBDIR ?? "public/static/raze_charts";
+const destDir = resolve(appDir, subdir);
 
 const files = [
   "charting_library.esm.js",
@@ -20,6 +28,13 @@ const files = [
   "charting_library.d.ts",
 ];
 
+if (!existsSync(appDir)) {
+  console.error(
+    `[sync] host app dir not found: ${appDir}\n` +
+      "usage: node scripts/sync-to-app.mjs [appDir] [subdir]",
+  );
+  process.exit(1);
+}
 if (!existsSync(resolve(root, "dist/charting_library.esm.js"))) {
   console.error("[sync] dist not built — run `npm run build` first.");
   process.exit(1);

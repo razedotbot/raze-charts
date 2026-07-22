@@ -3,7 +3,8 @@
  *
  * Hand-authored to be a STRUCTURALLY-COMPATIBLE subset of the TradingView
  * Charting Library v30 type definitions — specifically the types that
- * app.raze.bot imports. The goal is that the existing consumer imports
+ * TradingView-integrated host apps typically import. The goal is that existing
+ * consumer imports
  *
  *   import { widget } from ".../charting_library.esm";
  *   import type { ChartingLibraryWidgetOptions, IChartingLibraryWidget,
