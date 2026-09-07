@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts - visual goldens</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; }
+    #wrap { position: absolute; inset: 0; overflow: hidden; }
+    /* inset:0 would ignore width/height; compact must actually be 480px so the sidebar hides. */
+    #wrap.compact { inset: auto; top: 0; left: 0; width: 480px; height: 620px; }
+  </style>
+</head>
+<body>
+  <div id="wrap"></div>
+  <script type="module">
+    import { widget } from "../dist/charting_library.esm.js";
+    import { makeMockDatafeed, VISUAL_NOW } from "./mock-datafeed.mjs";
+
+    const params = new URLSearchParams(location.search);
+    const testCase = params.get("case") || "dark";
+    const wrap = document.getElementById("wrap");
+    if (testCase === "compact") wrap.classList.add("compact");
+
+    const light = testCase === "light";
+    const datafeed = makeMockDatafeed({
+      bars: 400,
+      startPrice: 6400,
+      now: VISUAL_NOW,
+      live: false,
+    });
+
+    const darkOverrides = {
+      "paneProperties.background": "#181615",
+      "paneProperties.vertGridProperties.color": "rgba(244,238,225,0.04)",
+      "paneProperties.horzGridProperties.color": "rgba(244,238,225,0.04)",
+      "paneProperties.crossHairProperties.color": "rgba(244,238,225,0.3)",
+      "scalesProperties.textColor": "#8b887e",
+      "scalesProperties.backgroundColor": "#181615",
+      "scalesProperties.lineColor": "#3d3935",
+      "mainSeriesProperties.candleStyle.upColor": "#66d89e",
+      "mainSeriesProperties.candleStyle.downColor": "#e57359",
+      "mainSeriesProperties.candleStyle.borderUpColor": "#66d89e",
+      "mainSeriesProperties.candleStyle.borderDownColor": "#e57359",
+      "mainSeriesProperties.candleStyle.wickUpColor": "#66d89e",
+      "mainSeriesProperties.candleStyle.wickDownColor": "#e57359",
+    };
+
+    const w = new widget({
+      symbol: "MOCK",
+      datafeed,
+      interval: "1",
+      container: wrap,
+      library_path: "/",
+      locale: "en",
+      theme: light ? "light" : "dark",
+      autosize: true,
+      timezone: "Etc/UTC",
+      custom_font_family: "Arial, Helvetica, sans-serif",
+      loading_screen: { backgroundColor: light ? "#ffffff" : "#181615", foregroundColor: "#d8aa5b" },
+      enabled_features: ["seconds_resolution", "mark_on_bars"],
+      disabled_features: ["header_symbol_search", "popup_hints"],
+      overrides: light ? {} : darkOverrides,
+      favorites: { intervals: ["1S", "1", "5", "15"] },
+      raze: {
+        compact_breakpoint: testCase === "compact" ? 520 : 0,
+      },
+    });
+
+    w.onChartReady(async () => {
+      const chart = w.activeChart();
+      const t0 = Math.floor(VISUAL_NOW / 1000);
+      if (testCase === "rsi") {
+        await chart.createStudy("EMA", false, false, { length: 21 });
+        await chart.createStudy("RSI", false, false, { length: 14 });
+      }
+      if (testCase === "drawings") {
+        await chart.createShape({ time: t0, price: 7000 }, {
+          shape: "horizontal_line", lock: false, text: "Limit",
+          overrides: { linecolor: "#66d89e", linestyle: 1, linewidth: 1, textcolor: "#66d89e", showPrice: true },
+        });
+        await chart.createMultipointShape(
+          [{ time: t0 - 600 * 60, price: 5500 }, { time: t0, price: 7200 }],
+          { shape: "trend_line", overrides: { linecolor: "#66d89e", linewidth: 1 } },
+        );
+      }
+      window.__razeReady = true;
+      window.__razeChart = w;
+    });
+  </script>
+</body>
+</html>

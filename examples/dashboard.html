@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts — dashboard</title>
+  <style>
+    :root {
+      --bg: #181615;
+      --pane: #181615;
+      --line: #3d3935;
+      --text: #f4eee1;
+      --muted: #8b887e;
+      --up: #66d89e;
+      --gold: #d8aa5b;
+      --sky: #8ecae6;
+      --down: #e57359;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); }
+    body {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      padding: 12px 16px 9px;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    header h1 { font-size: 12px; font-weight: 500; margin: 0; letter-spacing: 0.06em; }
+    header a { color: var(--muted); text-decoration: none; font-size: 11px; }
+    header a:hover { color: var(--up); }
+    header .hint { margin-left: auto; color: var(--muted); font-size: 10px; letter-spacing: 0.04em; }
+    .desk {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-auto-rows: 400px;
+    }
+    .pane {
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      min-width: 0;
+      min-height: 0;
+      height: 400px;
+      display: flex;
+      flex-direction: column;
+      background: var(--pane);
+    }
+    .pane-bar {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 10px;
+      color: var(--muted);
+      flex-shrink: 0;
+      letter-spacing: 0.02em;
+    }
+    .pane-bar b { color: var(--text); font-weight: 500; font-size: 11px; letter-spacing: 0.04em; }
+    .pane-bar .grow { flex: 1; }
+    .pane-bar .val { color: var(--up); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 11px; }
+    .pane-bar .val.down { color: var(--down); }
+    .pane-bar .val.sky { color: var(--sky); }
+    .pane-bar .val.gold { color: var(--gold); }
+    .pane-bar .split { color: var(--muted); font-weight: 400; }
+    .key { display: inline-flex; align-items: center; gap: 5px; }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 1px;
+      display: inline-block;
+    }
+    .dot.up { background: var(--up); }
+    .dot.down { background: var(--down); }
+    .dot.gold { background: var(--gold); }
+    .dot.sky { background: var(--sky); }
+    .plot { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+    @media (max-width: 900px) {
+      .desk { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RAZE / dashboard</h1>
+    <a href="./index.html">full widget</a>
+    <span class="hint">candles + cartesian · same pane</span>
+  </header>
+  <div class="desk">
+    <section class="pane">
+      <div class="plot" id="trading"></div>
+    </section>
+    <section class="pane">
+      <div class="pane-bar"><b>Returns</b><span>token × horizon</span><span class="grow"></span><span class="val">%</span></div>
+      <div class="plot" id="heatmap"></div>
+    </section>
+    <section class="pane">
+      <div class="pane-bar"><b>Revenue</b><span>48 sessions</span><span class="grow"></span><span class="val" id="rev-last"></span></div>
+      <div class="plot" id="line"></div>
+    </section>
+    <section class="pane">
+      <div class="pane-bar">
+        <b>Sales / cost</b>
+        <span class="key"><i class="dot up"></i>Sales</span>
+        <span class="key"><i class="dot down"></i>Cost</span>
+        <span class="grow"></span>
+        <span id="sales-last"></span>
+      </div>
+      <div class="plot" id="bar"></div>
+    </section>
+    <section class="pane">
+      <div class="pane-bar"><b>Volume</b><span>fills</span><span class="grow"></span><span class="val sky" id="vol-last"></span></div>
+      <div class="plot" id="area"></div>
+    </section>
+    <section class="pane">
+      <div class="pane-bar"><b>Flow mix</b><span>source</span><span class="grow"></span><span class="val" id="pie-last"></span></div>
+      <div class="plot" id="pie"></div>
+    </section>
+    <section class="pane">
+      <div class="pane-bar"><b>Scatter</b><span>latency × size</span><span class="grow"></span><span class="key"><i class="dot gold"></i>fit</span></div>
+      <div class="plot" id="scatter"></div>
+    </section>
+    <section class="pane">
+      <div class="pane-bar">
+        <b>Profile</b>
+        <span class="key"><i class="dot up"></i>Live</span>
+        <span class="key"><i class="dot gold"></i>Base</span>
+        <span class="grow"></span>
+      </div>
+      <div class="plot" id="radar"></div>
+    </section>
+  </div>
+  <script type="module">
+    import { widget } from "../dist/charting_library.esm.js";
+    import { defineChart, line, bar, area, pie, point, radar, heatmap, ruleY, mountChart } from "../dist/chart.esm.js";
+    import { makeMockDatafeed } from "./mock-datafeed.mjs";
+
+    const trading = document.getElementById("trading");
+    const datafeed = makeMockDatafeed({ bars: 2000, startPrice: 6400 });
+    new widget({
+      symbol: "MOCK",
+      datafeed,
+      interval: "1",
+      container: trading,
+      library_path: "/",
+      locale: "en",
+      theme: "dark",
+      autosize: true,
+      timezone: "exchange",
+      custom_font_family: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      loading_screen: { backgroundColor: "#181615", foregroundColor: "#d8aa5b" },
+      enabled_features: ["seconds_resolution"],
+      // left_toolbar stays optional via disabled_features; this demo shows it.
+      disabled_features: [
+        "header_symbol_search",
+        "popup_hints",
+        "scale_bar",
+        "legend_widget",
+      ],
+      overrides: {
+        "paneProperties.background": "#181615",
+        "paneProperties.vertGridProperties.color": "rgba(244,238,225,0.04)",
+        "paneProperties.horzGridProperties.color": "rgba(244,238,225,0.04)",
+        "paneProperties.crossHairProperties.color": "rgba(244,238,225,0.3)",
+        "scalesProperties.textColor": "#8b887e",
+        "scalesProperties.backgroundColor": "#181615",
+        "scalesProperties.lineColor": "#3d3935",
+        "mainSeriesProperties.candleStyle.upColor": "#66d89e",
+        "mainSeriesProperties.candleStyle.downColor": "#e57359",
+        "mainSeriesProperties.candleStyle.borderUpColor": "#66d89e",
+        "mainSeriesProperties.candleStyle.borderDownColor": "#e57359",
+        "mainSeriesProperties.candleStyle.wickUpColor": "#66d89e",
+        "mainSeriesProperties.candleStyle.wickDownColor": "#e57359",
+      },
+      favorites: { intervals: ["1", "5", "15", "60"] },
+      raze: {
+        // Pane is ~790px; compact_breakpoint 900 would auto-hide the tools
+        // sidebar (TV mobile behaviour). 0 keeps it visible in this demo.
+        compact_breakpoint: 0,
+        sidebar: [
+          "cursor", "trend_line", "horizontal_line", "fib_retracement", "rectangle", "text",
+          "separator",
+          "indicators",
+          "separator",
+          "fit", "screenshot", "fullscreen",
+          "separator",
+          "chart_type",
+        ],
+      },
+    });
+
+    let seed = 1234567;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+
+    const t0 = Date.UTC(2026, 7, 1);
+    const rev = [];
+    for (let i = 0; i < 48; i++) {
+      const trend = 52 + i * 0.68;
+      const wave = Math.sin(i / 7.2) * 3.6;
+      const noise = (rnd() - 0.5) * 2.1;
+      const sales = Math.round((trend + wave + noise) * 10) / 10;
+      rev.push({
+        t: t0 + i * 86400000,
+        sales,
+        cost: Math.round(sales * 0.54 * 10) / 10,
+      });
+    }
+    const dSales = rev[rev.length - 1].sales - rev[0].sales;
+    const sign = dSales >= 0 ? "+" : "";
+    document.getElementById("rev-last").textContent =
+      `${rev[rev.length - 1].sales.toFixed(1)}  ${sign}${dSales.toFixed(1)}`;
+
+    const months = [
+      { month: "Jan", sales: 42, cost: 28 },
+      { month: "Feb", sales: 55, cost: 31 },
+      { month: "Mar", sales: 49, cost: 30 },
+      { month: "Apr", sales: 71, cost: 39 },
+      { month: "May", sales: 84, cost: 43 },
+      { month: "Jun", sales: 78, cost: 41 },
+      { month: "Jul", sales: 96, cost: 49 },
+      { month: "Aug", sales: 88, cost: 46 },
+    ];
+    const lastM = months[months.length - 1];
+    document.getElementById("sales-last").innerHTML =
+      `<span class="val">${lastM.sales}</span><span class="split"> / </span><span class="val down">${lastM.cost}</span>`;
+
+    const monthsShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const vol = [];
+    for (let i = 0; i < 24; i++) {
+      const d = new Date(t0 + i * 2 * 86400000);
+      const wave = Math.sin(i / 3.4) * 9;
+      vol.push({
+        t: `${d.getUTCDate()} ${monthsShort[d.getUTCMonth()]}`,
+        volume: Math.round(38 + i * 4.1 + wave + rnd() * 8),
+      });
+    }
+    document.getElementById("vol-last").textContent = String(vol[vol.length - 1].volume);
+
+    const flow = [
+      { name: "Organic", value: 44 },
+      { name: "Paid", value: 31 },
+      { name: "Referral", value: 16 },
+      { name: "Direct", value: 9 },
+    ];
+    document.getElementById("pie-last").textContent = "Organic  44%";
+
+    mountChart(document.getElementById("line"), defineChart({
+      marks: [
+        area(rev, { x: "t", y: "sales", fill: "#66d89e", stroke: "#66d89e", name: "Sales" }),
+        ruleY([70], { stroke: "#d8aa5b", name: "goal" }),
+      ],
+      scales: { x: { type: "time" } },
+      legend: false,
+      ariaLabel: "Revenue",
+    }));
+
+    mountChart(document.getElementById("bar"), defineChart({
+      marks: [
+        bar(months, { x: "month", y: "sales", fill: "#66d89e", name: "Sales" }),
+        bar(months, { x: "month", y: "cost", fill: "#e57359", name: "Cost" }),
+      ],
+      legend: false,
+      ariaLabel: "Sales vs cost",
+    }));
+
+    mountChart(document.getElementById("area"), defineChart({
+      marks: [bar(vol, { x: "t", y: "volume", fill: "#8ecae6", name: "Volume", lastValue: true, fade: true })],
+      legend: false,
+      ariaLabel: "Volume",
+    }));
+
+    mountChart(document.getElementById("pie"), defineChart({
+      marks: [pie(flow, { valueKey: "value", labelKey: "name" })],
+      ariaLabel: "Traffic source",
+    }));
+
+    const dots = Array.from({ length: 64 }, () => {
+      const x = Math.round(12 + rnd() * 108);
+      const y = Math.round(16 + 0.46 * x + (rnd() - 0.5) * 18);
+      return { x, y };
+    });
+    const n = dots.length;
+    let sx = 0, sy = 0, sxy = 0, sxx = 0;
+    for (const p of dots) { sx += p.x; sy += p.y; sxy += p.x * p.y; sxx += p.x * p.x; }
+    const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1);
+    const intercept = (sy - slope * sx) / n;
+    const minX = Math.min(...dots.map((p) => p.x));
+    const maxX = Math.max(...dots.map((p) => p.x));
+    const fit = [
+      { x: minX, y: intercept + slope * minX },
+      { x: maxX, y: intercept + slope * maxX },
+    ];
+    mountChart(document.getElementById("scatter"), defineChart({
+      marks: [
+        point(dots, { x: "x", y: "y", name: "fill" }),
+        line(fit, { x: "x", y: "y", stroke: "rgba(216,170,91,0.7)", name: "Fit", dashed: true, lastValue: false, strokeWidth: 1.2 }),
+      ],
+      scales: { x: { type: "linear" }, y: { type: "linear" } },
+      legend: false,
+      ariaLabel: "Scatter",
+    }));
+
+    const axes = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"];
+    mountChart(document.getElementById("radar"), defineChart({
+      marks: [
+        radar(axes.map((name, i) => ({ name, value: [6.2, 6.0, 6.8, 5.4, 5.9][i] })), {
+          x: "name", y: "value", fill: "#d8aa5b", stroke: "#d8aa5b", name: "Base", fillOpacity: 0.07,
+        }),
+        radar(axes.map((name, i) => ({ name, value: [8.6, 4.1, 9.2, 3.6, 7.5][i] })), {
+          x: "name", y: "value", fill: "#66d89e", stroke: "#66d89e", name: "Live", fillOpacity: 0.13,
+        }),
+      ],
+      legend: false,
+      ariaLabel: "Profile",
+    }));
+
+    const tokens = ["BTC", "ETH", "SOL", "BONK", "WIF", "JUP"];
+    const horizons = ["5m", "15m", "1h", "4h", "1D", "1W"];
+    const tokBias = { BTC: 1.4, ETH: 0.5, SOL: 2.2, BONK: -0.9, WIF: -1.8, JUP: 0.7 };
+    const horBias = { "5m": 0.2, "15m": 0.05, "1h": -0.1, "4h": 0.4, "1D": 1.1, "1W": 1.8 };
+    const heat = [];
+    for (const token of tokens) {
+      for (const h of horizons) {
+        const v = tokBias[token] + horBias[h] + (rnd() - 0.5) * 3.8;
+        heat.push({ token, h, value: Math.round(v * 10) / 10 });
+      }
+    }
+    mountChart(document.getElementById("heatmap"), defineChart({
+      marks: [heatmap(heat, { x: "h", y: "token", valueKey: "value", name: "return %" })],
+      ariaLabel: "Token returns",
+    }));
+  </script>
+</body>
+</html>

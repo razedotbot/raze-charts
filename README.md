@@ -204,17 +204,56 @@ UI chrome (`Toolbar`, `LeftSidebar`, `IndicatorsMenu`, `IntervalSelector`,
 `ScaleBar`, `LoadingScreen`) and theming (`buildTheme`, `withAlpha`) are
 exported too. `sideEffects: false` — bundlers drop whatever you don't import.
 
+## Dashboard charts
+
+Product charts (line / bar / area / pie / scatter / radar / heatmap) live on a **separate
+entry** so the TradingView widget bundle stays lean. SVG by default.
+
+```ts
+import { defineChart, line, bar, mountChart } from "@raze/charts/chart";
+
+const sales = [
+  { month: "Jan", value: 42 },
+  { month: "Feb", value: 58 },
+];
+
+const definition = defineChart({
+  marks: [line(sales, { x: "month", y: "value", stroke: "#66d89e" })],
+  ariaLabel: "Monthly sales",
+});
+
+mountChart(document.getElementById("chart")!, definition);
+```
+
+React (peer dependency, optional):
+
+```tsx
+import { Chart, LineChart, Line, XAxis, Tooltip } from "@raze/charts/react";
+
+<Chart definition={definition} height={320} />
+
+<LineChart data={sales} height={320}>
+  <XAxis dataKey="month" />
+  <Line dataKey="value" stroke="#66d89e" />
+  <Tooltip />
+</LineChart>
+```
+
+The candlestick widget is unchanged: Canvas, chrome, and paint constants stay
+frozen. Dashboard charts are a new surface.
+
 ## Examples & tests
 
 ```bash
-npm test                        # build + headless jsdom smoke of the full widget lifecycle
-python3 -m http.server 8799     # then open http://localhost:8799/examples/index.html
+npm test                        # build + jsdom widget smoke + dashboard unit tests
+npm run test:visual             # Playwright goldens of the trading widget (Chromium)
+python3 -m http.server 8799     # then open examples/index.html or examples/dashboard.html
 ```
 
-`examples/index.html` mounts a full chart against the synthetic
-`examples/mock-datafeed.mjs` (random-walk OHLCV + 1 s live ticks).
-`examples/snap.mjs` / `examples/drag-axis.mjs` are optional Playwright visual
-checks against that page.
+`examples/index.html` mounts the trading widget against the synthetic
+`examples/mock-datafeed.mjs`. `examples/visual.html` is the golden harness
+(frozen timestamps, no live ticks). `examples/dashboard.html` mounts the
+cartesian SVG charts.
 
 ## Scope
 
@@ -231,7 +270,8 @@ type-checks without enumerating thousands of keys.
 ```bash
 npm run dev        # esbuild watch
 npm run typecheck  # tsc strict, no emit
-npm test           # build + smoke
+npm test           # build + smoke + dashboard tests
+npm run test:visual:update  # rewrite widget screenshot goldens
 ```
 
 Layout:
@@ -239,10 +279,12 @@ Layout:
 ```
 src/
   index.ts                     public entry — widget + modular named exports
+  chart/     defineChart, marks, scales, SVG/Canvas dashboard renderers
+  react/     <Chart> + Recharts-shaped JSX (LineChart, Bar, XAxis, …)
   types/charting_library.d.ts  hand-authored drop-in types (copied to dist)
   core/      Widget, ChartApi, ShapeStore, context, theme
   data/      DataManager (datafeed orchestration, bar store, pagination, live)
-  engine/    ChartEngine (canvas/rAF loop), ChartRenderer (draw + interaction)
+  engine/    ChartEngine, layout, plotScale, scene, paint/*, gestures
   studies/   SMA/EMA/RSI calc + StudyStore
   ui/        Toolbar, LeftSidebar, IndicatorsMenu, IntervalSelector, ScaleBar, …
   util/      delegate, resolution, format, heikinAshi

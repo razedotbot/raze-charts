@@ -20,3 +20,17 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  visual:
+    # Goldens are captured on Windows Chromium (Arial). Ubuntu rasterizes
+    # axis labels differently enough to fail a freeze test.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run test:visual

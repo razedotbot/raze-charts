@@ -8,8 +8,9 @@
 //   dist/charting_library.standalone.js  — IIFE that assigns window.TradingView
 //   dist/charting_library.d.ts           — hand-authored drop-in types (copied verbatim)
 //   dist/datafeed-api.d.ts               — alias of the above (TV layout parity)
-//   dist/types/**                        — tsc-generated declarations for the
-//                                          full modular API (package `types`)
+//   dist/chart.esm.js                    — dashboard grammar (tree-shaken, no widget)
+//   dist/react.esm.js                    — React adapter (peer: react)
+//   dist/types/**                        — tsc-generated declarations
 //
 // The drop-in `.d.ts` is authored by hand (src/types/charting_library.d.ts)
 // rather than generated, so it stays a small, stable, structurally-compatible
@@ -33,7 +34,6 @@ const watch = process.argv.includes("--watch");
 const entry = resolve(root, "src/index.ts");
 
 const common = {
-  entryPoints: [entry],
   bundle: true,
   sourcemap: true,
   target: ["es2020"],
@@ -41,7 +41,7 @@ const common = {
   define: { __RAZE_CHARTS_VERSION__: JSON.stringify(pkg.version) },
 };
 
-const targets = [
+const widgetTargets = [
   { format: "esm", outfile: resolve(out, "charting_library.esm.js") },
   { format: "cjs", outfile: resolve(out, "charting_library.cjs.js") },
   {
@@ -49,8 +49,6 @@ const targets = [
     globalName: "RazeCharts",
     outfile: resolve(out, "charting_library.standalone.js"),
     footer: {
-      // Mirror TradingView's standalone global so existing `window.TradingView.widget`
-      // call sites keep working when the standalone bundle is loaded via <script>.
       js: "if(typeof window!=='undefined'){window.TradingView=window.TradingView||{};window.TradingView.widget=RazeCharts.widget;window.TradingView.version=RazeCharts.version;}",
     },
   },
@@ -60,13 +58,10 @@ function emitTypes() {
   const require = createRequire(import.meta.url);
   const tsc = require.resolve("typescript/bin/tsc");
   const typesOut = resolve(out, "types");
-  // tsconfig.json has declaration + emitDeclarationOnly; only the outDir moves.
   execFileSync(process.execPath, [tsc, "--outDir", typesOut], {
     cwd: root,
     stdio: "inherit",
   });
-  // Input .d.ts files are not re-emitted by tsc, but the generated declarations
-  // import from "../types/charting_library" — put the hand-authored file there.
   mkdirSync(resolve(typesOut, "types"), { recursive: true });
   copyFileSync(
     resolve(root, "src/types/charting_library.d.ts"),
@@ -75,15 +70,27 @@ function emitTypes() {
 }
 
 async function run() {
-  for (const t of targets) {
-    await build({ ...common, ...t });
+  for (const t of widgetTargets) {
+    await build({ ...common, entryPoints: [entry], ...t });
   }
+  await build({
+    ...common,
+    entryPoints: [resolve(root, "src/chart/index.ts")],
+    format: "esm",
+    outfile: resolve(out, "chart.esm.js"),
+  });
+  await build({
+    ...common,
+    entryPoints: [resolve(root, "src/react/index.tsx")],
+    format: "esm",
+    outfile: resolve(out, "react.esm.js"),
+    jsx: "automatic",
+    external: ["react", "react/jsx-runtime", "react/jsx-dev-runtime"],
+  });
   copyFileSync(
     resolve(root, "src/types/charting_library.d.ts"),
     resolve(out, "charting_library.d.ts"),
   );
-  // Also emit a datafeed-api.d.ts alias for parity with the TV layout (some
-  // call sites import datafeed types from there).
   copyFileSync(
     resolve(root, "src/types/charting_library.d.ts"),
     resolve(out, "datafeed-api.d.ts"),
@@ -93,7 +100,7 @@ async function run() {
 }
 
 if (watch) {
-  const ctx = await (await import("esbuild")).context({ ...common, ...targets[0] });
+  const ctx = await (await import("esbuild")).context({ ...common, entryPoints: [entry], ...widgetTargets[0] });
   await ctx.watch();
   console.log("[raze-charts] watching…");
 } else {

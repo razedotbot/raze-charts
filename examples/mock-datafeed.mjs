@@ -1,20 +1,34 @@
 // A synthetic IBasicDataFeed for examples + smoke tests. Generates a random-walk
-// OHLCV series and emits a live tick every second. Shared by the browser
-// example (examples/index.html) and the headless smoke test (examples/smoke.mjs).
+// OHLCV series and optionally emits a live tick every second. Shared by the
+// browser example (examples/index.html), visual goldens, and the headless smoke
+// test (examples/smoke.mjs).
 
-export function makeMockDatafeed({ bars = 2000, startPrice = 1000 } = {}) {
+/**
+ * @param {object} [opts]
+ * @param {number} [opts.bars=2000]
+ * @param {number} [opts.startPrice=1000]
+ * @param {number} [opts.now]  Unix ms used as the last-bar time. Defaults to Date.now().
+ * @param {boolean} [opts.live=true]  When false, subscribeBars is a no-op (visual tests).
+ */
+export function makeMockDatafeed({
+  bars = 2000,
+  startPrice = 1000,
+  now = Date.now(),
+  live = true,
+} = {}) {
   const RES_MS = { "1S": 1000, "5S": 5000, "1": 60000, "5": 300000, "15": 900000, "60": 3600000, "1D": 86400000 };
   const seriesCache = new Map();
+  const frozenNow = now;
 
   function gen(resMs, count) {
-    const now = Math.floor(Date.now() / resMs) * resMs;
+    const end = Math.floor(frozenNow / resMs) * resMs;
     const out = [];
     let price = startPrice;
-    // deterministic-ish walk (no Math.random dependence on time ordering)
+    // Deterministic walk (no Math.random).
     let seed = 1234567;
     const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
     for (let i = count - 1; i >= 0; i--) {
-      const t = now - i * resMs;
+      const t = end - i * resMs;
       const drift = (rnd() - 0.48) * price * 0.02;
       const open = price;
       const close = Math.max(0.0001, price + drift);
@@ -50,35 +64,42 @@ export function makeMockDatafeed({ bars = 2000, startPrice = 1000 } = {}) {
         seconds_multipliers: ["1", "5"], intraday_multipliers: ["1", "5", "15", "60"],
         has_daily: true, daily_multipliers: ["1"],
         supported_resolutions: ["1S", "5S", "1", "5", "15", "60", "1D"],
-        volume_precision: 0, data_status: "streaming",
+        volume_precision: 0, data_status: live ? "streaming" : "endofday",
       }), 0);
     },
     getBars(_symbolInfo, resolution, periodParams, onResult) {
       const series = seriesFor(resolution);
       const fromMs = periodParams.from * 1000;
       const toMs = periodParams.to * 1000;
-      const slice = series.filter((b) => b.time >= fromMs && b.time <= toMs);
+      let slice = series.filter((b) => b.time >= fromMs && b.time <= toMs);
+      // Visual fixtures freeze `now` in the past; the widget still requests a
+      // wall-clock window around Date.now(). Serve the frozen series anyway.
+      if (slice.length === 0 && series.length) {
+        const n = Math.max(1, periodParams.countBack || series.length);
+        slice = series.slice(-n);
+      }
       setTimeout(() => onResult(slice, { noData: slice.length === 0 }), 0);
     },
     subscribeBars(_symbolInfo, resolution, onTick, guid) {
+      if (!live) return;
       const resMs = RES_MS[resolution] ?? 60000;
       const series = seriesFor(resolution);
       let last = series[series.length - 1];
       const timer = setInterval(() => {
         if (!subs.has(guid)) return;
-        const now = Math.floor(Date.now() / resMs) * resMs;
-        if (now > last.time) {
-          last = { time: now, open: last.close, high: last.close, low: last.close, close: last.close, volume: 0 };
+        const tickNow = Math.floor(Date.now() / resMs) * resMs;
+        if (tickNow > last.time) {
+          last = { time: tickNow, open: last.close, high: last.close, low: last.close, close: last.close, volume: 0 };
           series.push(last);
         }
-        const delta = (Math.sin(Date.now() / 5000) ) * last.close * 0.003;
+        const delta = (Math.sin(Date.now() / 5000)) * last.close * 0.003;
         last.close = Math.max(0.0001, last.close + delta);
         last.high = Math.max(last.high, last.close);
         last.low = Math.min(last.low, last.close);
         last.volume += Math.floor(Math.abs(delta) * 1000);
         onTick({ ...last });
       }, 1000);
-      if (timer.unref) timer.unref(); // don't keep the Node event loop alive in tests
+      if (timer.unref) timer.unref();
       subs.set(guid, timer);
     },
     unsubscribeBars(guid) {
@@ -105,3 +126,6 @@ export function makeMockDatafeed({ bars = 2000, startPrice = 1000 } = {}) {
     },
   };
 }
+
+/** Frozen unix-ms used by visual goldens so timestamps (and therefore axis labels) never drift. */
+export const VISUAL_NOW = Date.UTC(2024, 0, 15, 12, 0, 0);

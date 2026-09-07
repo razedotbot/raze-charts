@@ -7,9 +7,15 @@
   <style>
     html, body { margin: 0; height: 100%; background: #181615; font-family: 'JetBrains Mono', ui-monospace, monospace; }
     #wrap { position: absolute; inset: 24px; border: 1px solid #3d3935; border-radius: 6px; overflow: hidden; }
+    .dash-link {
+      position: absolute; top: 6px; right: 28px; z-index: 5;
+      color: #8b887e; font-size: 11px; text-decoration: none;
+    }
+    .dash-link:hover { color: #66d89e; }
   </style>
 </head>
 <body>
+  <a class="dash-link" href="./dashboard.html">dashboard</a>
   <div id="wrap"></div>
   <script type="module">
     import { widget } from "../dist/charting_library.esm.js";
