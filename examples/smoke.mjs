@@ -17,9 +17,14 @@ globalThis.Node = window.Node;
 // which resolve to Node's natives — no need to mirror them onto window.
 window.devicePixelRatio = 2;
 
-// 2D context stub — records nothing, just satisfies the renderer.
+// 2D context stub — records fillText so formatter paint-path tests can assert.
+const paintedTexts = [];
 const ctxStub = new Proxy(
-  { measureText: () => ({ width: 10 }), canvas: {} },
+  {
+    measureText: (s) => ({ width: String(s ?? "").length * 6 }),
+    fillText: (s) => { paintedTexts.push(String(s)); },
+    canvas: {},
+  },
   { get: (t, p) => (p in t ? t[p] : () => {}), set: () => true },
 );
 window.HTMLCanvasElement.prototype.getContext = () => ctxStub;
@@ -54,7 +59,7 @@ window.requestAnimationFrame = globalThis.requestAnimationFrame;
 window.cancelAnimationFrame = globalThis.cancelAnimationFrame;
 globalThis.ResizeObserver = window.ResizeObserver;
 
-const { widget } = await import("../dist/charting_library.esm.js");
+const { widget, createPriceFormatter, formatPrice } = await import("../dist/charting_library.esm.js");
 
 const assert = (cond, msg) => { if (!cond) { console.error("✗ " + msg); process.exitCode = 1; } else { console.log("✓ " + msg); } };
 
@@ -327,5 +332,88 @@ const sb4 = container4.querySelector(".raze-chart-left-sidebar");
 assert(sb4 !== null && sb4.style.display !== "none", "compact_breakpoint: 0 keeps the sidebar at phone width");
 w4.remove();
 stubClientW = 800;
+
+// ── Price formatter: createPriceFormatter + on-canvas paint paths ───────────
+{
+  const def = createPriceFormatter(undefined, null);
+  assert(def(1234.56, 100) === formatPrice(1234.56, 100), "createPriceFormatter default matches formatPrice");
+
+  const razeFmt = createPriceFormatter({
+    raze: { format_price: (v, ps) => `${v}@${ps}` },
+  });
+  assert(razeFmt(0.000157, 1e8) === "0.000157@100000000", "raze.format_price receives value + pricescale");
+
+  let factoryInfo = "unset";
+  let factoryTick = "unset";
+  const tvFmt = createPriceFormatter({
+    custom_formatters: {
+      priceFormatterFactory: (info, minTick) => {
+        factoryInfo = info && info.name;
+        factoryTick = minTick;
+        if (!info) return null;
+        return { format: (v) => `tv:${v}` };
+      },
+    },
+    raze: { format_price: () => "raze-fallback" },
+  }, {
+    name: "PEPE", ticker: "PEPE", session: "24x7", timezone: "Etc/UTC",
+    exchange: "Mock", minmov: 1, pricescale: 100,
+  });
+  assert(factoryInfo === "PEPE" && factoryTick === "0.01", "priceFormatterFactory receives (symbolInfo, minTick)");
+  assert(tvFmt(3, 100) === "tv:3", "priceFormatterFactory wins over raze.format_price");
+
+  const fallFmt = createPriceFormatter({
+    custom_formatters: { priceFormatterFactory: () => null },
+    raze: { format_price: () => "raze-fallback" },
+  });
+  assert(fallFmt(1, 100) === "raze-fallback", "factory returning null falls through to raze.format_price");
+}
+
+const container5 = window.document.createElement("div");
+window.document.body.appendChild(container5);
+paintedTexts.length = 0;
+const w5 = new widget({
+  symbol: "MOCK",
+  datafeed: makeMockDatafeed({ bars: 200, startPrice: 6400 }),
+  interval: "1",
+  container: container5,
+  library_path: "/",
+  locale: "en",
+  autosize: true,
+  raze: { format_price: (value) => `@fmt:${value}` },
+});
+await new Promise((r) => w5.onChartReady(r));
+flushFrames(3);
+assert(
+  paintedTexts.some((t) => t.includes("@fmt:")),
+  `raze.format_price used on canvas labels (${paintedTexts.filter((t) => t.includes("@fmt:")).length} hits)`,
+);
+w5.remove();
+
+const container6 = window.document.createElement("div");
+window.document.body.appendChild(container6);
+paintedTexts.length = 0;
+const w6 = new widget({
+  symbol: "MOCK",
+  datafeed: makeMockDatafeed({ bars: 200, startPrice: 6400 }),
+  interval: "1",
+  container: container6,
+  library_path: "/",
+  locale: "en",
+  autosize: true,
+  custom_formatters: {
+    priceFormatterFactory: (info) => {
+      if (!info) return null;
+      return { format: (value) => `@tv:${value}` };
+    },
+  },
+});
+await new Promise((r) => w6.onChartReady(r));
+flushFrames(3);
+assert(
+  paintedTexts.some((t) => t.includes("@tv:")),
+  `custom_formatters.priceFormatterFactory used on canvas labels (${paintedTexts.filter((t) => t.includes("@tv:")).length} hits)`,
+);
+w6.remove();
 
 console.log(process.exitCode ? "\nSMOKE: FAIL" : "\nSMOKE: PASS");

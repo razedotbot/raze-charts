@@ -1,8 +1,8 @@
-// Public entry point for @raze/charts.
+// Public entry point for @razedotbot/charts.
 //
 // Two ways to consume this package:
 //
-// 1. TradingView drop-in — `import { widget } from "@raze/charts"` (or vendor
+// 1. TradingView drop-in — `import { widget } from "@razedotbot/charts"` (or vendor
 //    dist/charting_library.esm.js under a bundler alias). The `widget` class
 //    matches TradingView's `import { widget } from "charting_library"` usage;
 //    the default export mirrors the `TradingView` namespace shape for
@@ -29,7 +29,7 @@ export type { ChartApiDeps } from "./core/ChartApi";
 export { ShapeStore } from "./core/ShapeStore";
 export type { ShapeKind, StoredShape } from "./core/ShapeStore";
 export { buildTheme, isLightColor, withAlpha } from "./core/theme";
-export { buildFeatureSet } from "./core/context";
+export { applySymbolInfo, buildFeatureSet } from "./core/context";
 export type {
   ChartContext,
   ChartStyle,
@@ -74,11 +74,13 @@ export {
 } from "./util/resolution";
 export type { ParsedResolution } from "./util/resolution";
 export {
+  createPriceFormatter,
   decimalsFromPricescale,
   formatCompact,
   formatPrice,
   formatVolume,
 } from "./util/format";
+export type { PriceFormatFn } from "./util/format";
 export { heikinAshi } from "./util/heikinAshi";
 
 // Default export mirroring the TradingView namespace shape (some integrations

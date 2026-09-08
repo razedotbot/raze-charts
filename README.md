@@ -43,7 +43,9 @@ vendored library without touching consumer code.
   `Delete` remove selection. **Fully composable** — see
   [Configuring the chrome](#configuring-the-chrome).
 - **Theming:** TradingView-style `overrides` keys, `theme: "dark" | "light"`,
-  CSS custom properties, custom fonts.
+  CSS custom properties, custom fonts. Custom price strings via
+  `custom_formatters.priceFormatterFactory` or `raze.format_price` (Y axis,
+  last-price tag, OHLC legend, crosshair).
 - **Mobile / touch:** pointer-events native — one-finger pan, pinch-to-zoom,
   long-press crosshair (persists until the next tap), finger-sized hit targets
   on shapes/marks, ≥40px tap targets across the chrome on touch devices, and a
@@ -54,7 +56,25 @@ vendored library without touching consumer code.
 ## Install
 
 ```bash
-npm i github:razedotbot/raze-charts   # builds on install (prepare script)
+npm i @razedotbot/charts
+```
+
+Dashboard charts (tree-shaken, no trading widget):
+
+```ts
+import { defineChart, line, mountChart } from "@razedotbot/charts/chart";
+```
+
+React adapter (optional peer):
+
+```ts
+import { Chart, LineChart, Line } from "@razedotbot/charts/react";
+```
+
+Git install (builds on `prepare` when `dist/` is missing):
+
+```bash
+npm i github:razedotbot/raze-charts
 ```
 
 Or clone and build:
@@ -65,15 +85,15 @@ cd raze-charts && npm install && npm run build
 ```
 
 `dist/` then contains `charting_library.esm.js` (+ `.cjs.js`,
-`.standalone.js`, the drop-in `charting_library.d.ts`, and generated
-`types/` for the modular API).
+`.standalone.js`, the drop-in `charting_library.d.ts`, generated
+`types/`, plus `chart.*` and `react.*` for the dashboard entries).
 
 ## Use
 
 ### As a package
 
 ```ts
-import { widget } from "@raze/charts";
+import { widget } from "@razedotbot/charts";
 
 const w = new widget({
   container: document.getElementById("chart")!,
@@ -182,22 +202,62 @@ built-in study catalogue (`BUILTIN_STUDIES`, `StudyRegistry`) and preset
 defaults (`DEFAULT_SIDEBAR_ITEMS`, `DEFAULT_INDICATOR_PRESETS`,
 `DEFAULT_INTERVAL_FAVORITES`) are all exported for composition.
 
+## Custom price format
+
+The built-in price string is `pricescale` + `toLocaleString` (at least two
+fractional digits). `minmov` / `pricescale` on the symbol change precision, not
+the notation (`1.57e-4`, `1.57k`). To own the string on the **Y axis, last-price
+tag, OHLC legend, crosshair, and shape price labels**, pass a formatter on the
+widget — not a `node_modules` patch.
+
+TradingView drop-in (`custom_formatters.priceFormatterFactory` is called as
+`(symbolInfo, minTick)`; return `null` to fall through):
+
+```ts
+new widget({
+  // ...
+  custom_formatters: {
+    priceFormatterFactory: (symbolInfo) => {
+      if (!symbolInfo) return null;
+      return { format: (value) => formatTokenPrice(value) };
+    },
+  },
+});
+```
+
+Raze-native (receives `pricescale`; used when the factory is omitted or returns
+`null`):
+
+```ts
+new widget({
+  // ...
+  raze: {
+    format_price: (value, pricescale) => formatTokenPrice(value, pricescale),
+  },
+});
+```
+
+Percent-scale axis ticks stay `+x.xx%`. Overlay study legend values still honour
+`StudyDefinition.formatValue` when set. The exported `formatPrice` helper is
+unchanged — wire the same function through the options above so the canvas
+matches the rest of the page.
+
 ## Modular API
 
 Everything the widget is made of is exported à la carte, fully typed:
 
 ```ts
 // Indicator math — pure functions, no DOM
-import { ema, sma, rsi, closesFromBars, heikinAshi } from "@raze/charts";
+import { ema, sma, rsi, closesFromBars, heikinAshi } from "@razedotbot/charts";
 
 // Datafeed orchestration without the widget shell (pagination + live merge)
-import { DataManager } from "@raze/charts";
+import { DataManager } from "@razedotbot/charts";
 
 // Engine + renderer for a custom shell
-import { ChartEngine, ChartRenderer, ShapeStore, StudyStore } from "@raze/charts";
+import { ChartEngine, ChartRenderer, ShapeStore, StudyStore } from "@razedotbot/charts";
 
 // Formatting / resolution helpers
-import { formatPrice, formatCompact, parseResolution, resolutionToMs } from "@raze/charts";
+import { formatPrice, createPriceFormatter, formatCompact, parseResolution, resolutionToMs } from "@razedotbot/charts";
 ```
 
 UI chrome (`Toolbar`, `LeftSidebar`, `IndicatorsMenu`, `IntervalSelector`,
@@ -210,7 +270,7 @@ Product charts (line / bar / area / pie / scatter / radar / heatmap) live on a *
 entry** so the TradingView widget bundle stays lean. SVG by default.
 
 ```ts
-import { defineChart, line, bar, mountChart } from "@raze/charts/chart";
+import { defineChart, line, bar, mountChart } from "@razedotbot/charts/chart";
 
 const sales = [
   { month: "Jan", value: 42 },
@@ -228,7 +288,7 @@ mountChart(document.getElementById("chart")!, definition);
 React (peer dependency, optional):
 
 ```tsx
-import { Chart, LineChart, Line, XAxis, Tooltip } from "@raze/charts/react";
+import { Chart, LineChart, Line, XAxis, Tooltip } from "@razedotbot/charts/react";
 
 <Chart definition={definition} height={320} />
 

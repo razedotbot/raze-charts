@@ -13,6 +13,7 @@ import type {
 } from "../types/charting_library";
 import { buildFeatureSet, type ChartContext, type IndexRange } from "./context";
 import { buildTheme } from "./theme";
+import { createPriceFormatter } from "../util/format";
 import { Delegate } from "../util/delegate";
 import { DataManager } from "../data/DataManager";
 import { ShapeStore } from "./ShapeStore";
@@ -82,6 +83,7 @@ export class Widget implements IChartingLibraryWidget {
       symbol: options.symbol,
       resolution: options.interval,
       symbolInfo: null,
+      formatPrice: createPriceFormatter(options, null),
       theme,
       features,
       bars: [],

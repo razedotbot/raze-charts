@@ -11,6 +11,7 @@ import type {
 } from "../types/charting_library";
 import { Delegate } from "../util/delegate";
 import type { Bar, Mark } from "../types/charting_library";
+import { createPriceFormatter, type PriceFormatFn } from "../util/format";
 
 export interface ThemeColors {
   paneBackground: string;
@@ -61,6 +62,9 @@ export interface ChartContext {
   theme: ThemeColors;
   features: Set<string>;
 
+  /** Bound from `custom_formatters` / `raze.format_price`; rebuilt on symbol resolve. */
+  formatPrice: PriceFormatFn;
+
   /** The full bar series for the current (symbol, resolution), ascending by time. */
   bars: Bar[];
 
@@ -104,6 +108,12 @@ const FEATURE_DEFAULTS_ON = new Set<string>([
   "legend_widget",
   "scale_bar",
 ]);
+
+/** Assign symbol info and rebuild the on-canvas price formatter. */
+export function applySymbolInfo(ctx: ChartContext, info: LibrarySymbolInfo | null): void {
+  ctx.symbolInfo = info;
+  ctx.formatPrice = createPriceFormatter(ctx.options, info);
+}
 
 export function buildFeatureSet(opts: ChartingLibraryWidgetOptions): Set<string> {
   const set = new Set<string>(FEATURE_DEFAULTS_ON);

@@ -1,4 +1,4 @@
-import { formatPrice, formatVolume } from "../../util/format";
+import { formatVolume } from "../../util/format";
 import { indexForX } from "../plotScale";
 import type { FinanceView } from "./view";
 
@@ -17,7 +17,7 @@ export function drawLegend(ctx: CanvasRenderingContext2D, v: FinanceView): void 
   const col = up ? t.candleUp : t.candleDown;
 
   const dim = t.scaleText;
-  const f = (val: number): string => formatPrice(val, pricescale);
+  const f = (val: number): string => v.context.formatPrice(val, pricescale);
 
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -43,7 +43,7 @@ export function drawLegend(ctx: CanvasRenderingContext2D, v: FinanceView): void 
     const abs = bar.close - bar.open;
     const pct = (abs / bar.open) * 100;
     const sign = abs >= 0 ? "+" : "-";
-    const chgStr = `${sign}${formatPrice(Math.abs(abs), pricescale)} (${sign}${Math.abs(pct).toFixed(2)}%)`;
+    const chgStr = `${sign}${f(Math.abs(abs))} (${sign}${Math.abs(pct).toFixed(2)}%)`;
     ctx.fillStyle = col;
     ctx.fillText(chgStr, x, y);
     x += ctx.measureText(chgStr).width + 12;

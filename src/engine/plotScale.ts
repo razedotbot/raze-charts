@@ -75,13 +75,18 @@ export function priceForY(s: PlotScale, y: number): number {
   return fromDisplay(s, d);
 }
 
+type ScaleWithPriceFormat = PlotScale & {
+  context?: { formatPrice?: (value: number, pricescale: number) => string };
+};
+
 export function formatAxisPrice(s: PlotScale, price: number, pricescale: number): string {
   if (s.percentScale) {
     const pct = toDisplay(s, price);
     const sign = pct >= 0 ? "+" : "";
     return `${sign}${pct.toFixed(2)}%`;
   }
-  return formatPrice(price, pricescale);
+  const format = (s as ScaleWithPriceFormat).context?.formatPrice ?? formatPrice;
+  return format(price, pricescale);
 }
 
 export function computePriceTicks(s: PlotScale): number[] {

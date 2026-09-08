@@ -11,7 +11,7 @@ import type {
   PeriodParams,
   ResolutionString,
 } from "../types/charting_library";
-import type { ChartContext } from "../core/context";
+import { applySymbolInfo, type ChartContext } from "../core/context";
 import { resolutionToMs } from "../util/resolution";
 
 let guidCounter = 0;
@@ -55,7 +55,7 @@ export class DataManager {
   async resolveAndLoad(): Promise<void> {
     await this.ready();
     const info = await this.resolveSymbol(this.context.symbol);
-    this.context.symbolInfo = info;
+    applySymbolInfo(this.context, info);
     await this.loadInitial();
   }
 
@@ -307,7 +307,7 @@ export class DataManager {
     if (symbol === this.context.symbol) return;
     this.stopLiveSubscription();
     this.context.symbol = symbol;
-    this.context.symbolInfo = await this.resolveSymbol(symbol);
+    applySymbolInfo(this.context, await this.resolveSymbol(symbol));
     await this.loadInitial();
   }
 

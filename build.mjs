@@ -1,4 +1,4 @@
-// Build pipeline for @raze/charts.
+// Build pipeline for @razedotbot/charts.
 //
 // Emits artifacts mirroring the TradingView Charting Library package layout so
 // the build output can drop straight into a vendored `charting_library/`
@@ -8,8 +8,8 @@
 //   dist/charting_library.standalone.js  — IIFE that assigns window.TradingView
 //   dist/charting_library.d.ts           — hand-authored drop-in types (copied verbatim)
 //   dist/datafeed-api.d.ts               — alias of the above (TV layout parity)
-//   dist/chart.esm.js                    — dashboard grammar (tree-shaken, no widget)
-//   dist/react.esm.js                    — React adapter (peer: react)
+//   dist/chart.esm.js / chart.cjs.js     — dashboard grammar (tree-shaken, no widget)
+//   dist/react.esm.js / react.cjs.js     — React adapter (peer: react)
 //   dist/types/**                        — tsc-generated declarations
 //
 // The drop-in `.d.ts` is authored by hand (src/types/charting_library.d.ts)
@@ -73,20 +73,24 @@ async function run() {
   for (const t of widgetTargets) {
     await build({ ...common, entryPoints: [entry], ...t });
   }
-  await build({
-    ...common,
-    entryPoints: [resolve(root, "src/chart/index.ts")],
-    format: "esm",
-    outfile: resolve(out, "chart.esm.js"),
-  });
-  await build({
-    ...common,
-    entryPoints: [resolve(root, "src/react/index.tsx")],
-    format: "esm",
-    outfile: resolve(out, "react.esm.js"),
-    jsx: "automatic",
-    external: ["react", "react/jsx-runtime", "react/jsx-dev-runtime"],
-  });
+  const chartEntry = resolve(root, "src/chart/index.ts");
+  const reactEntry = resolve(root, "src/react/index.tsx");
+  for (const [format, ext] of [["esm", "esm"], ["cjs", "cjs"]]) {
+    await build({
+      ...common,
+      entryPoints: [chartEntry],
+      format,
+      outfile: resolve(out, `chart.${ext}.js`),
+    });
+    await build({
+      ...common,
+      entryPoints: [reactEntry],
+      format,
+      outfile: resolve(out, `react.${ext}.js`),
+      jsx: "automatic",
+      external: ["react", "react/jsx-runtime", "react/jsx-dev-runtime"],
+    });
+  }
   copyFileSync(
     resolve(root, "src/types/charting_library.d.ts"),
     resolve(out, "charting_library.d.ts"),

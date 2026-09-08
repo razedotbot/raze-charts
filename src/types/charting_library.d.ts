@@ -1,5 +1,5 @@
 /**
- * Public type surface for @raze/charts.
+ * Public type surface for @razedotbot/charts.
  *
  * Hand-authored to be a STRUCTURALLY-COMPATIBLE subset of the TradingView
  * Charting Library v30 type definitions — specifically the types that
@@ -372,6 +372,28 @@ export interface IndicatorPreset {
   color?: string;
 }
 
+/** Returned by `custom_formatters.priceFormatterFactory`. */
+export interface CustomSymbolValueFormatter {
+  format(price: number, signPositive?: boolean): string;
+}
+
+/**
+ * TradingView Advanced Charts drop-in. Return `null` to fall through to
+ * `raze.format_price` (if set) or the built-in pricescale formatter.
+ *
+ * Called as `(symbolInfo, minTick)` — `minTick` is `minmov / pricescale`.
+ */
+export type PriceFormatterFactory = (
+  symbolInfo: LibrarySymbolInfo | null,
+  minTick: string,
+) => CustomSymbolValueFormatter | null;
+
+/** Subset of TradingView `custom_formatters`. Only price formatting is wired. */
+export interface CustomFormatters {
+  priceFormatterFactory?: PriceFormatterFactory;
+  [key: string]: unknown;
+}
+
 export interface RazeChartsOptions {
   /** Container width (px) below which the left sidebar auto-hides (mobile).
    *  Default 520; 0 disables the compact behaviour. */
@@ -384,6 +406,13 @@ export interface RazeChartsOptions {
   indicator_presets?: IndicatorPreset[];
   /** Extra studies available to createStudy() and the Indicators panel. */
   custom_studies?: StudyDefinition[];
+  /**
+   * Custom price string for the Y axis, last-price tag, OHLC legend, crosshair,
+   * and shape price labels. Receives the symbol `pricescale`. Ignored when
+   * `custom_formatters.priceFormatterFactory` returns a formatter. Percent-scale
+   * axis ticks stay `+x.xx%`.
+   */
+  format_price?: (value: number, pricescale: number) => string;
 }
 
 export interface ChartingLibraryWidgetOptions {
@@ -410,6 +439,13 @@ export interface ChartingLibraryWidgetOptions {
   toolbar_bg?: string;
   /** TV-compatible favorites; `intervals` drives the header interval row. */
   favorites?: { intervals?: ResolutionString[]; [key: string]: unknown };
+  /**
+   * TradingView drop-in custom formatters. Raze honours
+   * `priceFormatterFactory` for every on-canvas price label (axis, last price,
+   * OHLC legend, crosshair, shape tags). Return `null` from the factory to use
+   * `raze.format_price` or the built-in formatter.
+   */
+  custom_formatters?: CustomFormatters;
   /** Raze-charts chrome configuration (ignored by the real TradingView library). */
   raze?: RazeChartsOptions;
   [key: string]: unknown;
