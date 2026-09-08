@@ -1,186 +1,258 @@
-# raze-charts
+# Raze Charts
 
-An open, **dependency-free Canvas-2D financial charting library** with a
-widget API **drop-in compatible** with the TradingView Charting Library.
+Raze Charts is a dependency-free TypeScript toolkit for product-grade charts.
+It combines a realtime financial widget, a small renderer-neutral chart grammar,
+and a thin React adapter without locking product UI behind a proprietary shell.
 
-Built for and battle-tested on [app.raze.bot](https://app.raze.bot), where it
-renders live sub-second candles for on-chain markets. Runtime dependencies:
-**zero**. ESM bundle: **~70 KB** minifiable, sourcemapped, tree-shakeable.
+The priorities are deliberate: a clear API, predictable lifecycle, excellent
+defaults, honest compatibility, and escape hatches that remain typed.
 
-> **Not affiliated with TradingView.** This is an independent, clean-room
-> implementation of a *subset* of the widget API surface published in the
-> TradingView Charting Library type definitions. It contains no TradingView
-> code or assets. "TradingView" is a trademark of TradingView, Inc.
+> Raze Charts is not affiliated with TradingView. It is an independent,
+> clean-room implementation of a documented subset of the TradingView widget
+> and datafeed interfaces. TradingView is a trademark of TradingView, Inc.
 
-## Why
+## Choose a surface
 
-The TradingView Charting Library is closed-source and cannot be redistributed,
-which makes it awkward for open-source apps and self-hosted deployments. If
-your integration uses the common widget surface — `new widget(...)`, a
-`IBasicDataFeed` datafeed, shapes, marks, studies — this package replaces the
-vendored library without touching consumer code.
+| Import | Use it for | Contract |
+| --- | --- | --- |
+| `@razedotbot/charts` | Realtime financial charts and low-level financial building blocks | TradingView-shaped compatibility subset plus Raze-native exports |
+| `@razedotbot/charts/chart` | Framework-neutral product and dashboard charts | Native typed grammar, SVG string rendering, SVG/Canvas DOM mounting |
+| `@razedotbot/charts/react` | React product charts or an incremental Recharts migration | Thin adapter over `/chart`; React is an optional peer dependency |
 
-## Features
+Those are the only public package subpaths today. Imports from `src/**` or
+`dist/**` are implementation details and are not a compatibility contract.
 
-- **Widget API:** `new widget(options)`, `onChartReady`, `headerReady`,
-  `activeChart()`/`chart()`, `createButton`, `setCSSCustomProperty`,
-  `subscribe("drawing_event")`, `onContextMenu`, `remove`.
-- **Chart API:** `resolution`, `onIntervalChanged().subscribe`, `createShape` /
-  `createMultipointShape` (horizontal_line, trend_line, fib_retracement,
-  rectangle, text), `getShapeById().setPoints/getPoints`, `removeEntity`,
-  `clearMarks` / `refreshMarks`, `resetData`, `getVisibleRange` /
-  `setVisibleRange`, `createStudy` (EMA / SMA / RSI).
-- **Datafeed:** drives any `IBasicDataFeed` — `onReady`, `resolveSymbol`,
-  `getBars` (initial + lazy left-scroll pagination), `subscribeBars` /
-  `unsubscribeBars` (live ticks), `getMarks`.
-- **Rendering:** candlesticks / line / area / heikin ashi + volume, crosshair,
-  draggable price/time scales (linear / log / %), OHLC legend, bar marks with
-  hover tooltip, shape drag editing, seconds resolutions, autosize,
-  loading screen, pan/zoom/fit.
-- **Chrome:** left sidebar (drawing tools, indicators, fit / screenshot /
-  fullscreen, chart type), header interval selector, bottom `%` / `log` /
-  `auto` scale bar. Keyboard: arrows pan, `+`/`-` zoom, `f` fit, `Esc` cancel,
-  `Delete` remove selection. **Fully composable** — see
-  [Configuring the chrome](#configuring-the-chrome).
-- **Theming:** TradingView-style `overrides` keys, `theme: "dark" | "light"`,
-  CSS custom properties, custom fonts. Custom price strings via
-  `custom_formatters.priceFormatterFactory` or `raze.format_price` (Y axis,
-  last-price tag, OHLC legend, crosshair).
-- **Mobile / touch:** pointer-events native — one-finger pan, pinch-to-zoom,
-  long-press crosshair (persists until the next tap), finger-sized hit targets
-  on shapes/marks, ≥40px tap targets across the chrome on touch devices, and a
-  compact mode that auto-hides the left sidebar below `raze.compact_breakpoint`
-  (default 520px; 0 disables). `touch-action` is managed so chart gestures
-  never scroll the host page.
+For a precise feature-by-feature view, see the
+[capability matrix](./docs/capabilities.md). For internals and extension
+points, see [architecture](./docs/architecture.md).
+
+## Product principles
+
+- **Native first.** The typed chart definition and data source own behavior;
+  compatibility layers translate into those contracts.
+- **No silent compatibility.** A supported component works, while a known
+  unsupported component such as React `Brush` fails with guidance.
+- **One explicit lifecycle.** Mounted charts update in place and expose cleanup;
+  stale async work cannot regain ownership after a target change or teardown.
+- **One semantic scene.** SVG and Canvas consume the same compiled chart, with
+  renderer parity tested rather than assumed.
+- **Measured quality.** Accessibility, package formats, visual output, dense
+  data, and bundle size have documented checks and honest boundaries.
 
 ## Install
 
 ```bash
-npm i @razedotbot/charts
+npm install @razedotbot/charts
 ```
 
-Dashboard charts (tree-shaken, no trading widget):
+Node 18 or newer is required for development and server-side SVG generation.
+React 17 or newer is required only when importing the React entrypoint. There
+are no runtime dependencies. The published declaration surface requires
+TypeScript 5.0 or newer.
+
+## Native charts: recommended for new product UI
+
+Data keys are inferred from the datum type. A misspelled key is a TypeScript
+error, and accessors can be functions when a key is not enough.
 
 ```ts
 import { defineChart, line, mountChart } from "@razedotbot/charts/chart";
+
+type PricePoint = {
+  time: Date;
+  close: number;
+};
+
+const prices: PricePoint[] = [
+  { time: new Date("2026-09-01T00:00:00Z"), close: 42.1 },
+  { time: new Date("2026-09-02T00:00:00Z"), close: 44.8 },
+];
+
+const definition = defineChart({
+  marks: [
+    line(prices, {
+      x: "time",
+      y: "close",
+      name: "Close",
+      stroke: "#66d89e",
+    }),
+  ],
+  scales: { x: { type: "time" } },
+  tooltip: true,
+  legend: true,
+  ariaLabel: "Daily close price",
+  ariaDescription: "Close price for 1 and 2 September 2026.",
+});
+
+const chart = mountChart(document.querySelector("#chart")!, definition, {
+  renderer: "svg", // or "canvas"
+  height: 320,
+});
+
+// Preserve the host and interaction lifecycle while data or options change.
+chart.update(definition, { height: 360 });
+chart.destroy();
 ```
 
-React adapter (optional peer):
+Built-in marks are `line`, `area`, `bar`, `point`, `ruleY`, `pie`, `radar`,
+and `heatmap`. Scales are `linear`, `band`, `time`, and `log`. The compiler
+produces a renderer-neutral scene that can be inspected with `getScene()` or
+rendered with `renderChartSvg`, `svgFromCompiled`, and `paintChartCanvas`.
+
+Omit `scales.x` to infer it from the data; once an X scale object is present,
+its `type` is required so configuration cannot silently mean something else.
+Built-in marks expose mark-specific option types, and dynamic JavaScript input
+is checked against the same boundary with stable `ChartCompileError` codes.
+Pie and heatmap are standalone compositions. Multiple radar layers may be
+overlaid when they share the same axes; Cartesian scales cannot be mixed into
+a polar chart.
+
+Dense line and area geometry is reduced by a pixel-aware extrema envelope by
+default. Tune it with `performance.maxRenderedPoints`, opt out with
+`performance.decimation: "none"`, and inspect `CompiledChart.diagnostics`.
+While decimation is enabled, the configured maximum is a hard per-series cap
+on source-derived path samples (minimum `1`; area closure vertices are extra).
+The compiler still scans source rows, so this bounds render complexity without
+pretending input processing is free.
+
+Product-specific layers can use the typed `defineMarkPlugin` + `customMark`
+extension point without forking the compiler. Plugins receive isolated,
+read-only scale/theme snapshots and must return validated, discriminated scene
+geometry. The plugin contract is documented in
+[architecture](./docs/architecture.md#custom-marks).
+
+## Financial widget
+
+The root entrypoint is for candlesticks, live bars, financial studies,
+drawings, marks, and TradingView-style datafeeds.
 
 ```ts
-import { Chart, LineChart, Line } from "@razedotbot/charts/react";
-```
+import {
+  widget,
+  type IBasicDataFeed,
+  type ResolutionString,
+} from "@razedotbot/charts";
 
-Git install (builds on `prepare` when `dist/` is missing):
+declare const datafeed: IBasicDataFeed;
 
-```bash
-npm i github:razedotbot/raze-charts
-```
-
-Or clone and build:
-
-```bash
-git clone https://github.com/razedotbot/raze-charts
-cd raze-charts && npm install && npm run build
-```
-
-`dist/` then contains `charting_library.esm.js` (+ `.cjs.js`,
-`.standalone.js`, the drop-in `charting_library.d.ts`, generated
-`types/`, plus `chart.*` and `react.*` for the dashboard entries).
-
-## Use
-
-### As a package
-
-```ts
-import { widget } from "@razedotbot/charts";
-
-const w = new widget({
-  container: document.getElementById("chart")!,
+const financialChart = new widget({
+  container: document.querySelector("#chart")!,
   symbol: "MYTOKEN",
-  interval: "1S" as ResolutionString,
-  datafeed: myDatafeed,          // any TradingView-style IBasicDataFeed
+  interval: "1" as ResolutionString,
+  datafeed,
   autosize: true,
   theme: "dark",
-  enabled_features: ["seconds_resolution", "mark_on_bars"],
+  enabled_features: ["mark_on_bars"],
+  raze: {
+    chart_types: ["candles", "line"],
+    compact_breakpoint: 520,
+    aria_label: "MYTOKEN price chart",
+    aria_description: "One-minute candles quoted in USD.",
+  },
 });
-w.onChartReady(() => w.activeChart().createStudy("EMA", false, false, { length: 21 }));
+
+financialChart.onChartReady(() => {
+  void financialChart.activeChart().createStudy(
+    "EMA",
+    false,
+    false,
+    { length: 21 },
+  );
+});
+
+// Required when the host unmounts.
+financialChart.remove();
 ```
 
-### As a `<script>` tag
-
-`charting_library.standalone.js` assigns `window.TradingView.widget`, mirroring
-the TradingView standalone bundle:
+For a standalone browser bundle, `dist/charting_library.standalone.js` assigns
+`window.TradingView.widget`:
 
 ```html
 <script src="/static/charting_library.standalone.js"></script>
-<script>new TradingView.widget({ /* ... */ });</script>
+<script>
+  const chart = new TradingView.widget({ /* widget options */ });
+</script>
 ```
 
-### Drop-in replacement for a vendored TradingView library
+For new integrations, a Promise-first data source avoids callback plumbing and
+adapts to the widget protocol:
 
-Keep every existing import and swap the module at bundle time. Webpack / Next:
+```ts
+import {
+  createDatafeed,
+  defineDataSource,
+  type ResolutionString,
+} from "@razedotbot/charts";
 
-```js
-// next.config.js — behind an env flag, e.g. NEXT_PUBLIC_CHART_ENGINE=raze
-config.plugins.push(
-  new webpack.NormalModuleReplacementPlugin(
-    /charting_library[\\/]charting_library\.esm(\.js)?$/,
-    path.resolve(__dirname, "public/static/raze_charts/charting_library.esm.js"),
-  ),
-);
+const source = defineDataSource({
+  async resolveSymbol(symbol) {
+    return {
+      name: symbol,
+      ticker: symbol,
+      description: symbol,
+      type: "crypto",
+      session: "24x7",
+      timezone: "Etc/UTC",
+      exchange: "Raze",
+      listed_exchange: "Raze",
+      format: "price",
+      minmov: 1,
+      pricescale: 100,
+      has_intraday: true,
+      supported_resolutions: ["1", "5", "15"] as ResolutionString[],
+    };
+  },
+  async getBars({ symbol, resolution, from, to }) {
+    const query = new URLSearchParams({
+      symbol,
+      resolution: String(resolution),
+      from: String(from),
+      to: String(to),
+    });
+    const response = await fetch(`/api/bars?${query}`);
+    if (!response.ok) throw new Error(`History failed: ${response.status}`);
+    return response.json();
+  },
+});
+
+const datafeed = createDatafeed(source, {
+  supportedResolutions: ["1", "5", "15"] as ResolutionString[],
+});
 ```
 
-`scripts/sync-to-app.mjs` copies the built bundle + `.d.ts` into a host app
-(`node scripts/sync-to-app.mjs <appDir> [subdir]`). Type imports keep pointing
-at the TradingView `charting_library.d.ts` superset or at the bundled drop-in
-`.d.ts` — both compile.
+`subscribeBars` additionally receives an `AbortSignal` and may resolve to a
+cleanup function, making async realtime setup safe. Existing
+`IBasicDataFeed` implementations remain supported directly.
 
-## Configuring the chrome
+The data path handles initial history, left-scroll pagination, live updates,
+marks, symbol/interval changes, and stale async callbacks. `TimeIndex` maps real
+timestamps to logical bars, so weekends and missing sessions do not create
+phantom candles for drawings or marks. See
+[performance and data correctness](./docs/performance.md#financial-data-correctness).
 
-Every visible piece — options, buttons, sidebar, indicators — is data-driven.
-The defaults reproduce the stock chrome; each knob below is optional and typed
-(`RazeChartsOptions` in the bundled `.d.ts`).
+### Financial customization
+
+Chrome is data-driven through `favorites`, feature flags, and `raze` options:
 
 ```ts
 new widget({
-  // ...standard TradingView options...
-
-  // TV-compatible: which intervals sit inline in the header row.
-  favorites: { intervals: ["1S", "1", "5", "15"] as ResolutionString[] },
-
-  // TV-compatible granular hiding (all default-on):
-  //   header_widget · header_resolutions · left_toolbar · legend_widget · scale_bar
+  // ...required widget options
+  favorites: { intervals: ["1", "5", "15"] as ResolutionString[] },
   disabled_features: ["scale_bar"],
-
   raze: {
-    // Container width below which the sidebar auto-hides (default 520; 0 = never).
-    compact_breakpoint: 520,
-
-    // Sidebar layout: builtin ids, "separator", or your own buttons.
     sidebar: [
-      "cursor", "trend_line", "horizontal_line",
+      "cursor",
+      "trend_line",
+      "horizontal_line",
       "separator",
       "indicators",
-      { id: "alerts", title: "Alerts", icon: "<svg…>", onClick: () => openAlerts() },
-      "separator",
-      "fit", "screenshot", "fullscreen", "chart_type",
+      "fit",
+      "screenshot",
     ],
-
-    // Chart-type picker whitelist (default: all four).
-    chart_types: ["candles", "line"],
-
-    // Rows of the Indicators panel (default: EMA 9/21, SMA 20/50, RSI 14,
-    // plus one row per custom study).
     indicator_presets: [
       { name: "EMA", length: 9 },
-      { name: "EMA", length: 21, color: "#26a69a" },
-      { label: "Momentum", name: "MOM", length: 10 },
+      { name: "RSI", length: 14 },
     ],
-
-    // Register your own indicators — same shape as the built-ins. `pane:
-    // "overlay"` draws on the price pane; `pane: "pane"` gets its own
-    // sub-pane with optional fixed range, guide levels and label.
     custom_studies: [
       {
         name: "MOM",
@@ -188,167 +260,151 @@ new widget({
         defaults: { length: 10, color: "#8ecae6" },
         levels: [{ value: 0, dashed: true, axisLabel: true }],
         compute: (bars, { length }) =>
-          bars.map((b, i) => (i < length ? null : b.close - bars[i - length].close)),
+          bars.map((bar, index) =>
+            index < length ? null : bar.close - bars[index - length]!.close,
+          ),
       },
     ],
   },
 });
 ```
 
-Custom studies are first-class: `createStudy("MOM")` resolves them, the
-Indicators panel lists them, the legend shows their values, and pane studies
-render with auto-fit or fixed ranges. Sidebar items, interval favorites,
-built-in study catalogue (`BUILTIN_STUDIES`, `StudyRegistry`) and preset
-defaults (`DEFAULT_SIDEBAR_ITEMS`, `DEFAULT_INDICATOR_PRESETS`,
-`DEFAULT_INTERVAL_FAVORITES`) are all exported for composition.
+Custom studies use the public full-array `compute` contract. Built-in EMA,
+SMA, and RSI update incrementally for an appended or replaced live bar;
+backfills and custom studies recompute. This distinction matters for high-rate
+feeds and is intentionally documented rather than hidden.
 
-## Custom price format
+### Price formatting
 
-The built-in price string is `pricescale` + `toLocaleString` (at least two
-fractional digits). `minmov` / `pricescale` on the symbol change precision, not
-the notation (`1.57e-4`, `1.57k`). To own the string on the **Y axis, last-price
-tag, OHLC legend, crosshair, and shape price labels**, pass a formatter on the
-widget — not a `node_modules` patch.
-
-TradingView drop-in (`custom_formatters.priceFormatterFactory` is called as
-`(symbolInfo, minTick)`; return `null` to fall through):
+One formatter controls the price axis, last-price tag, OHLC legend, crosshair,
+and shape price labels. A TradingView-shaped factory takes precedence; return
+`null` to fall through to the Raze-native formatter and then the built-in
+`pricescale` formatter.
 
 ```ts
+declare function formatTokenPrice(value: number, pricescale?: number): string;
+
 new widget({
-  // ...
+  // ...required widget options
   custom_formatters: {
-    priceFormatterFactory: (symbolInfo) => {
-      if (!symbolInfo) return null;
-      return { format: (value) => formatTokenPrice(value) };
-    },
+    priceFormatterFactory: (symbolInfo) =>
+      symbolInfo ? { format: (value) => formatTokenPrice(value) } : null,
   },
-});
-```
-
-Raze-native (receives `pricescale`; used when the factory is omitted or returns
-`null`):
-
-```ts
-new widget({
-  // ...
   raze: {
-    format_price: (value, pricescale) => formatTokenPrice(value, pricescale),
+    format_price: (value, pricescale) =>
+      formatTokenPrice(value, pricescale),
   },
 });
 ```
 
-Percent-scale axis ticks stay `+x.xx%`. Overlay study legend values still honour
-`StudyDefinition.formatValue` when set. The exported `formatPrice` helper is
-unchanged — wire the same function through the options above so the canvas
-matches the rest of the page.
+Percent-scale ticks keep percent notation. Overlay studies may still own their
+legend value through `StudyDefinition.formatValue`.
 
-## Modular API
+The root also exports `DataManager`, `TimeIndex`, `ChartEngine`,
+`ChartRenderer`, `ShapeStore`, `StudyStore`, indicator math, formatting and
+resolution helpers, `defineDataSource` / `createDatafeed`, and the default UI
+chrome. These pieces are useful for a custom financial shell, but currently
+share the widget's mutable `ChartContext`; they are not separate package
+subpaths.
 
-Everything the widget is made of is exported à la carte, fully typed:
+## React
 
-```ts
-// Indicator math — pure functions, no DOM
-import { ema, sma, rsi, closesFromBars, heikinAshi } from "@razedotbot/charts";
+For the native API, `<Chart>` is a lifecycle adapter around a
+`ChartDefinition`. It mounts once and forwards new definitions, dimensions,
+renderer choices, and accessibility text through `update()`.
 
-// Datafeed orchestration without the widget shell (pagination + live merge)
-import { DataManager } from "@razedotbot/charts";
-
-// Engine + renderer for a custom shell
-import { ChartEngine, ChartRenderer, ShapeStore, StudyStore } from "@razedotbot/charts";
-
-// Formatting / resolution helpers
-import { formatPrice, createPriceFormatter, formatCompact, parseResolution, resolutionToMs } from "@razedotbot/charts";
-```
-
-UI chrome (`Toolbar`, `LeftSidebar`, `IndicatorsMenu`, `IntervalSelector`,
-`ScaleBar`, `LoadingScreen`) and theming (`buildTheme`, `withAlpha`) are
-exported too. `sideEffects: false` — bundlers drop whatever you don't import.
-
-## Dashboard charts
-
-Product charts (line / bar / area / pie / scatter / radar / heatmap) live on a **separate
-entry** so the TradingView widget bundle stays lean. SVG by default.
-
-```ts
-import { defineChart, line, bar, mountChart } from "@razedotbot/charts/chart";
-
-const sales = [
-  { month: "Jan", value: 42 },
-  { month: "Feb", value: 58 },
-];
-
-const definition = defineChart({
-  marks: [line(sales, { x: "month", y: "value", stroke: "#66d89e" })],
-  ariaLabel: "Monthly sales",
-});
-
-mountChart(document.getElementById("chart")!, definition);
-```
-
-React (peer dependency, optional):
+For Recharts-shaped JSX, use the typed factory in new code:
 
 ```tsx
-import { Chart, LineChart, Line, XAxis, Tooltip } from "@razedotbot/charts/react";
+import { createChartComponents } from "@razedotbot/charts/react";
 
-<Chart definition={definition} height={320} />
+type Sale = { month: string; revenue: number };
 
-<LineChart data={sales} height={320}>
-  <XAxis dataKey="month" />
-  <Line dataKey="value" stroke="#66d89e" />
-  <Tooltip />
-</LineChart>
+const { LineChart, Line, XAxis, CartesianGrid, Tooltip, Legend } =
+  createChartComponents<Sale>({ xKey: "month", valueKey: "revenue" });
+
+export function RevenueChart({ data }: { data: Sale[] }) {
+  return (
+    <LineChart
+      data={data}
+      height={320}
+      ariaLabel="Monthly revenue"
+      ariaDescription="Revenue from January through March."
+    >
+      <CartesianGrid />
+      <XAxis dataKey="month" />
+      <Line dataKey="revenue" name="Revenue" stroke="#66d89e" />
+      <Tooltip />
+      <Legend />
+    </LineChart>
+  );
+}
 ```
 
-The candlestick widget is unchanged: Canvas, chrome, and paint constants stay
-frozen. Dashboard charts are a new surface.
+`Tooltip` and `Legend` are functional configuration toggles consumed by the
+parent chart. They are not customizable overlay components. `Brush` is
+explicitly unsupported and throws a descriptive error when used; it is never
+silently ignored. The adapter is a migration convenience, not a drop-in
+implementation of the full Recharts API. See the
+[Recharts migration matrix](./docs/migration.md#recharts-shaped-jsx).
 
-## Examples & tests
+Each series component accepts only the options it implements, both in
+TypeScript and at runtime. `ResponsiveContainer` measures its box and injects
+numeric dimensions into exactly one chart child; set visual size through chart
+props or the container, not `Chart.style.width` / `height`. `onReady` exposes
+only detached, deeply frozen scene snapshots, while React retains lifecycle
+and teardown ownership.
 
-```bash
-npm test                        # build + jsdom widget smoke + dashboard unit tests
-npm run test:visual             # Playwright goldens of the trading widget (Chromium)
-python3 -m http.server 8799     # then open examples/index.html or examples/dashboard.html
-```
+## Design and accessibility
 
-`examples/index.html` mounts the trading widget against the synthetic
-`examples/mock-datafeed.mjs`. `examples/visual.html` is the golden harness
-(frozen timestamps, no live ticks). `examples/dashboard.html` mounts the
-cartesian SVG charts.
+Dark and light themes ship with cohesive pane, grid, axis, tooltip, status,
+and series colors. Every native chart also accepts a partial theme, so a
+product can own its visual language without replacing the renderer.
 
-## Scope
+Good visual defaults do not make every integration accessible automatically.
+Supply a specific `ariaLabel`, add `ariaDescription` when the trend needs
+context, preserve keyboard focus styles, and offer a table or textual summary
+when users need exact values. The implemented behavior and integration
+checklist live in the [accessibility guide](./docs/accessibility.md). Raze
+Charts does not claim a blanket WCAG conformance certification.
 
-Implemented: the API surface above. **Not** implemented (by design, PRs
-welcome): the full ~70 TradingView drawing-tool set, TradingView's built-in
-studies library (bring your own via `raze.custom_studies` — each pane study
-gets its own sub-pane), compare/multi-symbol, save/load layouts, study
-templates. Where TradingView types are enormous unions, the bundled
-`.d.ts` uses permissive index signatures so existing consumer code
-type-checks without enumerating thousands of keys.
+## Compatibility and migration
+
+- [Capability matrix](./docs/capabilities.md) — what each entrypoint supports.
+- [Migration guide](./docs/migration.md) — TradingView and Recharts mappings,
+  differences, and unsupported surfaces.
+- [Architecture](./docs/architecture.md) — data flow, lifecycle, renderers, and
+  custom mark plugins.
+- [Performance](./docs/performance.md) — reproducible benchmarks, budgets, and
+  large-data guidance.
+- [Accessibility](./docs/accessibility.md) — current semantics and host-app
+  responsibilities.
 
 ## Development
 
 ```bash
-npm run dev        # esbuild watch
-npm run typecheck  # tsc strict, no emit
-npm test           # build + smoke + dashboard tests
-npm run test:visual:update  # rewrite widget screenshot goldens
+npm ci
+npm run quality
+npm run test:visual
 ```
 
-Layout:
+`npm run quality` runs strict source/API type checks, builds the distributable
+artifacts, and exercises the widget, dashboard compiler and edge cases,
+SVG/Canvas color parity, React 17/18 contracts, data races, time indexing,
+studies, declaration watch mode, the packed ESM/CJS/NodeNext package contract,
+documentation, bundle budgets, and compiler performance. Visual tests use
+Playwright Chromium snapshots and remain a separate platform-specific gate.
 
+Use `npm run typecheck` as the faster type-only feedback loop while editing.
+
+Open `examples/index.html`, `examples/dashboard.html`, or
+`examples/visual.html` through a local HTTP server after building:
+
+```bash
+python -m http.server 8799
 ```
-src/
-  index.ts                     public entry — widget + modular named exports
-  chart/     defineChart, marks, scales, SVG/Canvas dashboard renderers
-  react/     <Chart> + Recharts-shaped JSX (LineChart, Bar, XAxis, …)
-  types/charting_library.d.ts  hand-authored drop-in types (copied to dist)
-  core/      Widget, ChartApi, ShapeStore, context, theme
-  data/      DataManager (datafeed orchestration, bar store, pagination, live)
-  engine/    ChartEngine, layout, plotScale, scene, paint/*, gestures
-  studies/   SMA/EMA/RSI calc + StudyStore
-  ui/        Toolbar, LeftSidebar, IndicatorsMenu, IntervalSelector, ScaleBar, …
-  util/      delegate, resolution, format, heikinAshi
-```
+
+Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 

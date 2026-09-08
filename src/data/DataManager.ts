@@ -22,25 +22,71 @@ const INITIAL_BARS = 1500;
 /** How many bars to request on each left-scroll page. */
 const PAGE_BARS = 1000;
 
+interface DataTarget {
+  symbol: string;
+  resolution: ResolutionString;
+}
+
+interface HistoryResult {
+  bars: Bar[];
+  noData: boolean;
+}
+
+const errorMessage = (reason: unknown): string => {
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === "string" && reason.trim()) return reason;
+  return "unknown datafeed error";
+};
+
 export class DataManager {
   private config: DatafeedConfiguration | null = null;
   private subGuid: string | null = null;
-  private liveTick: ((bar: Bar) => void) | null = null;
+  private destroyed = false;
 
-  /** True while a history request is in flight (guards against re-entrancy). */
-  private loading = false;
+  /** Invalidates every callback belonging to an older data target. */
+  private generation = 0;
+  /** Logical cancellation for callback-only datafeeds. */
+  private pendingCancellations = new Set<() => void>();
+  private latestReload: Promise<boolean> | null = null;
+  private desiredTarget: DataTarget;
+
+  /** A request id avoids an old pagination finally-block unlocking a new one. */
+  private historyRequestId = 0;
+  private activeHistoryRequestId: number | null = null;
+  /** Marks have their own revision so refresh/clear can supersede one another. */
+  private marksRequestId = 0;
+  private marksCancellation: (() => void) | null = null;
+
   /** False once the datafeed reports `noData` for older history. */
   private hasMoreHistory = true;
-  /** Resolves when onReady has fired. */
+  /** Resolves when onReady fires, or when the manager is destroyed. */
   private readyPromise: Promise<void>;
+  private readyResolve!: () => void;
+  private readySettled = false;
 
   constructor(private readonly context: ChartContext) {
-    this.readyPromise = new Promise<void>((resolve) => {
-      this.context.datafeed.onReady((cfg: DatafeedConfiguration) => {
-        this.config = cfg;
-        resolve();
-      });
+    this.desiredTarget = {
+      symbol: this.context.symbol,
+      resolution: this.context.resolution,
+    };
+    this.readyPromise = new Promise<void>((resolve, reject) => {
+      this.readyResolve = resolve;
+      try {
+        this.context.datafeed.onReady((cfg: DatafeedConfiguration) => {
+          if (!this.destroyed) this.config = cfg ?? {};
+          this.settleReady();
+        });
+      } catch (error) {
+        this.readySettled = true;
+        reject(new Error(`[raze-charts] datafeed onReady failed: ${errorMessage(error)}`));
+      }
     });
+  }
+
+  private settleReady(): void {
+    if (this.readySettled) return;
+    this.readySettled = true;
+    this.readyResolve();
   }
 
   ready(): Promise<void> {
@@ -51,39 +97,165 @@ export class DataManager {
     return this.config;
   }
 
-  // ── Symbol resolution + initial load ────────────────────────────────────────
-  async resolveAndLoad(): Promise<void> {
-    await this.ready();
-    const info = await this.resolveSymbol(this.context.symbol);
-    applySymbolInfo(this.context, info);
-    await this.loadInitial();
+  private isCurrent(generation: number): boolean {
+    return !this.destroyed && generation === this.generation;
   }
 
-  private resolveSymbol(symbol: string): Promise<LibrarySymbolInfo> {
-    return new Promise<LibrarySymbolInfo>((resolve, reject) => {
-      this.context.datafeed.resolveSymbol(
-        symbol,
-        (info) => resolve(info),
-        (reason) => reject(new Error(reason)),
-      );
-    });
+  private cancelPending(): void {
+    const pending = Array.from(this.pendingCancellations);
+    this.pendingCancellations.clear();
+    for (const cancel of pending) cancel();
+    this.marksCancellation = null;
   }
 
-  private async loadInitial(): Promise<void> {
+  private beginReload(target: DataTarget): number {
+    this.generation += 1;
+    this.desiredTarget = target;
+    this.stopLiveSubscription();
+    this.cancelPending();
+    this.marksRequestId += 1;
+    this.historyRequestId += 1;
+    this.activeHistoryRequestId = null;
     this.hasMoreHistory = true;
-    this.context.bars = [];
-    const resMs = resolutionToMs(this.context.resolution);
-    const nowSec = Math.floor(Date.now() / 1000);
-    const fromSec = nowSec - Math.ceil((INITIAL_BARS * resMs) / 1000);
-    const bars = await this.requestBars(
-      { from: fromSec, to: nowSec, countBack: INITIAL_BARS, firstDataRequest: true },
+    return this.generation;
+  }
+
+  // -- Symbol resolution + initial load -------------------------------------
+
+  async resolveAndLoad(): Promise<void> {
+    const first = this.startReload(
+      { symbol: this.context.symbol, resolution: this.context.resolution },
+      true,
     );
-    this.mergeBars(bars);
-    this.initVisibleRange();
-    this.startLiveSubscription();
-    await this.loadMarks();
-    this.context.dataChanged.fire();
-    this.context.requestPaint();
+
+    // A host may call setSymbol immediately after constructing the widget. In
+    // that case chartReady belongs to the newest request, not the cancelled
+    // constructor request.
+    let pending = first;
+    while (!this.destroyed) {
+      try {
+        await pending;
+      } catch (error) {
+        if (!this.latestReload || this.latestReload === pending) throw error;
+      }
+      const latest = this.latestReload;
+      if (!latest || latest === pending) return;
+      pending = latest;
+    }
+  }
+
+  private startReload(target: DataTarget, forceResolve = false): Promise<boolean> {
+    if (this.destroyed) return Promise.resolve(false);
+
+    const generation = this.beginReload(target);
+    let tracked!: Promise<boolean>;
+    tracked = this.performReload(generation, target, forceResolve).finally(() => {
+      if (this.latestReload === tracked) this.latestReload = null;
+    });
+    this.latestReload = tracked;
+    return tracked;
+  }
+
+  private async performReload(
+    generation: number,
+    target: DataTarget,
+    forceResolve: boolean,
+  ): Promise<boolean> {
+    try {
+      await this.ready();
+      if (!this.isCurrent(generation)) return false;
+
+      let info: LibrarySymbolInfo | null = null;
+      if (!forceResolve && target.symbol === this.context.symbol) {
+        info = this.context.symbolInfo;
+      }
+      if (!info) info = await this.resolveSymbol(target.symbol, generation);
+      if (!info || !this.isCurrent(generation)) return false;
+
+      const resMs = resolutionToMs(target.resolution);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const fromSec = nowSec - Math.ceil((INITIAL_BARS * resMs) / 1000);
+      const history = await this.requestBars(
+        info,
+        target.resolution,
+        { from: fromSec, to: nowSec, countBack: INITIAL_BARS, firstDataRequest: true },
+        generation,
+      );
+      if (!history || !this.isCurrent(generation)) return false;
+
+      // Commit symbol, interval, bars, and formatter atomically. Until history
+      // succeeds the previous chart remains internally consistent.
+      this.context.symbol = target.symbol;
+      this.context.resolution = target.resolution;
+      applySymbolInfo(this.context, info);
+      this.context.bars = this.normaliseBars(history.bars);
+      this.context.marks = [];
+      this.hasMoreHistory = !(history.noData && history.bars.length === 0);
+      this.initVisibleRange();
+      this.startLiveSubscription(generation, info, target.resolution);
+      this.context.dataChanged.fire();
+      this.context.requestPaint();
+
+      // Marks are intentionally non-blocking: many TradingView-compatible
+      // feeds answer asynchronously, and a missing marks callback must not hold
+      // chartReady forever. The generation guard still prevents stale writes.
+      this.refreshMarksFor(generation, info, target.resolution, this.context.bars);
+      return true;
+    } catch (error) {
+      if (this.isCurrent(generation)) {
+        this.desiredTarget = {
+          symbol: this.context.symbol,
+          resolution: this.context.resolution,
+        };
+        // A failed transition keeps the previous committed data usable.
+        if (this.context.symbolInfo) {
+          this.startLiveSubscription(
+            generation,
+            this.context.symbolInfo,
+            this.context.resolution,
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  private resolveSymbol(
+    symbol: string,
+    generation: number,
+  ): Promise<LibrarySymbolInfo | null> {
+    return new Promise<LibrarySymbolInfo | null>((resolve, reject) => {
+      if (!this.isCurrent(generation)) {
+        resolve(null);
+        return;
+      }
+
+      let settled = false;
+      const finish = (value: LibrarySymbolInfo | null, error?: unknown): void => {
+        if (settled) return;
+        settled = true;
+        this.pendingCancellations.delete(cancel);
+        if (error !== undefined && this.isCurrent(generation)) {
+          reject(new Error(
+            `[raze-charts] resolveSymbol failed for "${symbol}": ${errorMessage(error)}`,
+          ));
+        } else {
+          resolve(this.isCurrent(generation) ? value : null);
+        }
+      };
+      const cancel = (): void => finish(null);
+      this.pendingCancellations.add(cancel);
+
+      try {
+        this.context.datafeed.resolveSymbol(
+          symbol,
+          (info) => finish(info),
+          (reason) => finish(null, reason),
+        );
+      } catch (error) {
+        finish(null, error);
+      }
+    });
   }
 
   /** Position the initial visible window over the most recent ~120 bars. */
@@ -94,8 +266,6 @@ export class DataManager {
       return;
     }
     const visibleCount = Math.min(n, 120);
-    // A small right gutter (TV's default scroll position), but capped so sparse
-    // charts don't open with a wall of empty space on the right.
     const rightPad = Math.min(8, Math.max(1, Math.round(visibleCount * 0.06)));
     this.context.visibleRange = {
       from: n - visibleCount,
@@ -104,32 +274,41 @@ export class DataManager {
     this.context.autoScalePrice = true;
   }
 
-  // ── Lazy left-scroll pagination ─────────────────────────────────────────────
+  // -- Lazy left-scroll pagination -----------------------------------------
+
   /** Called by the engine when the visible range nears the left edge. */
   async maybeLoadMoreHistory(): Promise<void> {
-    if (this.loading || !this.hasMoreHistory) return;
+    if (this.destroyed || this.activeHistoryRequestId !== null || !this.hasMoreHistory) return;
     const bars = this.context.bars;
-    if (!bars.length) return;
-    // Trigger when the left of the visible range is within 50 bars of bar 0.
+    const info = this.context.symbolInfo;
+    if (!bars.length || !info) return;
     if (this.context.visibleRange.from > 50) return;
 
-    this.loading = true;
+    const generation = this.generation;
+    const resolution = this.context.resolution;
+    const requestId = ++this.historyRequestId;
+    this.activeHistoryRequestId = requestId;
     try {
       const oldestMs = bars[0]!.time;
-      const resMs = resolutionToMs(this.context.resolution);
+      const resMs = resolutionToMs(resolution);
       const toSec = Math.floor(oldestMs / 1000) - 1;
       const fromSec = toSec - Math.ceil((PAGE_BARS * resMs) / 1000);
-      const older = await this.requestBars(
+      const history = await this.requestBars(
+        info,
+        resolution,
         { from: fromSec, to: toSec, countBack: PAGE_BARS, firstDataRequest: false },
+        generation,
       );
-      if (!older.length) {
+      if (!history || !this.isCurrent(generation) || this.activeHistoryRequestId !== requestId) {
+        return;
+      }
+
+      if (!history.bars.length) {
         this.hasMoreHistory = false;
       } else {
-        const addedBefore = this.context.bars.length;
-        this.mergeBars(older);
-        const addedCount = this.context.bars.length - addedBefore;
-        // Shift the visible range right by however many bars were prepended so
-        // the view stays anchored on the same candles.
+        const before = this.context.bars.length;
+        this.mergeBars(history.bars);
+        const addedCount = this.context.bars.length - before;
         if (addedCount > 0) {
           this.context.visibleRange = {
             from: this.context.visibleRange.from + addedCount,
@@ -139,76 +318,117 @@ export class DataManager {
       }
       this.context.dataChanged.fire();
       this.context.requestPaint();
+    } catch (error) {
+      if (this.isCurrent(generation)) this.reportError("history pagination", error);
     } finally {
-      this.loading = false;
+      if (this.activeHistoryRequestId === requestId) this.activeHistoryRequestId = null;
     }
   }
 
-  private requestBars(periodParams: PeriodParams): Promise<Bar[]> {
-    const info = this.context.symbolInfo;
-    if (!info) return Promise.resolve([]);
-    return new Promise<Bar[]>((resolve) => {
+  private requestBars(
+    info: LibrarySymbolInfo,
+    resolution: ResolutionString,
+    periodParams: PeriodParams,
+    generation: number,
+  ): Promise<HistoryResult | null> {
+    return new Promise<HistoryResult | null>((resolve, reject) => {
+      if (!this.isCurrent(generation)) {
+        resolve(null);
+        return;
+      }
+
       let settled = false;
-      const done = (bars: Bar[]): void => {
+      const finish = (value: HistoryResult | null, error?: unknown): void => {
         if (settled) return;
         settled = true;
-        resolve(bars);
+        this.pendingCancellations.delete(cancel);
+        if (error !== undefined && this.isCurrent(generation)) {
+          reject(new Error(
+            `[raze-charts] getBars failed for "${info.name}" at ${resolution}: ${errorMessage(error)}`,
+          ));
+        } else {
+          resolve(this.isCurrent(generation) ? value : null);
+        }
       };
-      this.context.datafeed.getBars(
-        info,
-        this.context.resolution,
-        periodParams,
-        (bars: Bar[], meta?: HistoryMetadata) => {
-          if (meta?.noData && (!bars || bars.length === 0)) {
-            done([]);
-          } else {
-            done(bars ?? []);
-          }
-        },
-        () => done([]),
-      );
+      const cancel = (): void => finish(null);
+      this.pendingCancellations.add(cancel);
+
+      try {
+        this.context.datafeed.getBars(
+          info,
+          resolution,
+          periodParams,
+          (bars: Bar[], meta?: HistoryMetadata) => {
+            const safeBars = Array.isArray(bars) ? bars : [];
+            finish({ bars: safeBars, noData: meta?.noData === true });
+          },
+          (reason) => finish(null, reason),
+        );
+      } catch (error) {
+        finish(null, error);
+      }
     });
   }
 
   /** Merge a batch into the canonical series, dedup by time, keep ascending. */
   private mergeBars(batch: Bar[]): void {
-    if (!batch.length) return;
-    const byTime = new Map<number, Bar>();
-    for (const b of this.context.bars) byTime.set(b.time, b);
-    for (const b of batch) {
-      if (!Number.isFinite(b.time)) continue;
-      byTime.set(b.time, b);
-    }
-    const merged = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
-    this.context.bars = merged;
+    this.context.bars = this.normaliseBars([...this.context.bars, ...batch]);
   }
 
-  // ── Live subscription ───────────────────────────────────────────────────────
-  private startLiveSubscription(): void {
+  private normaliseBars(batch: Bar[]): Bar[] {
+    const byTime = new Map<number, Bar>();
+    for (const bar of batch) {
+      if (!bar || !Number.isFinite(bar.time)) continue;
+      byTime.set(bar.time, bar);
+    }
+    return Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+  }
+
+  // -- Live subscription ----------------------------------------------------
+
+  private startLiveSubscription(
+    generation: number,
+    info: LibrarySymbolInfo,
+    resolution: ResolutionString,
+  ): void {
     this.stopLiveSubscription();
-    const info = this.context.symbolInfo;
-    if (!info) return;
+    if (!this.isCurrent(generation)) return;
+
     const guid = nextGuid();
     this.subGuid = guid;
-    this.liveTick = (bar: Bar) => this.onLiveBar(bar);
-    this.context.datafeed.subscribeBars(
-      info,
-      this.context.resolution,
-      (bar: Bar) => this.liveTick?.(bar),
-      guid,
-      () => this.onResetCacheNeeded(),
-    );
+    try {
+      this.context.datafeed.subscribeBars(
+        info,
+        resolution,
+        (bar: Bar) => {
+          if (!this.isCurrent(generation) || this.subGuid !== guid) return;
+          this.onLiveBar(bar);
+        },
+        guid,
+        () => {
+          // Defer so a feed that calls reset synchronously from subscribeBars
+          // cannot recursively subscribe forever.
+          queueMicrotask(() => {
+            if (!this.isCurrent(generation) || this.subGuid !== guid) return;
+            this.resetData();
+          });
+        },
+      );
+    } catch (error) {
+      if (this.subGuid === guid) this.subGuid = null;
+      if (this.isCurrent(generation)) this.reportError("live subscription", error);
+    }
   }
 
   private stopLiveSubscription(): void {
-    if (this.subGuid) {
-      try {
-        this.context.datafeed.unsubscribeBars(this.subGuid);
-      } catch {
-        /* ignore */
-      }
-      this.subGuid = null;
-      this.liveTick = null;
+    const guid = this.subGuid;
+    this.subGuid = null;
+    if (!guid) return;
+    try {
+      this.context.datafeed.unsubscribeBars(guid);
+    } catch {
+      // Teardown remains best-effort; the cleared guid already makes any late
+      // callback harmless.
     }
   }
 
@@ -216,12 +436,11 @@ export class DataManager {
     if (!Number.isFinite(bar.time)) return;
     const bars = this.context.bars;
     const last = bars[bars.length - 1];
-    // Was the viewport pinned to the right edge before this tick?
     const pinnedRight = bars.length > 0 && this.context.visibleRange.to >= bars.length - 1;
     if (last && bar.time === last.time) {
-      bars[bars.length - 1] = bar; // update the forming bar
+      bars[bars.length - 1] = bar;
     } else if (!last || bar.time > last.time) {
-      bars.push(bar); // a new bar opened
+      bars.push(bar);
       if (pinnedRight) {
         this.context.visibleRange = {
           from: this.context.visibleRange.from + 1,
@@ -229,93 +448,217 @@ export class DataManager {
         };
       }
     } else {
-      return; // out-of-order historical tick — ignore
+      return;
     }
     this.context.dataChanged.fire();
     this.context.requestPaint();
   }
 
-  private async onResetCacheNeeded(): Promise<void> {
-    this.context.bars = [];
-    await this.loadInitial();
+  // -- Marks ---------------------------------------------------------------
+
+  private cancelMarksRequest(): void {
+    this.marksRequestId += 1;
+    const cancel = this.marksCancellation;
+    this.marksCancellation = null;
+    cancel?.();
   }
 
-  // ── Marks ───────────────────────────────────────────────────────────────────
-  async loadMarks(): Promise<void> {
-    const info = this.context.symbolInfo;
-    const df = this.context.datafeed;
-    if (!info || typeof df.getMarks !== "function") {
-      this.context.marks = [];
-      return;
+  private requestMarks(
+    generation: number,
+    requestId: number,
+    info: LibrarySymbolInfo,
+    resolution: ResolutionString,
+    from: number,
+    to: number,
+  ): Promise<Mark[] | null> {
+    return new Promise<Mark[] | null>((resolve, reject) => {
+      if (!this.isCurrent(generation) || requestId !== this.marksRequestId) {
+        resolve(null);
+        return;
+      }
+
+      let settled = false;
+      const finish = (value: Mark[] | null, error?: unknown): void => {
+        if (settled) return;
+        settled = true;
+        this.pendingCancellations.delete(cancel);
+        if (this.marksCancellation === cancel) this.marksCancellation = null;
+        if (
+          error !== undefined &&
+          this.isCurrent(generation) &&
+          requestId === this.marksRequestId
+        ) {
+          reject(new Error(
+            `[raze-charts] getMarks failed for "${info.name}" at ${resolution}: ${errorMessage(error)}`,
+          ));
+        } else {
+          resolve(
+            this.isCurrent(generation) && requestId === this.marksRequestId ? value : null,
+          );
+        }
+      };
+      const cancel = (): void => finish(null);
+      this.pendingCancellations.add(cancel);
+      this.marksCancellation = cancel;
+
+      try {
+        this.context.datafeed.getMarks!(
+          info,
+          from,
+          to,
+          (marks: Mark[]) => finish(Array.isArray(marks) ? marks : []),
+          resolution,
+        );
+      } catch (error) {
+        finish(null, error);
+      }
+    });
+  }
+
+  private async loadMarksFor(
+    generation: number,
+    info: LibrarySymbolInfo | null,
+    resolution: ResolutionString,
+    bars: Bar[],
+  ): Promise<boolean> {
+    this.cancelMarksRequest();
+    const requestId = this.marksRequestId;
+    const getMarks = this.context.datafeed.getMarks;
+    if (!info || typeof getMarks !== "function" || !bars.length) {
+      if (this.isCurrent(generation) && requestId === this.marksRequestId) {
+        this.context.marks = [];
+        return true;
+      }
+      return false;
     }
-    const bars = this.context.bars;
-    if (!bars.length) {
-      this.context.marks = [];
-      return;
-    }
+
     const from = Math.floor(bars[0]!.time / 1000);
     const to = Math.floor(bars[bars.length - 1]!.time / 1000) + 86_400;
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      df.getMarks!(
-        info,
-        from,
-        to,
-        (marks: Mark[]) => {
-          if (settled) return;
-          settled = true;
-          this.context.marks = marks ?? [];
-          resolve();
-        },
-        this.context.resolution,
-      );
-      // getMarks may never call back if the provider is empty; resolve next tick.
-      queueMicrotask(() => {
-        if (!settled) {
-          settled = true;
-          resolve();
-        }
+    const marks = await this.requestMarks(
+      generation,
+      requestId,
+      info,
+      resolution,
+      from,
+      to,
+    );
+    if (
+      marks === null ||
+      !this.isCurrent(generation) ||
+      requestId !== this.marksRequestId
+    ) {
+      return false;
+    }
+    this.context.marks = marks;
+    return true;
+  }
+
+  async loadMarks(): Promise<void> {
+    await this.loadMarksFor(
+      this.generation,
+      this.context.symbolInfo,
+      this.context.resolution,
+      this.context.bars,
+    );
+  }
+
+  private refreshMarksFor(
+    generation: number,
+    info: LibrarySymbolInfo | null,
+    resolution: ResolutionString,
+    bars: Bar[],
+  ): void {
+    void this.loadMarksFor(generation, info, resolution, bars)
+      .then((changed) => {
+        if (!changed || !this.isCurrent(generation)) return;
+        this.context.dataChanged.fire();
+        this.context.requestPaint();
+      })
+      .catch((error: unknown) => {
+        if (this.isCurrent(generation)) this.reportError("marks request", error);
       });
-    });
   }
 
   refreshMarks(): void {
-    void this.loadMarks().then(() => {
-      this.context.dataChanged.fire();
-      this.context.requestPaint();
-    });
+    this.refreshMarksFor(
+      this.generation,
+      this.context.symbolInfo,
+      this.context.resolution,
+      this.context.bars,
+    );
   }
 
   clearMarks(): void {
+    if (this.destroyed) return;
+    this.cancelMarksRequest();
     this.context.marks = [];
     this.context.dataChanged.fire();
     this.context.requestPaint();
   }
 
-  // ── Resolution / symbol changes ─────────────────────────────────────────────
-  async changeResolution(res: ResolutionString): Promise<void> {
-    if (res === this.context.resolution) return;
-    this.stopLiveSubscription();
-    this.context.resolution = res;
-    await this.loadInitial();
-    // Notify subscribers (the app persists the interval + repaints overlays).
-    const tfObj: { timeframe?: { value: string; type: string } } = {};
-    this.context.intervalChanged.fire(res, tfObj);
+  // -- Resolution / symbol changes -----------------------------------------
+
+  async changeResolution(resolution: ResolutionString): Promise<void> {
+    const target = { symbol: this.desiredTarget.symbol, resolution };
+    if (
+      target.symbol === this.desiredTarget.symbol &&
+      target.resolution === this.desiredTarget.resolution
+    ) {
+      if (this.latestReload) await this.latestReload;
+      return;
+    }
+
+    const previous = this.context.resolution;
+    const changed = await this.startReload(target);
+    if (changed && previous !== resolution && !this.destroyed) {
+      const timeframe: { timeframe?: { value: string; type: string } } = {};
+      this.context.intervalChanged.fire(resolution, timeframe);
+    }
   }
 
-  async changeSymbol(symbol: string): Promise<void> {
-    if (symbol === this.context.symbol) return;
-    this.stopLiveSubscription();
-    this.context.symbol = symbol;
-    applySymbolInfo(this.context, await this.resolveSymbol(symbol));
-    await this.loadInitial();
+  async changeSymbol(
+    symbol: string,
+    resolution: ResolutionString = this.desiredTarget.resolution,
+  ): Promise<void> {
+    const target = { symbol, resolution };
+    if (
+      target.symbol === this.desiredTarget.symbol &&
+      target.resolution === this.desiredTarget.resolution
+    ) {
+      if (this.latestReload) await this.latestReload;
+      return;
+    }
+
+    const previousResolution = this.context.resolution;
+    const changed = await this.startReload(target);
+    if (changed && previousResolution !== resolution && !this.destroyed) {
+      const timeframe: { timeframe?: { value: string; type: string } } = {};
+      this.context.intervalChanged.fire(resolution, timeframe);
+    }
   }
 
   resetData(): void {
-    void this.loadInitial();
+    if (this.destroyed) return;
+    const target = { ...this.desiredTarget };
+    void this.startReload(target).catch((error: unknown) => {
+      if (!this.destroyed) this.reportError("data reset", error);
+    });
+  }
+
+  private reportError(operation: string, error: unknown): void {
+    console.error(`[raze-charts] ${operation} failed`, error);
   }
 
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.generation += 1;
+    this.historyRequestId += 1;
+    this.activeHistoryRequestId = null;
+    this.marksRequestId += 1;
     this.stopLiveSubscription();
+    this.cancelPending();
+    this.latestReload = null;
+    this.settleReady();
   }
 }

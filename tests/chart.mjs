@@ -1,4 +1,4 @@
-import { defineChart, line, bar, area, point, ruleY, pie, radar, heatmap, compileChart, renderChartSvg, scaleLinear, scaleBand, scaleLog, scaleTime, hitTestCompiled } from "../dist/chart.esm.js";
+import { defineChart, defineMarkPlugin, customMark, line, bar, area, point, ruleY, pie, radar, heatmap, compileChart, renderChartSvg, scaleLinear, scaleBand, scaleLog, scaleTime, hitTestCompiled } from "../dist/chart.esm.js";
 
 const assert = (cond, msg) => {
   if (!cond) { console.error("✗ " + msg); process.exitCode = 1; }
@@ -105,5 +105,244 @@ const fitDef = defineChart({
 const fc = compileChart(fitDef, { width: 200, height: 120 });
 assert(fc.lastValues.length === 0, "dashed fit line skips last-value chips");
 assert(fc.nodes.some((n) => n.type === "line" && n.dashed), "dashed line flag reaches the scene");
+
+const lollipop = defineMarkPlugin({
+  kind: "lollipop",
+  domain: (data) => ({ x: data.map((d) => d.month), y: data.map((d) => d.value), includeZero: true }),
+  compile: ({ data, mapX, mapY, color }) => ({
+    nodes: data.flatMap((d) => {
+      const x = mapX(d.month);
+      const y = mapY(d.value);
+      return [
+        { type: "rule", x, y, x2: x, y2: mapY(0), stroke: color, dashed: false, hit: false },
+        { type: "circle", x, y, r: 4, fill: color, datum: d, tip: `${d.month}\n${d.value}`, role: "lollipop" },
+      ];
+    }),
+  }),
+});
+const pluginDef = defineChart({
+  marks: [customMark(lollipop, rows, {})],
+  ariaLabel: "Plugin chart",
+  ariaDescription: "A custom lollipop series.",
+});
+const pluginChart = compileChart(pluginDef, { width: 400, height: 220 });
+assert(pluginChart.nodes.filter((n) => n.role === "lollipop").length === rows.length, "custom mark plugin emits renderer-neutral nodes");
+assert(pluginChart.yScale.map(0) <= pluginChart.plot.y + pluginChart.plot.h + 1, "custom mark contributes an inferred domain");
+const pluginSvg = renderChartSvg(pluginDef, { width: 400, height: 220 }, { idPrefix: "plugin-test" });
+assert(pluginSvg.includes('aria-describedby="raze-description-plugin-test"'), "SVG links its accessible description");
+assert(pluginSvg.includes("A custom lollipop series."), "SVG includes its accessible description");
+assert(pluginSvg === renderChartSvg(pluginDef, { width: 400, height: 220 }, { idPrefix: "plugin-test" }), "stable SVG id prefix produces deterministic output");
+
+const denseRows = Array.from({ length: 10_000 }, (_, index) => ({
+  x: index,
+  y: index === 4_321 ? 10_000 : Math.sin(index / 20),
+}));
+const dense = compileChart(defineChart({
+  marks: [line(denseRows, { x: "x", y: "y" })],
+  performance: { maxRenderedPoints: 128 },
+}), { width: 320, height: 180 });
+const densePath = dense.nodes.find((node) => node.type === "line");
+assert((densePath?.points?.length ?? Infinity) <= 128, "dense line geometry respects the render budget");
+assert(dense.diagnostics.decimatedPoints > 9_800, "compiled diagnostics report automatic decimation");
+assert(densePath?.points?.some((point) => point.y === dense.yScale.map(10_000)), "extrema decimation preserves a narrow spike");
+
+const exact = compileChart(defineChart({
+  marks: [line(denseRows, { x: "x", y: "y" })],
+  performance: { decimation: "none" },
+}), { width: 320, height: 180 });
+assert(exact.nodes.find((node) => node.type === "line")?.points?.length === denseRows.length, "decimation has an explicit exact-geometry opt-out");
+assert(exact.diagnostics.decimatedPoints === 0, "exact geometry reports zero decimated points");
+
+const withGap = compileChart(defineChart({
+  marks: [line([
+    { x: 0, y: 1 },
+    { x: 1, y: 2 },
+    { x: 2, y: Number.NaN },
+    { x: 3, y: 4 },
+    { x: 4, y: 5 },
+  ], { x: "x", y: "y" })],
+}), { width: 320, height: 180 });
+assert(withGap.nodes.filter((node) => node.type === "line").length === 2, "invalid values create truthful line gaps instead of invented connections");
+
+const fragmentedRows = [];
+for (let segment = 0; segment < 100; segment += 1) {
+  for (let point = 0; point < 100; point += 1) {
+    fragmentedRows.push({ x: fragmentedRows.length, y: Math.sin(point) + segment });
+  }
+  fragmentedRows.push({ x: fragmentedRows.length, y: Number.NaN });
+}
+const fragmented = compileChart(defineChart({
+  marks: [line(fragmentedRows, { x: "x", y: "y" })],
+  performance: { maxRenderedPoints: 128 },
+}), { width: 320, height: 180 });
+const fragmentedPointCount = fragmented.nodes
+  .filter((node) => node.type === "line")
+  .reduce((total, node) => total + (node.points?.length ?? 0), 0);
+assert(fragmentedPointCount <= 128, "dense gapped series honor a global per-series point budget");
+
+const isolatedSpikeRows = [];
+for (let segment = 0; segment < 100; segment += 1) {
+  isolatedSpikeRows.push({ x: segment * 2, y: segment === 50 ? 10_000 : 1 });
+  isolatedSpikeRows.push({ x: segment * 2 + 1, y: Number.NaN });
+}
+const isolatedSpike = compileChart(defineChart({
+  marks: [line(isolatedSpikeRows, { x: "x", y: "y" })],
+  performance: { maxRenderedPoints: 16 },
+}), { width: 320, height: 180 });
+assert(
+  isolatedSpike.nodes.some((node) => node.type === "circle" && node.y === isolatedSpike.yScale.map(10_000)),
+  "segment selection keeps extrema that define the full-data domain",
+);
+
+const internalSpikeRows = [];
+for (let segment = 0; segment < 100; segment += 1) {
+  for (let point = 0; point < 100; point += 1) {
+    internalSpikeRows.push({
+      x: internalSpikeRows.length,
+      y: segment === 50 && point === 50 ? 20_000 : segment + point / 100,
+    });
+  }
+  internalSpikeRows.push({ x: internalSpikeRows.length, y: Number.NaN });
+}
+const internalSpike = compileChart(defineChart({
+  marks: [line(internalSpikeRows, { x: "x", y: "y" })],
+  performance: { maxRenderedPoints: 16 },
+}), { width: 320, height: 180 });
+assert(
+  internalSpike.nodes.some((node) => node.type === "line" && node.points?.some((point) => point.y === internalSpike.yScale.map(20_000))),
+  "tight multi-gap budgets preserve extrema inside retained segments",
+);
+
+const lastValueRows = [];
+for (let segment = 0; segment < 100; segment += 1) {
+  const values = segment === 50
+    ? [2, 2, 20_000, 2, 2]
+    : segment === 99
+      ? [5, 1, 4, 2, 3]
+      : [2, 2, 2, 2, 2];
+  for (const y of values) lastValueRows.push({ x: lastValueRows.length, y });
+  lastValueRows.push({ x: lastValueRows.length, y: Number.NaN });
+}
+const lastValueChart = compileChart(defineChart({
+  marks: [line(lastValueRows, { x: "x", y: "y" })],
+  performance: { maxRenderedPoints: 16 },
+}), { width: 320, height: 180 });
+const lastValidRow = lastValueRows[lastValueRows.length - 2];
+const endpoint = lastValueChart.nodes.find((node) => node.role === "endpoint");
+assert(lastValueChart.lastValues[0]?.label === "3", "last-value label always uses the final valid source sample");
+assert(endpoint?.x === lastValueChart.xScale.map(lastValidRow.x), "last-value endpoint stays anchored to the source tail after decimation");
+assert(
+  lastValueChart.samples.some((sample) => sample.x === lastValueChart.xScale.map(lastValidRow.x)),
+  "the true source tail remains connected and hoverable after decimation",
+);
+
+for (const cap of [1, 15, 16]) {
+  const capped = compileChart(defineChart({
+    marks: [line(denseRows, { x: "x", y: "y" })],
+    performance: { maxRenderedPoints: cap },
+  }), { width: 320, height: 180 });
+  const rendered = capped.nodes
+    .filter((node) => node.type === "line")
+    .reduce((total, node) => total + (node.points?.length ?? 0), 0);
+  assert(rendered <= cap, `maxRenderedPoints=${cap} is honored as a hard cap`);
+}
+
+const singletonRows = Array.from({ length: 17 }, (_, index) => [
+  { x: index * 2, y: index },
+  { x: index * 2 + 1, y: Number.NaN },
+]).flat();
+const singletonChart = compileChart(defineChart({
+  marks: [line(singletonRows, { x: "x", y: "y" })],
+  performance: { maxRenderedPoints: 16 },
+}), { width: 320, height: 180 });
+const singletonRendered = singletonChart.nodes
+  .filter((node) => node.type === "line")
+  .reduce((total, node) => total + (node.points?.length ?? 0), 0);
+assert(singletonRendered === 16, "fragmented singleton data uses the available budget without overshooting it");
+
+const finalExtremeChart = compileChart(defineChart({
+  marks: [line([
+    { x: 0, y: -1 }, { x: 1, y: -0.5 }, { x: 2, y: Number.NaN },
+    { x: 3, y: 0 }, { x: 4, y: 100 }, { x: 5, y: 60 },
+  ], { x: "x", y: "y" })],
+  performance: { maxRenderedPoints: 4 },
+}), { width: 320, height: 180 });
+assert(
+  finalExtremeChart.nodes.some((node) => node.type === "line" && node.points?.some((p) => p.y === finalExtremeChart.yScale.map(100))),
+  "a final segment retains its global extremum as well as the true tail",
+);
+
+const narrowDefault = compileChart(defineChart({ marks: [line(denseRows, { x: "x", y: "y" })] }), {
+  width: 80,
+  height: 180,
+});
+const narrowRendered = narrowDefault.nodes
+  .filter((node) => node.type === "line")
+  .reduce((total, node) => total + (node.points?.length ?? 0), 0);
+assert(narrowRendered <= Math.max(1, Math.floor(narrowDefault.plot.w * 2)), "the automatic budget is exactly pixel-aware on narrow plots");
+
+for (const invalidBudget of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+  let budgetError;
+  try {
+    compileChart(defineChart({
+      marks: [line(rows, { x: "month", y: "value" })],
+      performance: { maxRenderedPoints: invalidBudget },
+    }), { width: 320, height: 180 });
+  } catch (error) {
+    budgetError = error;
+  }
+  assert(budgetError?.code === "E_CHART_PERFORMANCE", `invalid render budget ${String(invalidBudget)} has a stable error code`);
+}
+
+let unsupportedChannelError;
+try {
+  compileChart(defineChart({
+    marks: [{ kind: "area", data: rows, x: "month", y: "value", y0: "other" }],
+  }), { width: 320, height: 180 });
+} catch (error) {
+  unsupportedChannelError = error;
+}
+assert(unsupportedChannelError?.code === "E_MARK_CHANNEL", "unsupported mark channels fail explicitly instead of rendering misleading geometry");
+
+let reservedKindError;
+try {
+  defineMarkPlugin({ kind: "line", compile: () => ({ nodes: [] }) });
+} catch (error) {
+  reservedKindError = error;
+}
+assert(reservedKindError?.code === "E_MARK_PLUGIN_KIND", "custom plugins cannot collide with built-in mark semantics");
+
+let pluginBypassError;
+try {
+  compileChart(defineChart({
+    marks: [{
+      kind: "line",
+      data: rows,
+      x: "month",
+      y: "value",
+      plugin: { kind: "line", compile: () => ({ nodes: [] }) },
+      pluginOptions: {},
+    }],
+  }), { width: 320, height: 180 });
+} catch (error) {
+  pluginBypassError = error;
+}
+assert(pluginBypassError?.code === "E_MARK_PLUGIN_KIND", "manual marks cannot bypass reserved plugin kinds");
+
+let invalidKindError;
+try {
+  compileChart(defineChart({ marks: [{ kind: "mystery", data: [] }] }), { width: 320, height: 180 });
+} catch (error) {
+  invalidKindError = error;
+}
+assert(invalidKindError?.code === "E_MARK_KIND", "dynamic unknown mark kinds fail with a stable actionable error");
+
+let invalidSizeError;
+try {
+  compileChart(def, { width: 0, height: 180 });
+} catch (error) {
+  invalidSizeError = error;
+}
+assert(invalidSizeError?.code === "E_CHART_SIZE", "invalid runtime dimensions fail with a stable actionable error");
 
 console.log(process.exitCode ? "\nCHART: FAIL" : "\nCHART: PASS");

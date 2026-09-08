@@ -23,6 +23,8 @@ export function showContextMenu(
     padding: "4px",
     x,
     y,
+    role: "menu",
+    label: "Chart context menu",
     onClose: () => {
       if (current === popup) current = null;
     },
@@ -31,7 +33,8 @@ export function showContextMenu(
 
   const top = items.filter((i) => i.position !== "bottom");
   const bottom = items.filter((i) => i.position === "bottom");
-  for (const item of [...top, ...bottom]) {
+  const ordered = [...top, ...bottom];
+  for (const [index, item] of ordered.entries()) {
     const row = popupRow(item.text, () => {
       closeContextMenu();
       try {
@@ -39,7 +42,9 @@ export function showContextMenu(
       } catch {
         /* a handler throwing must not wedge the menu */
       }
-    });
+    }, { role: "menuitem", label: item.text });
+    row.setAttribute("aria-posinset", String(index + 1));
+    row.setAttribute("aria-setsize", String(ordered.length));
     if (!isCoarsePointer()) row.style.padding = "6px 10px";
     row.textContent = item.text; // plain text, never HTML
     popup.el.appendChild(row);

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "scenario": "native-auto-decimated-interactive-line-compile",
+  "description": "One numeric interactive line mark with default pixel-aware decimation; legend and grid disabled; renderer-neutral scene and hover-sample compilation only.",
+  "reference": {
+    "node": "24.20.0",
+    "platform": "Windows x64",
+    "cpu": "AMD Ryzen 9 5900X",
+    "captured": "2026-09-08",
+    "note": "Maintainer workstation reference; compare trends, not machines. CI enforces the portable budget only."
+  },
+  "sizes": {
+    "1000": {
+      "baselineMs": 0.84,
+      "budgetMs": 20
+    },
+    "10000": {
+      "baselineMs": 3.61,
+      "budgetMs": 75
+    },
+    "100000": {
+      "baselineMs": 24.75,
+      "budgetMs": 500
+    },
+    "1000000": {
+      "baselineMs": 330.27,
+      "budgetMs": 5000
+    }
+  }
+}

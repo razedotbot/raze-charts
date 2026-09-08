@@ -13,7 +13,7 @@ import { isCoarsePointer, openPopup, popupRow, type PopupHandle } from "./popup"
 export const DEFAULT_INTERVAL_FAVORITES = ["1S", "1", "5", "15", "60", "240", "1D"];
 
 export class IntervalSelector {
-  private buttons = new Map<string, HTMLDivElement>();
+  private buttons = new Map<string, HTMLButtonElement>();
   private active: string;
   private dropdown: PopupHandle | null = null;
   private readonly favorites: string[];
@@ -26,6 +26,8 @@ export class IntervalSelector {
   ) {
     this.favorites = favorites && favorites.length ? favorites.map(String) : DEFAULT_INTERVAL_FAVORITES;
     this.active = String(context.resolution);
+    this.mount.setAttribute("role", "group");
+    this.mount.setAttribute("aria-label", "Chart interval");
     this.render();
   }
 
@@ -55,9 +57,12 @@ export class IntervalSelector {
     this.repaint();
   }
 
-  private makeButton(res: string, label: string): HTMLDivElement {
-    const b = document.createElement("div");
+  private makeButton(res: string, label: string): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "raze-chart-focusable";
     b.textContent = label;
+    b.setAttribute("aria-label", `Interval ${label}`);
     b.style.cssText = this.btnCss();
     b.addEventListener("click", () => this.select(res));
     b.addEventListener("mouseenter", () => { if (res !== this.active) b.style.background = "var(--tv-color-toolbar-button-background-hover, rgba(255,255,255,0.06))"; });
@@ -66,9 +71,15 @@ export class IntervalSelector {
     return b;
   }
 
-  private makeMoreButton(rest: string[]): HTMLDivElement {
-    const b = document.createElement("div");
+  private makeMoreButton(rest: string[]): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "raze-chart-focusable";
     b.textContent = "⋯";
+    b.title = "More intervals";
+    b.setAttribute("aria-label", "More intervals");
+    b.setAttribute("aria-haspopup", "menu");
+    b.setAttribute("aria-expanded", "false");
     b.style.cssText = this.btnCss();
     b.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -88,8 +99,12 @@ export class IntervalSelector {
       "border-radius:4px",
       "cursor:pointer",
       "font-size:12px",
+      "font-family:inherit",
+      "line-height:normal",
       "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
       "background:transparent",
+      "border:0",
+      "appearance:none",
       "touch-action:manipulation",
       "flex:0 0 auto",
     ].join(";");
@@ -121,6 +136,9 @@ export class IntervalSelector {
   private repaint(): void {
     for (const [res, b] of this.buttons) {
       const on = res === this.active;
+      b.setAttribute("aria-pressed", String(on));
+      if (on) b.setAttribute("aria-current", "true");
+      else b.removeAttribute("aria-current");
       b.style.background = on ? "var(--tv-color-toolbar-button-background-active, rgba(255,255,255,0.1))" : "transparent";
       b.style.color = on ? "var(--tv-color-toolbar-button-text-hover, #fff)" : "var(--tv-color-toolbar-button-text, #d1d4dc)";
       b.style.fontWeight = on ? "600" : "400";
@@ -136,13 +154,20 @@ export class IntervalSelector {
       padding: "4px",
       anchor,
       place: "below-start",
+      role: "menu",
+      label: "Chart intervals",
       onClose: () => {
         if (this.dropdown === popup) this.dropdown = null;
       },
     });
     this.dropdown = popup;
     for (const res of rest) {
-      const row = popupRow(resolutionLabel(res), () => this.select(res));
+      const label = resolutionLabel(res);
+      const row = popupRow(label, () => this.select(res), {
+        role: "menuitemradio",
+        checked: res === this.active,
+        label: `Interval ${label}`,
+      });
       if (!isCoarsePointer()) row.style.padding = "6px 10px";
       popup.el.appendChild(row);
     }

@@ -23,6 +23,7 @@ import {
 import { hitComplexShape, neededPoints, pointXY } from "./paint/shapes";
 import type { Crosshair, DraftShape, FinanceView, MarkHit, ShapeHit } from "./paint/view";
 import { resolutionToMs } from "../util/resolution";
+import { TimeIndex } from "../data/TimeIndex";
 
 export interface GestureHost {
   readonly canvas: HTMLCanvasElement;
@@ -81,6 +82,8 @@ export class GestureController {
   private boundWheel: (e: WheelEvent) => void;
   private boundDbl: (e: MouseEvent) => void;
   private boundKey: (e: KeyboardEvent) => void;
+  private boundFocus: () => void;
+  private boundBlur: () => void;
 
   constructor(private readonly host: GestureHost) {
     this.boundMove = (e) => this.onPointerMove(e);
@@ -91,6 +94,8 @@ export class GestureController {
     this.boundWheel = (e) => this.onWheel(e);
     this.boundDbl = (e) => this.onDblClick(e);
     this.boundKey = (e) => this.onKeyDown(e);
+    this.boundFocus = () => this.onFocus();
+    this.boundBlur = () => this.onBlur();
   }
 
   attach(): void {
@@ -103,9 +108,10 @@ export class GestureController {
     canvas.addEventListener("pointerleave", this.boundLeave);
     canvas.addEventListener("wheel", this.boundWheel, { passive: false });
     canvas.addEventListener("dblclick", this.boundDbl);
-    window.addEventListener("keydown", this.boundKey);
+    canvas.addEventListener("keydown", this.boundKey);
+    canvas.addEventListener("focus", this.boundFocus);
+    canvas.addEventListener("blur", this.boundBlur);
     canvas.tabIndex = 0;
-    canvas.style.outline = "none";
   }
 
   destroy(): void {
@@ -118,7 +124,34 @@ export class GestureController {
     canvas.removeEventListener("pointerleave", this.boundLeave);
     canvas.removeEventListener("wheel", this.boundWheel);
     canvas.removeEventListener("dblclick", this.boundDbl);
-    window.removeEventListener("keydown", this.boundKey);
+    canvas.removeEventListener("keydown", this.boundKey);
+    canvas.removeEventListener("focus", this.boundFocus);
+    canvas.removeEventListener("blur", this.boundBlur);
+    this.onBlur();
+  }
+
+  private onFocus(): void {
+    const canvas = this.host.canvas;
+    let focusVisible = true;
+    try {
+      focusVisible = canvas.matches(":focus-visible");
+    } catch {
+      // Older engines do not support :focus-visible; showing the ring is safer.
+    }
+    if (!focusVisible) return;
+    this.showFocusRing();
+  }
+
+  private showFocusRing(): void {
+    const canvas = this.host.canvas;
+    canvas.style.outline = `2px solid ${this.host.context.theme.scaleText}`;
+    canvas.style.outlineOffset = "-2px";
+  }
+
+  private onBlur(): void {
+    const canvas = this.host.canvas;
+    canvas.style.removeProperty("outline");
+    canvas.style.removeProperty("outline-offset");
   }
 
   pointerXY(e: MouseEvent): { x: number; y: number } {
@@ -138,9 +171,9 @@ export class GestureController {
     const bars = this.host.context.bars;
     let unixTime = 0;
     if (bars.length) {
-      const resMs = resolutionToMs(this.host.context.resolution);
       const idx = indexForX(s, x);
-      unixTime = (bars[0]!.time + idx * resMs) / 1000;
+      const timeIndex = new TimeIndex(bars, resolutionToMs(this.host.context.resolution));
+      unixTime = (timeIndex.timeAt(idx) ?? 0) / 1000;
     }
     return { unixTime, price: priceForY(s, y) };
   }
@@ -289,6 +322,10 @@ export class GestureController {
     const h = this.host;
     const { x, y } = this.pointerXY(e);
     h.lastPointerType = e.pointerType || "mouse";
+    h.canvas.focus({ preventScroll: true });
+    // Pointer focus should not masquerade as keyboard focus. A subsequent key
+    // press restores the guaranteed high-contrast ring below.
+    this.onBlur();
     this.activePointers.set(e.pointerId, { x, y, type: e.pointerType });
     try { h.canvas.setPointerCapture?.(e.pointerId); } catch { /* detached/test env */ }
 
@@ -542,9 +579,8 @@ export class GestureController {
 
   private onKeyDown(e: KeyboardEvent): void {
     const h = this.host;
-    const tag = (e.target as HTMLElement | null)?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement | null)?.isContentEditable) return;
-    if (!h.crosshair.active && document.activeElement !== h.canvas) return;
+    if (e.target !== h.canvas) return;
+    this.showFocusRing();
 
     const { from, to } = h.context.visibleRange;
     const span = to - from;
@@ -554,6 +590,7 @@ export class GestureController {
       h.context.selectedShapeId = null;
       h.onToolDone?.("cursor");
       h.requestPaint();
+      h.engine.announce("Drawing cancelled.");
       e.preventDefault();
       return;
     }
@@ -561,12 +598,14 @@ export class GestureController {
       if (h.context.selectedShapeId) {
         h.shapes.remove(h.context.selectedShapeId as never);
         h.requestPaint();
+        h.engine.announce("Selected drawing removed.");
         e.preventDefault();
       }
       return;
     }
     if (e.key === "f" || e.key === "F") {
       h.fitContent();
+      h.engine.announce("Chart fitted to all data.");
       e.preventDefault();
       return;
     }
@@ -574,6 +613,7 @@ export class GestureController {
       const newSpan = Math.max(h.plotW / MAX_BAR_SPACING, span / 1.15);
       h.context.visibleRange = { from: to - newSpan, to };
       h.requestPaint();
+      h.engine.announce("Zoomed in.");
       e.preventDefault();
       return;
     }
@@ -582,6 +622,7 @@ export class GestureController {
       h.context.visibleRange = { from: to - newSpan, to };
       void h.data.maybeLoadMoreHistory();
       h.requestPaint();
+      h.engine.announce("Zoomed out.");
       e.preventDefault();
       return;
     }
@@ -591,6 +632,7 @@ export class GestureController {
       h.context.visibleRange = { from: from + shift, to: to + shift };
       void h.data.maybeLoadMoreHistory();
       h.requestPaint();
+      h.engine.announce(dir < 0 ? "Panned left." : "Panned right.");
       e.preventDefault();
     }
   }

@@ -142,7 +142,7 @@
 
     const trading = document.getElementById("trading");
     const datafeed = makeMockDatafeed({ bars: 2000, startPrice: 6400 });
-    new widget({
+    const dashboardWidget = new widget({
       symbol: "MOCK",
       datafeed,
       interval: "1",
@@ -192,6 +192,17 @@
           "chart_type",
         ],
       },
+    });
+    let nativeReady = false;
+    let financialReady = false;
+    const exposeReady = () => {
+      if (nativeReady && financialReady) window.__razeDashboardReady = true;
+    };
+    dashboardWidget.onChartReady(() => {
+      requestAnimationFrame(() => {
+        financialReady = true;
+        exposeReady();
+      });
     });
 
     let seed = 1234567;
@@ -334,6 +345,8 @@
       marks: [heatmap(heat, { x: "h", y: "token", valueKey: "value", name: "return %" })],
       ariaLabel: "Token returns",
     }));
+    nativeReady = true;
+    exposeReady();
   </script>
 </body>
 </html>

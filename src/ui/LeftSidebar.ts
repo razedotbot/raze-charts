@@ -9,7 +9,13 @@ import type {
   SidebarItem,
 } from "../types/charting_library";
 import type { ChartContext, DrawingTool } from "../core/context";
-import { isCoarsePointer, openPopup, popupRow, type PopupHandle } from "./popup";
+import {
+  enableToolbarKeyboardNavigation,
+  isCoarsePointer,
+  openPopup,
+  popupRow,
+  type PopupHandle,
+} from "./popup";
 
 export const LEFT_SIDEBAR_W = 42;
 
@@ -95,6 +101,7 @@ export class LeftSidebar {
   private activeTool: DrawingTool = "cursor";
   private chartStyle: ChartStyleId = "candles";
   private readonly chartStyles: typeof ALL_CHART_STYLES;
+  private removeKeyboardNavigation: () => void;
 
   constructor(
     private readonly context: ChartContext,
@@ -108,6 +115,9 @@ export class LeftSidebar {
 
     this.el = document.createElement("div");
     this.el.className = "raze-chart-left-sidebar";
+    this.el.setAttribute("role", "toolbar");
+    this.el.setAttribute("aria-label", "Drawing and chart tools");
+    this.el.setAttribute("aria-orientation", "vertical");
     this.el.style.cssText = [
       "display:flex",
       "flex-direction:column",
@@ -135,6 +145,7 @@ export class LeftSidebar {
 
     this.setTool("cursor");
     this.setChartStyle("candles");
+    this.removeKeyboardNavigation = enableToolbarKeyboardNavigation(this.el, "vertical");
   }
 
   private appendItem(item: SidebarItem): void {
@@ -153,6 +164,8 @@ export class LeftSidebar {
     }
     if (item === "chart_type") {
       this.styleBtn = this.mkBtn(def.title, def.svg);
+      this.styleBtn.setAttribute("aria-haspopup", "menu");
+      this.styleBtn.setAttribute("aria-expanded", "false");
       this.styleBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         if (this.stylePanel) this.closeStylePanel();
@@ -164,6 +177,8 @@ export class LeftSidebar {
     const b = this.mkBtn(def.title, def.svg);
     this.toolBtns.set(item, b);
     if (item === "indicators") {
+      b.setAttribute("aria-haspopup", "menu");
+      b.setAttribute("aria-expanded", "false");
       b.addEventListener("click", (e) => {
         e.stopPropagation();
         this.cbs.onIndicatorsClick(b);
@@ -203,7 +218,13 @@ export class LeftSidebar {
     const b = document.createElement("button");
     b.type = "button";
     b.title = title;
+    b.setAttribute("aria-label", title);
+    b.className = "raze-chart-focusable";
     b.innerHTML = svg;
+    for (const icon of b.querySelectorAll("svg")) {
+      icon.setAttribute("aria-hidden", "true");
+      icon.setAttribute("focusable", "false");
+    }
     const size = isCoarsePointer() ? 38 : 32;
     b.style.cssText = [
       "display:flex",
@@ -231,6 +252,8 @@ export class LeftSidebar {
 
   private addSep(): void {
     const s = document.createElement("div");
+    s.setAttribute("role", "separator");
+    s.setAttribute("aria-orientation", "horizontal");
     s.style.cssText = "width:22px;height:1px;background:var(--tv-color-toolbar-divider-background,#363a45);margin:4px 0;";
     this.el.appendChild(s);
   }
@@ -240,6 +263,7 @@ export class LeftSidebar {
     for (const [id, b] of this.toolBtns) {
       if (!TOOL_IDS.has(id)) continue;
       const on = id === tool;
+      b.setAttribute("aria-pressed", String(on));
       b.dataset.active = on ? "1" : "0";
       b.style.background = on ? "rgba(102,216,158,0.18)" : "transparent";
       b.style.color = on ? "#66d89e" : "inherit";
@@ -257,6 +281,11 @@ export class LeftSidebar {
     if (!def) return;
     this.styleBtn.innerHTML = def.svg;
     this.styleBtn.title = `Chart type: ${def.title}`;
+    this.styleBtn.setAttribute("aria-label", `Chart type: ${def.title}`);
+    for (const icon of this.styleBtn.querySelectorAll("svg")) {
+      icon.setAttribute("aria-hidden", "true");
+      icon.setAttribute("focusable", "false");
+    }
   }
 
   private openStylePanel(): void {
@@ -268,6 +297,8 @@ export class LeftSidebar {
       padding: "6px 0",
       anchor: this.styleBtn,
       place: "right-start",
+      role: "menu",
+      label: "Chart type",
       onClose: () => {
         if (this.stylePanel === popup) this.stylePanel = null;
       },
@@ -282,6 +313,7 @@ export class LeftSidebar {
           this.cbs.onChartType(s.id);
           this.closeStylePanel();
         },
+        { role: "menuitemradio", checked: on, label: s.title },
       );
       popup.el.appendChild(row);
     }
@@ -295,6 +327,7 @@ export class LeftSidebar {
 
   destroy(): void {
     this.closeStylePanel();
+    this.removeKeyboardNavigation();
     this.el.remove();
   }
 }

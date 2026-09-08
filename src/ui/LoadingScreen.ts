@@ -12,6 +12,12 @@ export class LoadingScreen {
     const fg = opts?.foregroundColor ?? "#2962ff";
 
     this.el = document.createElement("div");
+    this.el.className = "raze-chart-loading-screen";
+    this.el.setAttribute("role", "status");
+    this.el.setAttribute("aria-live", "polite");
+    this.el.setAttribute("aria-atomic", "true");
+    this.el.setAttribute("aria-busy", "true");
+    this.el.setAttribute("aria-label", "Loading chart data");
     this.el.style.cssText = [
       "position:absolute",
       "inset:0",
@@ -25,6 +31,8 @@ export class LoadingScreen {
     ].join(";");
 
     this.spinner = document.createElement("div");
+    this.spinner.className = "raze-chart-loading-spinner";
+    this.spinner.setAttribute("aria-hidden", "true");
     this.spinner.style.cssText = [
       "width:28px",
       "height:28px",
@@ -38,12 +46,16 @@ export class LoadingScreen {
     if (!document.getElementById("raze-chart-spin-kf")) {
       const style = document.createElement("style");
       style.id = "raze-chart-spin-kf";
-      style.textContent = "@keyframes raze-chart-spin{to{transform:rotate(360deg)}}";
+      style.textContent =
+        "@keyframes raze-chart-spin{to{transform:rotate(360deg)}}" +
+        "@media (prefers-reduced-motion:reduce){.raze-chart-loading-spinner{animation:none!important}}";
       document.head.appendChild(style);
     }
   }
 
   hide(): void {
+    this.el.setAttribute("aria-busy", "false");
+    this.el.setAttribute("aria-label", "Chart data loaded");
     this.el.style.opacity = "0";
     window.setTimeout(() => this.el.remove(), 200);
   }

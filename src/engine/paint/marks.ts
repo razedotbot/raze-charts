@@ -1,5 +1,6 @@
 import type { Mark, MarkCustomColor } from "../../types/charting_library";
 import { resolutionToMs } from "../../util/resolution";
+import { TimeIndex } from "../../data/TimeIndex";
 import { xForIndex, yForPrice } from "../plotScale";
 import { roundRect } from "./primitives";
 import type { FinanceView } from "./view";
@@ -11,8 +12,7 @@ export function drawMarks(ctx: CanvasRenderingContext2D, v: FinanceView): void {
   const bars = v.context.bars;
   if (!marks.length || !bars.length) return;
 
-  const resMs = resolutionToMs(v.context.resolution);
-  const firstT = bars[0]!.time;
+  const timeIndex = new TimeIndex(bars, resolutionToMs(v.context.resolution));
   const r = 7;
   const gap = 3;
   const maxStack = 4;
@@ -21,7 +21,10 @@ export function drawMarks(ctx: CanvasRenderingContext2D, v: FinanceView): void {
 
   const byBar = new Map<number, Mark[]>();
   for (const m of marks) {
-    const idx = Math.round((m.time * 1000 - firstT) / resMs);
+    const timeMs = m.time * 1000;
+    const logical = timeIndex.indexAt(timeMs);
+    if (logical === null) continue;
+    const idx = Math.round(logical);
     if (idx < 0 || idx >= bars.length) continue;
     const list = byBar.get(idx);
     if (list) list.push(m);

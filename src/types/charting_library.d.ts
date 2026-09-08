@@ -395,6 +395,16 @@ export interface CustomFormatters {
 }
 
 export interface RazeChartsOptions {
+  /**
+   * Accessible name for the complete widget and its interactive canvas.
+   * Defaults to `"<symbol> financial chart"` and stays in sync after setSymbol().
+   */
+  aria_label?: string;
+  /**
+   * Accessible chart summary. Keyboard instructions are appended automatically
+   * and exposed through aria-describedby without adding visible chrome.
+   */
+  aria_description?: string;
   /** Container width (px) below which the left sidebar auto-hides (mobile).
    *  Default 520; 0 disables the compact behaviour. */
   compact_breakpoint?: number;

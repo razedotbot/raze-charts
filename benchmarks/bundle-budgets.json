@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "compression": "gzip level 9",
+  "note": "Budgets cover built ESM entrypoints without source maps. The native budget includes runtime DSL/plugin validation and both renderers; React remains an external peer in react.esm.js.",
+  "entries": [
+    {
+      "name": "root financial widget",
+      "path": "dist/charting_library.esm.js",
+      "budgetGzipBytes": 49152
+    },
+    {
+      "name": "native chart",
+      "path": "dist/chart.esm.js",
+      "budgetGzipBytes": 36864
+    },
+    {
+      "name": "React adapter",
+      "path": "dist/react.esm.js",
+      "budgetGzipBytes": 30720,
+      "requiresExternal": "react"
+    }
+  ]
+}

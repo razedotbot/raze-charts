@@ -1,13 +1,14 @@
 // Bottom-right scale toggles: % / log / auto — TV chrome parity.
 
 import type { ChartContext } from "../core/context";
-import { isCoarsePointer } from "./popup";
+import { enableToolbarKeyboardNavigation, isCoarsePointer } from "./popup";
 
 export class ScaleBar {
   readonly el: HTMLDivElement;
   private pctBtn: HTMLButtonElement;
   private logBtn: HTMLButtonElement;
   private autoBtn: HTMLButtonElement;
+  private removeKeyboardNavigation: () => void;
 
   constructor(
     private readonly context: ChartContext,
@@ -15,6 +16,9 @@ export class ScaleBar {
   ) {
     this.el = document.createElement("div");
     this.el.className = "raze-chart-scale-bar";
+    this.el.setAttribute("role", "toolbar");
+    this.el.setAttribute("aria-label", "Price scale");
+    this.el.setAttribute("aria-orientation", "horizontal");
     this.el.style.cssText = [
       "position:absolute",
       "right:4px",
@@ -60,6 +64,7 @@ export class ScaleBar {
     });
 
     this.el.append(this.pctBtn, this.logBtn, this.autoBtn);
+    this.removeKeyboardNavigation = enableToolbarKeyboardNavigation(this.el, "horizontal");
     this.sync();
   }
 
@@ -68,6 +73,8 @@ export class ScaleBar {
     b.type = "button";
     b.textContent = label;
     b.title = title;
+    b.setAttribute("aria-label", title);
+    b.className = "raze-chart-focusable";
     b.style.cssText = [
       "border:0",
       "border-radius:3px",
@@ -83,6 +90,7 @@ export class ScaleBar {
 
   sync(): void {
     const set = (b: HTMLButtonElement, on: boolean): void => {
+      b.setAttribute("aria-pressed", String(on));
       b.style.color = on ? "#66d89e" : "var(--tv-color-toolbar-button-text, #8b887e)";
       b.style.background = on ? "rgba(102,216,158,0.14)" : "transparent";
       b.style.fontWeight = on ? "600" : "400";
@@ -93,6 +101,7 @@ export class ScaleBar {
   }
 
   destroy(): void {
+    this.removeKeyboardNavigation();
     this.el.remove();
   }
 }

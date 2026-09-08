@@ -78,6 +78,8 @@ export class IndicatorsMenu {
 
   open(anchor: HTMLElement): void {
     this.anchor = anchor;
+    anchor.setAttribute("aria-haspopup", "menu");
+    anchor.setAttribute("aria-expanded", "false");
     const popup = openPopup({
       fontFamily: this.context.fontFamily,
       className: "raze-chart-indicators-menu",
@@ -85,6 +87,8 @@ export class IndicatorsMenu {
       padding: "6px 0",
       anchor,
       place: "right-start",
+      role: "menu",
+      label: "Indicators",
       onClose: () => {
         if (this.popup === popup) {
           this.popup = null;
@@ -97,13 +101,13 @@ export class IndicatorsMenu {
     popup.reposition();
   }
 
-  private renderRows(panel: HTMLDivElement): void {
+  private renderRows(panel: HTMLDivElement, focusIndex?: number): void {
     panel.replaceChildren();
     const activeKey = new Set(
       this.studies.list().map((s) => `${s.name}:${s.length}`),
     );
 
-    for (const p of this.presets) {
+    for (const [index, p] of this.presets.entries()) {
       const on = activeKey.has(`${p.name}:${p.length}`);
       const row = popupRow("", () => {
         if (on) {
@@ -113,10 +117,11 @@ export class IndicatorsMenu {
         } else {
           this.studies.add({ name: p.name, length: p.length, color: p.color });
         }
-        this.renderRows(panel);
-      });
+        this.renderRows(panel, index);
+      }, { role: "menuitemcheckbox", checked: on, label: p.label });
       row.style.fontWeight = on ? "600" : "400";
       const swatch = document.createElement("span");
+      swatch.setAttribute("aria-hidden", "true");
       swatch.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};flex:0 0 auto;`;
       row.append(swatch, document.createTextNode(on ? `✓ ${p.label}` : p.label));
       panel.appendChild(row);
@@ -125,9 +130,10 @@ export class IndicatorsMenu {
     const clear = popupRow("Clear all", () => {
       this.studies.clear();
       this.close();
-    });
+    }, { role: "menuitem", label: "Clear all indicators" });
     clear.style.cssText += "border-top:1px solid var(--tv-color-toolbar-divider-background, #363a45);border-radius:0;color:#8b887e;margin-top:4px;padding:8px 12px;";
     panel.appendChild(clear);
+    if (focusIndex !== undefined) this.popup?.focusItem(focusIndex);
   }
 
   close(): void {

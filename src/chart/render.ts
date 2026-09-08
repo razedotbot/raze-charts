@@ -1,5 +1,12 @@
 import { compileChart, type ChartDefinition, type CompiledChart, type HoverSample, type SceneNode } from "./defineChart";
-import { heatFill, type DashboardTheme } from "./theme";
+import {
+  chartColorWithOpacity,
+  formatChartColor,
+  heatFill,
+  parseChartColor,
+  readableTextColor,
+  type DashboardTheme,
+} from "./theme";
 import type { LinearScale } from "./scales";
 
 function esc(s: string): string {
@@ -15,18 +22,12 @@ function hair(n: number): number {
 }
 
 /** Fritsch–Carlson monotone cubic. No Catmull overshoot on peaks. */
-function monotonePath(pts: { x: number; y: number }[]): string {
-  if (!pts.length) return "";
-  if (pts.length === 1) return `M${round(pts[0]!.x)} ${round(pts[0]!.y)}`;
-  if (pts.length === 2) {
-    return `M${round(pts[0]!.x)} ${round(pts[0]!.y)} L${round(pts[1]!.x)} ${round(pts[1]!.y)}`;
-  }
+function monotoneTangents(pts: readonly { x: number; y: number }[]): number[] {
   const n = pts.length;
-  const dx: number[] = [];
   const m: number[] = [];
   for (let i = 0; i < n - 1; i++) {
-    dx[i] = pts[i + 1]!.x - pts[i]!.x;
-    m[i] = dx[i] === 0 ? 0 : (pts[i + 1]!.y - pts[i]!.y) / dx[i]!;
+    const dx = pts[i + 1]!.x - pts[i]!.x;
+    m[i] = dx === 0 ? 0 : (pts[i + 1]!.y - pts[i]!.y) / dx;
   }
   const t: number[] = [m[0]!];
   for (let i = 1; i < n - 1; i++) {
@@ -41,15 +42,25 @@ function monotonePath(pts: { x: number; y: number }[]): string {
     }
     const a = t[i]! / m[i]!;
     const b = t[i + 1]! / m[i]!;
-    const s = a * a + b * b;
-    if (s > 9) {
-      const tau = 3 / Math.sqrt(s);
-      t[i] = tau * a * m[i]!;
-      t[i + 1] = tau * b * m[i]!;
+    const sum = a * a + b * b;
+    if (sum > 9) {
+      const factor = 3 / Math.sqrt(sum);
+      t[i] = factor * a * m[i]!;
+      t[i + 1] = factor * b * m[i]!;
     }
   }
+  return t;
+}
+
+function monotonePath(pts: readonly { x: number; y: number }[]): string {
+  if (!pts.length) return "";
+  if (pts.length === 1) return `M${round(pts[0]!.x)} ${round(pts[0]!.y)}`;
+  if (pts.length === 2) {
+    return `M${round(pts[0]!.x)} ${round(pts[0]!.y)} L${round(pts[1]!.x)} ${round(pts[1]!.y)}`;
+  }
+  const t = monotoneTangents(pts);
   let d = `M${round(pts[0]!.x)} ${round(pts[0]!.y)}`;
-  for (let i = 0; i < n - 1; i++) {
+  for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[i]!;
     const p1 = pts[i + 1]!;
     const h = p1.x - p0.x;
@@ -62,18 +73,56 @@ function monotonePath(pts: { x: number; y: number }[]): string {
   return d;
 }
 
+function traceMonotone(ctx: CanvasRenderingContext2D, pts: readonly { x: number; y: number }[]): void {
+  if (!pts.length) return;
+  ctx.moveTo(pts[0]!.x, pts[0]!.y);
+  if (pts.length === 1) return;
+  if (pts.length === 2) {
+    ctx.lineTo(pts[1]!.x, pts[1]!.y);
+    return;
+  }
+  const t = monotoneTangents(pts);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i]!;
+    const p1 = pts[i + 1]!;
+    const h = p1.x - p0.x;
+    ctx.bezierCurveTo(
+      p0.x + h / 3,
+      p0.y + t[i]! * h / 3,
+      p1.x - h / 3,
+      p1.y - t[i + 1]! * h / 3,
+      p1.x,
+      p1.y,
+    );
+  }
+}
+
+const TAU = Math.PI * 2;
+
+function arcSweep(n: SceneNode): number {
+  return Math.max(0, Math.min(TAU, (n.endAngle ?? 0) - (n.startAngle ?? 0)));
+}
+
 function arcPath(n: SceneNode): string {
   const cx = n.x ?? 0;
   const cy = n.y ?? 0;
   const r = n.r ?? 0;
   const inner = n.innerR ?? 0;
   const a0 = n.startAngle ?? 0;
-  const a1 = n.endAngle ?? 0;
-  const large = (a1 - a0) % (Math.PI * 2) > Math.PI ? 1 : 0;
+  const sweep = arcSweep(n);
+  if (r <= 0 || sweep <= 1e-9) return "";
+  const a1 = a0 + sweep;
+  const large = sweep > Math.PI ? 1 : 0;
   const x0 = cx + Math.cos(a0) * r;
   const y0 = cy + Math.sin(a0) * r;
   const x1 = cx + Math.cos(a1) * r;
   const y1 = cy + Math.sin(a1) * r;
+  const full = sweep >= TAU - 1e-9;
+  const mx = cx + Math.cos(a0 + Math.PI) * r;
+  const my = cy + Math.sin(a0 + Math.PI) * r;
+  if (inner <= 0 && full) {
+    return `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 1 1 ${mx} ${my} A ${r} ${r} 0 1 1 ${x1} ${y1} Z`;
+  }
   if (inner <= 0) {
     return `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z`;
   }
@@ -81,6 +130,11 @@ function arcPath(n: SceneNode): string {
   const iy0 = cy + Math.sin(a0) * inner;
   const ix1 = cx + Math.cos(a1) * inner;
   const iy1 = cy + Math.sin(a1) * inner;
+  if (full) {
+    const imx = cx + Math.cos(a0 + Math.PI) * inner;
+    const imy = cy + Math.sin(a0 + Math.PI) * inner;
+    return `M ${x0} ${y0} A ${r} ${r} 0 1 1 ${mx} ${my} A ${r} ${r} 0 1 1 ${x1} ${y1} L ${ix1} ${iy1} A ${inner} ${inner} 0 1 0 ${imx} ${imy} A ${inner} ${inner} 0 1 0 ${ix0} ${iy0} Z`;
+  }
   return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} L ${ix1} ${iy1} A ${inner} ${inner} 0 ${large} 0 ${ix0} ${iy0} Z`;
 }
 
@@ -93,50 +147,68 @@ function roundTopRect(x: number, y: number, w: number, h: number, r: number): st
 }
 
 function lift(color: string, t: number): string {
-  const hex = color.startsWith("rgb") ? color : color;
-  // mix toward cream for a top-edge sheen
-  const m = hex.match(/^#([0-9a-fA-F]{6})$/);
-  const rgb = hex.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
-  let r = 102, g = 216, b = 158;
-  if (m) {
-    r = parseInt(m[1]!.slice(0, 2), 16);
-    g = parseInt(m[1]!.slice(2, 4), 16);
-    b = parseInt(m[1]!.slice(4, 6), 16);
-  } else if (rgb) {
-    r = +rgb[1]!; g = +rgb[2]!; b = +rgb[3]!;
-  }
+  const parsed = parseChartColor(color);
+  if (!parsed) return color;
   const u = Math.max(0, Math.min(1, t));
-  return `rgb(${Math.round(r + (244 - r) * u)},${Math.round(g + (238 - g) * u)},${Math.round(b + (225 - b) * u)})`;
+  return formatChartColor({
+    r: parsed.r + (244 - parsed.r) * u,
+    g: parsed.g + (238 - parsed.g) * u,
+    b: parsed.b + (225 - parsed.b) * u,
+    a: parsed.a,
+  });
+}
+
+function roundBottomRect(x: number, y: number, w: number, h: number, r: number): string {
+  const rr = Math.min(r, w / 2, Math.max(0, h));
+  if (rr < 0.5) {
+    return `M${round(x)} ${round(y)} h${round(w)} v${round(h)} h${round(-w)} Z`;
+  }
+  return `M${round(x)} ${round(y)} L${round(x + w)} ${round(y)} L${round(x + w)} ${round(y + h - rr)} Q${round(x + w)} ${round(y + h)} ${round(x + w - rr)} ${round(y + h)} L${round(x + rr)} ${round(y + h)} Q${round(x)} ${round(y + h)} ${round(x)} ${round(y + h - rr)} Z`;
 }
 
 function shade(color: string, t: number): string {
-  const m = color.match(/^#([0-9a-fA-F]{6})$/);
-  const rgb = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
-  let r = 102, g = 216, b = 158;
-  if (m) {
-    r = parseInt(m[1]!.slice(0, 2), 16);
-    g = parseInt(m[1]!.slice(2, 4), 16);
-    b = parseInt(m[1]!.slice(4, 6), 16);
-  } else if (rgb) {
-    r = +rgb[1]!; g = +rgb[2]!; b = +rgb[3]!;
-  }
+  const parsed = parseChartColor(color);
+  if (!parsed) return color;
   const u = Math.max(0, Math.min(1, t));
-  return `rgb(${Math.round(r * (1 - u))},${Math.round(g * (1 - u))},${Math.round(b * (1 - u))})`;
+  return formatChartColor({
+    r: parsed.r * (1 - u),
+    g: parsed.g * (1 - u),
+    b: parsed.b * (1 - u),
+    a: parsed.a,
+  });
 }
 
-function nodeSvg(n: SceneNode, i: number, theme: DashboardTheme, uid: number): string {
+const AREA_GRADIENT_STOPS = Object.freeze([
+  [0, 1],
+  [0.18, 0.72],
+  [0.48, 0.28],
+  [0.78, 2 / 21],
+  [1, 0],
+] as const);
+
+function normalizedOpacity(value: number | undefined, fallback: number): number {
+  const opacity = value ?? fallback;
+  return Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : fallback;
+}
+
+function svgOpacity(value: number): string {
+  return String(Number(value.toFixed(4)));
+}
+
+function nodeSvg(n: SceneNode, i: number, theme: DashboardTheme, uid: string): string {
   const stroke = n.stroke ?? "none";
   const fill = n.fill ?? "none";
   const sw = n.strokeWidth != null ? ` stroke-width="${n.strokeWidth}"` : "";
   const lc = ` stroke-linecap="round" stroke-linejoin="round"`;
   const mark = n.idx != null ? ` data-idx="${n.idx}"` : "";
   const role = n.role ? ` data-role="${esc(n.role)}"` : "";
-  if (n.type === "line" && n.points) {
+  const meta = `${mark}${role}`;
+  if (n.type === "line" && n.points?.length) {
     const dash = n.dashed ? ` stroke-dasharray="4.5 3.5"` : "";
     const path = n.dashed && n.points.length <= 2
       ? `M${round(n.points[0]!.x)} ${round(n.points[0]!.y)} L${round(n.points[1]?.x ?? n.points[0]!.x)} ${round(n.points[1]?.y ?? n.points[0]!.y)}`
       : monotonePath(n.points);
-    return `<path fill="none" stroke="${esc(stroke)}"${sw}${lc}${dash}${role} d="${path}" />`;
+    return `<path fill="none" stroke="${esc(stroke)}"${sw}${lc}${dash}${meta} d="${path}" />`;
   }
   if (n.type === "area" && n.points && n.points.length >= 3) {
     const mid = n.points.slice(1, -1);
@@ -145,22 +217,20 @@ function nodeSvg(n: SceneNode, i: number, theme: DashboardTheme, uid: number): s
     const top = mid[0]!;
     const last = mid[mid.length - 1]!;
     const d = `${monotonePath(mid)} L${round(last.x)} ${round(yBase)} L${round(top.x)} ${round(yBase)} Z`;
-    const fo = n.fillOpacity ?? 0.42;
+    const opacity = normalizedOpacity(n.fillOpacity, 0.42);
     return [
       `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">`,
-      `<stop offset="0%" stop-color="${esc(fill)}" stop-opacity="${fo}"/>`,
-      `<stop offset="18%" stop-color="${esc(fill)}" stop-opacity="${fo * 0.72}"/>`,
-      `<stop offset="48%" stop-color="${esc(fill)}" stop-opacity="${fo * 0.28}"/>`,
-      `<stop offset="78%" stop-color="${esc(fill)}" stop-opacity="0.04"/>`,
-      `<stop offset="100%" stop-color="${esc(fill)}" stop-opacity="0"/>`,
+      ...AREA_GRADIENT_STOPS.map(([offset, factor]) => (
+        `<stop offset="${offset * 100}%" stop-color="${esc(fill)}" stop-opacity="${svgOpacity(opacity * factor)}"/>`
+      )),
       `</linearGradient></defs>`,
-      `<path fill="url(#${gid})" stroke="none" d="${d}" />`,
+      `<path fill="url(#${gid})" stroke="${esc(stroke)}"${sw}${lc}${meta} d="${d}" />`,
     ].join("");
   }
   if (n.type === "polygon" && n.points) {
     const pts = n.points.map((p) => `${round(p.x)},${round(p.y)}`).join(" ");
     const fo = n.fillOpacity != null && n.fill !== "none" ? ` fill-opacity="${n.fillOpacity}"` : "";
-    return `<polygon fill="${esc(fill)}"${fo} stroke="${esc(stroke)}"${sw}${lc} points="${pts}" />`;
+    return `<polygon fill="${esc(fill)}"${fo} stroke="${esc(stroke)}"${sw}${lc}${meta} points="${pts}" />`;
   }
   if (n.type === "rect") {
     const x = n.x ?? 0;
@@ -170,48 +240,50 @@ function nodeSvg(n: SceneNode, i: number, theme: DashboardTheme, uid: number): s
     const st = n.stroke && n.stroke !== "none"
       ? ` stroke="${esc(n.stroke)}" stroke-width="${n.strokeWidth ?? 1}"`
       : "";
-    if (n.corner === "top") {
+    const fo = n.fillOpacity != null ? ` fill-opacity="${n.fillOpacity}"` : "";
+    if (n.corner === "top" || n.corner === "bottom") {
       const gid = `raze-bar-${uid}-${i}`;
       const hi = lift(fill, 0.22);
       const lo = shade(fill, 0.14);
       const rr = Math.min(2.5, w / 2, Math.max(0, h));
       const sheen = h >= 6 && w >= 4
-        ? `<path d="M${round(x + rr + 0.5)} ${hair(y)} L${round(x + w - rr - 0.5)} ${hair(y)}" fill="none" stroke="rgba(244,238,225,0.28)" stroke-width="1" stroke-linecap="round" />`
+        ? `<path d="M${round(x + rr + 0.5)} ${hair(n.corner === "bottom" ? y + h : y)} L${round(x + w - rr - 0.5)} ${hair(n.corner === "bottom" ? y + h : y)}" fill="none" stroke="rgba(244,238,225,0.28)" stroke-width="1" stroke-linecap="round" />`
         : "";
       return [
         `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">`,
-        `<stop offset="0%" stop-color="${esc(hi)}"/>`,
+        `<stop offset="0%" stop-color="${esc(n.corner === "bottom" ? lo : hi)}"/>`,
         `<stop offset="38%" stop-color="${esc(fill)}"/>`,
-        `<stop offset="100%" stop-color="${esc(lo)}"/>`,
+        `<stop offset="100%" stop-color="${esc(n.corner === "bottom" ? hi : lo)}"/>`,
         `</linearGradient></defs>`,
-        `<path d="${roundTopRect(x, y, w, h, rr)}" fill="url(#${gid})"${st}${role} />`,
+        `<path d="${n.corner === "bottom" ? roundBottomRect(x, y, w, h, rr) : roundTopRect(x, y, w, h, rr)}" fill="url(#${gid})"${fo}${st}${meta} />`,
         sheen,
       ].join("");
     }
     if (n.corner === "none" || n.role === "heat") {
-      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${esc(fill)}"${st}${role} />`;
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${esc(fill)}"${fo}${st}${meta} />`;
     }
     const rx = Math.min(2.5, w / 2, h / 2);
-    return `<rect x="${round(x)}" y="${round(y)}" width="${round(w)}" height="${round(h)}" rx="${rx}" fill="${esc(fill)}"${st}${role} />`;
+    return `<rect x="${round(x)}" y="${round(y)}" width="${round(w)}" height="${round(h)}" rx="${rx}" fill="${esc(fill)}"${fo}${st}${meta} />`;
   }
   if (n.type === "circle") {
     const cs = n.stroke && n.stroke !== "none" ? ` stroke="${esc(n.stroke)}" stroke-width="${n.strokeWidth ?? 1}"` : "";
     const fo = n.fillOpacity != null ? ` fill-opacity="${n.fillOpacity}"` : "";
-    return `<circle cx="${round(n.x ?? 0)}" cy="${round(n.y ?? 0)}" r="${n.r}" fill="${esc(fill)}"${fo}${cs}${role} />`;
+    return `<circle cx="${round(n.x ?? 0)}" cy="${round(n.y ?? 0)}" r="${round(n.r ?? 3)}" fill="${esc(fill)}"${fo}${cs}${meta} />`;
   }
   if (n.type === "rule") {
     const dash = n.dashed === false ? "" : ` stroke-dasharray="3.5 3"`;
-    return `<line x1="${hair(n.x ?? 0)}" y1="${hair(n.y ?? 0)}" x2="${hair(n.x2 ?? 0)}" y2="${hair(n.y2 ?? 0)}" stroke="${esc(stroke)}"${sw}${dash} />`;
+    return `<line x1="${hair(n.x ?? 0)}" y1="${hair(n.y ?? 0)}" x2="${hair(n.x2 ?? 0)}" y2="${hair(n.y2 ?? 0)}" stroke="${esc(stroke)}"${sw}${dash}${meta} />`;
   }
   if (n.type === "arc") {
-    return `<path d="${arcPath(n)}" fill="${esc(fill)}" stroke="${esc(stroke)}"${sw}${mark}${role} />`;
+    const fo = n.fillOpacity != null ? ` fill-opacity="${n.fillOpacity}"` : "";
+    return `<path d="${arcPath(n)}" fill="${esc(fill)}"${fo} stroke="${esc(stroke)}"${sw}${meta} />`;
   }
   if (n.type === "text" && n.label) {
     const anchor = n.anchor ?? "start";
     const size = n.fontSize ?? 11;
     const baseline = "central";
     const weight = size >= 18 ? ` font-weight="600"` : "";
-    return `<text x="${round(n.x ?? 0)}" y="${round(n.y ?? 0)}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-size="${size}"${weight} fill="${esc(n.fill || theme.muted)}">${esc(n.label)}</text>`;
+    return `<text x="${round(n.x ?? 0)}" y="${round(n.y ?? 0)}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-size="${size}"${weight} fill="${esc(n.fill || theme.muted)}"${meta}>${esc(n.label)}</text>`;
   }
   return "";
 }
@@ -224,17 +296,32 @@ function chipSvg(
   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2.5" fill="${esc(bg)}" /><text x="${tx}" y="${y + h / 2 + 0.5}" text-anchor="${anchor}" dominant-baseline="middle" font-size="10" font-weight="600" fill="${esc(fg)}">${esc(label)}</text>`;
 }
 
-export function renderChartSvg(definition: ChartDefinition, size: { width: number; height: number }): string {
+export interface SvgRenderOptions {
+  /** Stable prefix for SSR/hydration or multiple charts in one document. */
+  idPrefix?: string;
+}
+
+export function renderChartSvg(
+  definition: ChartDefinition,
+  size: { width: number; height: number },
+  options?: SvgRenderOptions,
+): string {
   const c = compileChart(definition, size);
-  return svgFromCompiled(c);
+  return svgFromCompiled(c, options);
 }
 
 let svgSeq = 0;
 
-export function svgFromCompiled(c: CompiledChart): string {
+function safeId(value: string): string {
+  const clean = value.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return clean || "chart";
+}
+
+export function svgFromCompiled(c: CompiledChart, options?: SvgRenderOptions): string {
   const { width, height, plot, theme } = c;
-  const uid = ++svgSeq;
+  const uid = options?.idPrefix ? safeId(options.idPrefix) : String(++svgSeq);
   const clipId = `raze-plot-${uid}`;
+  const descId = `raze-description-${uid}`;
   const font = `font-family:${esc(theme.font)};font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1`;
 
   const grid = c.grid && !c.polar
@@ -296,7 +383,7 @@ export function svgFromCompiled(c: CompiledChart): string {
       : `<line x1="${plot.x}" x2="${plot.x + plot.w}" y1="${yy}" y2="${yy}" stroke="${esc(lv.color)}" stroke-dasharray="3.5 3" stroke-opacity="0.8" />`;
     return [
       dash,
-      chipSvg(plot.x + plot.w + 3, top, axisW - 6, 15, lv.color, theme.lastChipFg, lv.label, "end"),
+      chipSvg(plot.x + plot.w + 3, top, axisW - 6, 15, lv.color, readableTextColor(lv.color, theme), lv.label, "end"),
     ].join("");
   }).join("");
 
@@ -336,7 +423,11 @@ export function svgFromCompiled(c: CompiledChart): string {
   const overlay = c.nodes.map((n, i) => n.clip === false ? nodeSvg(n, 800 + i, theme, uid) : "").join("");
   const clip = `<defs><clipPath id="${clipId}"><rect x="${plot.x}" y="${plot.y}" width="${plot.w}" height="${plot.h}" /></clipPath></defs><g clip-path="url(#${clipId})">${body}</g>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(c.ariaLabel)}" style="display:block;width:100%;height:100%;${font};background:${esc(theme.background)}"><rect width="${width}" height="${height}" fill="${esc(theme.background)}" />${legend}${grid}${clip}${overlay}${yAxis}${xAxis}${last}${bar}</svg>`;
+  const description = c.ariaDescription
+    ? `<desc id="${descId}">${esc(c.ariaDescription)}</desc>`
+    : "";
+  const describedBy = description ? ` aria-describedby="${descId}"` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(c.ariaLabel)}"${describedBy} style="display:block;width:100%;height:100%;${font};background:${esc(theme.background)}">${description}<rect width="${width}" height="${height}" fill="${esc(theme.background)}" />${legend}${grid}${clip}${overlay}${yAxis}${xAxis}${last}${bar}</svg>`;
 }
 
 function distToSeg(x: number, y: number, x1: number, y1: number, x2: number, y2: number): number {
@@ -357,98 +448,262 @@ function inArc(n: SceneNode, x: number, y: number): boolean {
   const inner = n.innerR ?? 0;
   if (r > outer + 1 || r < inner - 1) return false;
   const a0 = n.startAngle ?? 0;
-  const a1 = n.endAngle ?? 0;
-  let ang = Math.atan2(dy, dx);
-  const twoPi = Math.PI * 2;
-  while (ang < a0) ang += twoPi;
-  while (ang > a0 + twoPi) ang -= twoPi;
-  return ang <= a1 + 1e-6;
+  const sweep = arcSweep(n);
+  if (sweep >= TAU - 1e-9) return true;
+  const relative = ((Math.atan2(dy, dx) - a0) % TAU + TAU) % TAU;
+  return relative <= sweep + 1e-6;
+}
+
+interface HitIndex {
+  nodes: SceneNode[];
+  length: number;
+  cellSize: number;
+  cells: Map<string, number[]>;
+  global: number[];
+}
+
+const hitIndexes = new WeakMap<CompiledChart, HitIndex>();
+
+function cellKey(x: number, y: number): string {
+  return `${x}:${y}`;
+}
+
+function nodeBounds(n: SceneNode, pad: number): { left: number; top: number; right: number; bottom: number } | null {
+  if (n.type === "text" || n.hit === false) return null;
+  if (n.type === "rect") {
+    const x0 = n.x ?? 0;
+    const y0 = n.y ?? 0;
+    const x1 = x0 + (n.w ?? 0);
+    const y1 = y0 + (n.h ?? 0);
+    return { left: Math.min(x0, x1) - pad, top: Math.min(y0, y1) - pad, right: Math.max(x0, x1) + pad, bottom: Math.max(y0, y1) + pad };
+  }
+  if (n.type === "circle" || n.type === "arc") {
+    const radius = (n.r ?? (n.type === "circle" ? 3 : 0)) + pad;
+    const x = n.x ?? 0;
+    const y = n.y ?? 0;
+    return { left: x - radius, top: y - radius, right: x + radius, bottom: y + radius };
+  }
+  if (n.type === "rule") {
+    const x0 = n.x ?? 0;
+    const y0 = n.y ?? 0;
+    const x1 = n.x2 ?? 0;
+    const y1 = n.y2 ?? 0;
+    return { left: Math.min(x0, x1) - pad, top: Math.min(y0, y1) - pad, right: Math.max(x0, x1) + pad, bottom: Math.max(y0, y1) + pad };
+  }
+  if (!n.points?.length) return null;
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const point of n.points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    left = Math.min(left, point.x);
+    top = Math.min(top, point.y);
+    right = Math.max(right, point.x);
+    bottom = Math.max(bottom, point.y);
+  }
+  return Number.isFinite(left) ? { left: left - pad, top: top - pad, right: right + pad, bottom: bottom + pad } : null;
+}
+
+function createHitIndex(c: CompiledChart): HitIndex {
+  const cellSize = 48;
+  const cells = new Map<string, number[]>();
+  const global: number[] = [];
+  const maxCellsPerNode = 256;
+  for (let i = 0; i < c.nodes.length; i++) {
+    const bounds = nodeBounds(c.nodes[i]!, 6);
+    if (!bounds) continue;
+    const left = Math.floor(bounds.left / cellSize);
+    const right = Math.floor(bounds.right / cellSize);
+    const top = Math.floor(bounds.top / cellSize);
+    const bottom = Math.floor(bounds.bottom / cellSize);
+    const count = (right - left + 1) * (bottom - top + 1);
+    if (!Number.isFinite(count) || count > maxCellsPerNode) {
+      global.push(i);
+      continue;
+    }
+    for (let cy = top; cy <= bottom; cy++) {
+      for (let cx = left; cx <= right; cx++) {
+        const key = cellKey(cx, cy);
+        const bucket = cells.get(key);
+        if (bucket) bucket.push(i);
+        else cells.set(key, [i]);
+      }
+    }
+  }
+  const index = { nodes: c.nodes, length: c.nodes.length, cellSize, cells, global };
+  hitIndexes.set(c, index);
+  return index;
+}
+
+function hitNode(n: SceneNode, x: number, y: number, pad: number): boolean {
+  if (n.hit === false || n.type === "text") return false;
+  if (n.type === "rect") {
+    const x0 = n.x ?? 0;
+    const y0 = n.y ?? 0;
+    const x1 = x0 + (n.w ?? 0);
+    const y1 = y0 + (n.h ?? 0);
+    return x >= Math.min(x0, x1) && x <= Math.max(x0, x1) && y >= Math.min(y0, y1) && y <= Math.max(y0, y1);
+  }
+  if (n.type === "circle") {
+    return Math.hypot(x - (n.x ?? 0), y - (n.y ?? 0)) <= (n.r ?? 3) + pad;
+  }
+  if (n.type === "arc") return inArc(n, x, y);
+  if ((n.type === "line" || n.type === "area" || n.type === "polygon") && n.points?.length) {
+    if (n.type === "polygon" && (n.fill === "none" || !n.series)) return false;
+    if (n.type !== "line") {
+      let inside = false;
+      const pts = n.points;
+      for (let j = 0, k = pts.length - 1; j < pts.length; k = j++) {
+        const a = pts[j]!;
+        const b = pts[k]!;
+        const intersects = ((a.y > y) !== (b.y > y)) && (x < (b.x - a.x) * (y - a.y) / (b.y - a.y || 1e-9) + a.x);
+        if (intersects) inside = !inside;
+      }
+      if (inside) return true;
+    }
+    for (let j = 1; j < n.points.length; j++) {
+      const a = n.points[j - 1]!;
+      const b = n.points[j]!;
+      if (distToSeg(x, y, a.x, a.y, b.x, b.y) <= pad) return true;
+    }
+  } else if (n.type === "rule") {
+    return distToSeg(x, y, n.x ?? 0, n.y ?? 0, n.x2 ?? 0, n.y2 ?? 0) <= pad;
+  }
+  return false;
 }
 
 /** Nearest painted mark under a plot-space pointer. Used by HTML tooltips. */
 export function hitTestCompiled(c: CompiledChart, x: number, y: number): SceneNode | null {
   const pad = 6;
-  for (let i = c.nodes.length - 1; i >= 0; i--) {
-    const n = c.nodes[i]!;
-    if (n.hit === false) continue;
-    if (n.type === "text") continue;
-    if (n.type === "rect") {
-      const nx = n.x ?? 0;
-      const ny = n.y ?? 0;
-      if (x >= nx && x <= nx + (n.w ?? 0) && y >= ny && y <= ny + (n.h ?? 0)) return n;
-    } else if (n.type === "circle") {
-      if (Math.hypot(x - (n.x ?? 0), y - (n.y ?? 0)) <= (n.r ?? 3) + pad) return n;
-    } else if (n.type === "arc") {
-      if (inArc(n, x, y)) return n;
-    } else if ((n.type === "line" || n.type === "area" || n.type === "polygon") && n.points && n.points.length) {
-      if (n.type === "polygon" && (n.fill === "none" || !n.series)) {
-        continue;
-      }
-      if (n.type !== "line") {
-        let inside = false;
-        const pts = n.points;
-        for (let j = 0, k = pts.length - 1; j < pts.length; k = j++) {
-          const a = pts[j]!;
-          const b = pts[k]!;
-          const hit = ((a.y > y) !== (b.y > y)) && (x < (b.x - a.x) * (y - a.y) / (b.y - a.y || 1e-9) + a.x);
-          if (hit) inside = !inside;
-        }
-        if (inside) return n;
-      }
-      for (let j = 1; j < n.points.length; j++) {
-        const a = n.points[j - 1]!;
-        const b = n.points[j]!;
-        if (distToSeg(x, y, a.x, a.y, b.x, b.y) <= pad) return n;
-      }
-    } else if (n.type === "rule" && n.dashed !== false) {
-      if (distToSeg(x, y, n.x ?? 0, n.y ?? 0, n.x2 ?? 0, n.y2 ?? 0) <= pad) return n;
+  if (c.nodes.length < 128) {
+    for (let i = c.nodes.length - 1; i >= 0; i--) {
+      const node = c.nodes[i]!;
+      if (hitNode(node, x, y, pad)) return node;
     }
+    return null;
+  }
+  let index = hitIndexes.get(c);
+  if (!index || index.nodes !== c.nodes || index.length !== c.nodes.length) index = createHitIndex(c);
+  const bucket = index.cells.get(cellKey(Math.floor(x / index.cellSize), Math.floor(y / index.cellSize))) ?? [];
+  const candidates = index.global.length
+    ? Array.from(new Set([...bucket, ...index.global])).sort((a, b) => b - a)
+    : [...bucket].reverse();
+  for (const nodeIndex of candidates) {
+    const node = c.nodes[nodeIndex]!;
+    if (hitNode(node, x, y, pad)) return node;
   }
   return null;
 }
 
-export function nearestSample(c: CompiledChart, x: number, y: number): HoverSample | null {
-  const samples = c.samples;
-  if (!samples.length) return null;
-  const kinds = new Set(samples.map((s) => s.kind));
-  if (kinds.has("point") && !kinds.has("line")) {
-    let best: HoverSample | null = null;
-    let bestD = 48;
-    for (const s of samples) {
-      const d = Math.hypot(s.x - x, s.y - y);
-      if (d < bestD) {
-        bestD = d;
-        best = s;
-      }
-    }
-    return best;
+interface SampleIndex {
+  samples: HoverSample[];
+  length: number;
+  kinds: Set<HoverSample["kind"]>;
+  lineByX: { sample: HoverSample; index: number }[];
+  cells: Map<string, { sample: HoverSample; index: number }[]>;
+}
+
+const sampleIndexes = new WeakMap<CompiledChart, SampleIndex>();
+
+function createSampleIndex(c: CompiledChart): SampleIndex {
+  const lineByX: { sample: HoverSample; index: number }[] = [];
+  const cells = new Map<string, { sample: HoverSample; index: number }[]>();
+  const kinds = new Set<HoverSample["kind"]>();
+  for (let i = 0; i < c.samples.length; i++) {
+    const sample = c.samples[i]!;
+    kinds.add(sample.kind);
+    if (!Number.isFinite(sample.x) || !Number.isFinite(sample.y)) continue;
+    if (sample.kind === "line") lineByX.push({ sample, index: i });
+    const key = cellKey(Math.floor(sample.x / 48), Math.floor(sample.y / 48));
+    const bucket = cells.get(key);
+    if (bucket) bucket.push({ sample, index: i });
+    else cells.set(key, [{ sample, index: i }]);
   }
-  if (kinds.has("radar")) {
-    let best: HoverSample | null = null;
-    let bestD = 22;
-    for (const s of samples) {
-      const d = Math.hypot(s.x - x, s.y - y);
-      if (d < bestD) {
-        bestD = d;
-        best = s;
-      }
-    }
-    return best;
+  lineByX.sort((a, b) => a.sample.x - b.sample.x || a.index - b.index);
+  const index = { samples: c.samples, length: c.samples.length, kinds, lineByX, cells };
+  sampleIndexes.set(c, index);
+  return index;
+}
+
+function lowerBoundX(values: readonly { sample: HoverSample }[], x: number): number {
+  let lo = 0;
+  let hi = values.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (values[mid]!.sample.x < x) lo = mid + 1;
+    else hi = mid;
   }
+  return lo;
+}
+
+function nearestSpatial(
+  index: SampleIndex,
+  x: number,
+  y: number,
+  radius: number,
+  accepts: (sample: HoverSample) => boolean = () => true,
+): HoverSample | null {
+  const cx = Math.floor(x / 48);
+  const cy = Math.floor(y / 48);
+  const candidates: { sample: HoverSample; index: number }[] = [];
+  const reach = Math.max(1, Math.ceil(radius / 48));
+  for (let iy = cy - reach; iy <= cy + reach; iy++) {
+    for (let ix = cx - reach; ix <= cx + reach; ix++) {
+      const bucket = index.cells.get(cellKey(ix, iy));
+      if (bucket) for (const index of bucket) candidates.push(index);
+    }
+  }
+  candidates.sort((a, b) => a.index - b.index);
   let best: HoverSample | null = null;
-  let bestDx = Infinity;
-  let bestDy = Infinity;
-  for (const s of samples) {
-    if (s.kind !== "line") continue;
-    const dx = Math.abs(s.x - x);
-    const dy = Math.abs(s.y - y);
-    if (dx < bestDx - 0.5 || (Math.abs(dx - bestDx) <= 0.5 && dy < bestDy)) {
-      bestDx = dx;
-      bestDy = dy;
-      best = s;
+  let bestDistance = radius;
+  for (const { sample } of candidates) {
+    if (!accepts(sample)) continue;
+    const distance = Math.hypot(sample.x - x, sample.y - y);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = sample;
     }
   }
   return best;
+}
+
+function nearestLine(index: SampleIndex, x: number, y: number): HoverSample | null {
+  const values = index.lineByX;
+  if (!values.length) return null;
+  const at = lowerBoundX(values, x);
+  const leftDx = at > 0 ? Math.abs(values[at - 1]!.sample.x - x) : Infinity;
+  const rightDx = at < values.length ? Math.abs(values[at]!.sample.x - x) : Infinity;
+  const minDx = Math.min(leftDx, rightDx);
+  const from = lowerBoundX(values, x - minDx - 0.5);
+  let to = lowerBoundX(values, x + minDx + 0.5);
+  while (to < values.length && values[to]!.sample.x <= x + minDx + 0.5) to++;
+  const candidates = values.slice(from, to).sort((a, b) => a.index - b.index);
+  let best: HoverSample | null = null;
+  let bestDx = Infinity;
+  let bestDy = Infinity;
+  for (const { sample } of candidates) {
+    const dx = Math.abs(sample.x - x);
+    const dy = Math.abs(sample.y - y);
+    if (dx < bestDx - 0.5 || (Math.abs(dx - bestDx) <= 0.5 && dy < bestDy)) {
+      bestDx = dx;
+      bestDy = dy;
+      best = sample;
+    }
+  }
+  return best;
+}
+
+export function nearestSample(c: CompiledChart, x: number, y: number): HoverSample | null {
+  if (!c.samples.length) return null;
+  let index = sampleIndexes.get(c);
+  if (!index || index.samples !== c.samples || index.length !== c.samples.length) index = createSampleIndex(c);
+  if (index.kinds.has("point")) {
+    const point = nearestSpatial(index, x, y, index.kinds.has("line") ? 12 : 48, (sample) => sample.kind === "point");
+    if (point) return point;
+  }
+  if (index.kinds.has("radar")) return nearestSpatial(index, x, y, 22);
+  return nearestLine(index, x, y);
 }
 
 export function tooltipText(n: SceneNode): string {
@@ -489,7 +744,7 @@ function tipStyle(theme: DashboardTheme): string {
     "pointer-events:none",
     "z-index:5",
     `background:${theme.chipBg}`,
-    `color:${theme.chipFg}`,
+    `color:${readableTextColor(theme.chipBg, theme)}`,
     `font:10px/1.5 ${theme.font}`,
     "font-variant-numeric:tabular-nums",
     "padding:7px 10px 7px 11px",
@@ -520,7 +775,7 @@ function axisChipStyle(theme: DashboardTheme): string {
     "pointer-events:none",
     "z-index:4",
     `background:${theme.chipBg}`,
-    `color:${theme.chipFg}`,
+    `color:${readableTextColor(theme.chipBg, theme)}`,
     `font:10px ${theme.font}`,
     "font-variant-numeric:tabular-nums",
     "padding:1px 6px",
@@ -531,97 +786,436 @@ function axisChipStyle(theme: DashboardTheme): string {
   ].join(";");
 }
 
+function traceRoundTopRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const radius = Math.min(r, w / 2, Math.max(0, h));
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x, y + radius);
+  if (radius >= 0.5) ctx.quadraticCurveTo(x, y, x + radius, y);
+  else ctx.lineTo(x, y);
+  ctx.lineTo(x + w - radius, y);
+  if (radius >= 0.5) ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  else ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + h);
+  ctx.closePath();
+}
+
+function traceRoundBottomRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const radius = Math.min(r, w / 2, Math.max(0, h));
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + h - radius);
+  if (radius >= 0.5) ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  else ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x + radius, y + h);
+  if (radius >= 0.5) ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  else ctx.lineTo(x, y + h);
+  ctx.closePath();
+}
+
+function traceRoundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+function traceArcNode(ctx: CanvasRenderingContext2D, n: SceneNode): boolean {
+  const cx = n.x ?? 0;
+  const cy = n.y ?? 0;
+  const outer = n.r ?? 0;
+  const inner = Math.max(0, n.innerR ?? 0);
+  const start = n.startAngle ?? 0;
+  const sweep = arcSweep(n);
+  if (outer <= 0 || sweep <= 1e-9) return false;
+  const end = start + sweep;
+  ctx.beginPath();
+  if (inner <= 0) {
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(start) * outer, cy + Math.sin(start) * outer);
+    ctx.arc(cx, cy, outer, start, end, false);
+  } else {
+    ctx.moveTo(cx + Math.cos(start) * outer, cy + Math.sin(start) * outer);
+    ctx.arc(cx, cy, outer, start, end, false);
+    ctx.lineTo(cx + Math.cos(end) * inner, cy + Math.sin(end) * inner);
+    ctx.arc(cx, cy, inner, end, start, true);
+  }
+  ctx.closePath();
+  return true;
+}
+
+function paintNodeCanvas(ctx: CanvasRenderingContext2D, n: SceneNode, theme: DashboardTheme): void {
+  const fill = n.fill ?? "none";
+  const stroke = n.stroke ?? "none";
+  if (n.type === "line" && n.points?.length) {
+    if (stroke === "none") return;
+    ctx.beginPath();
+    traceMonotone(ctx, n.points);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = n.strokeWidth ?? 1;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.setLineDash(n.dashed ? [4.5, 3.5] : []);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    return;
+  }
+  if (n.type === "area" && n.points && n.points.length >= 3) {
+    const middle = n.points.slice(1, -1);
+    if (!middle.length) return;
+    const baseline = n.points[0]!.y;
+    ctx.beginPath();
+    traceMonotone(ctx, middle);
+    const last = middle[middle.length - 1]!;
+    const first = middle[0]!;
+    ctx.lineTo(last.x, baseline);
+    ctx.lineTo(first.x, baseline);
+    ctx.closePath();
+    if (fill !== "none") {
+      let top = baseline;
+      let bottom = baseline;
+      for (const point of middle) {
+        top = Math.min(top, point.y);
+        bottom = Math.max(bottom, point.y);
+      }
+      const gradient = ctx.createLinearGradient(0, top, 0, Math.max(top + 1, bottom));
+      const opacity = normalizedOpacity(n.fillOpacity, 0.42);
+      for (const [offset, factor] of AREA_GRADIENT_STOPS) {
+        gradient.addColorStop(offset, chartColorWithOpacity(fill, opacity * factor));
+      }
+      ctx.fillStyle = gradient;
+      ctx.fill();
+    }
+    if (stroke !== "none") {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = n.strokeWidth ?? 1;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+    return;
+  }
+  if (n.type === "polygon" && n.points?.length) {
+    ctx.beginPath();
+    n.points.forEach((point, i) => i === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y));
+    ctx.closePath();
+    if (fill !== "none") {
+      const alpha = ctx.globalAlpha;
+      ctx.globalAlpha = n.fillOpacity ?? 1;
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.globalAlpha = alpha;
+    }
+    if (stroke !== "none") {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = n.strokeWidth ?? 1;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+    return;
+  }
+  if (n.type === "rect") {
+    const x = n.x ?? 0;
+    const y = n.y ?? 0;
+    const w = Math.max(0, n.w ?? 0);
+    const h = Math.max(0, n.h ?? 0);
+    const alpha = ctx.globalAlpha;
+    ctx.globalAlpha = n.fillOpacity ?? 1;
+    ctx.beginPath();
+    if (n.corner === "top") traceRoundTopRect(ctx, x, y, w, h, Math.min(2.5, w / 2, h));
+    else if (n.corner === "bottom") traceRoundBottomRect(ctx, x, y, w, h, Math.min(2.5, w / 2, h));
+    else if (n.corner === "none" || n.role === "heat") ctx.rect(x, y, w, h);
+    else traceRoundRect(ctx, x, y, w, h, Math.min(2.5, w / 2, h / 2));
+    if (fill !== "none") {
+      if (n.corner === "top" || n.corner === "bottom") {
+        const gradient = ctx.createLinearGradient(0, y, 0, y + Math.max(1, h));
+        gradient.addColorStop(0, n.corner === "bottom" ? shade(fill, 0.14) : lift(fill, 0.22));
+        gradient.addColorStop(0.38, fill);
+        gradient.addColorStop(1, n.corner === "bottom" ? lift(fill, 0.22) : shade(fill, 0.14));
+        ctx.fillStyle = gradient;
+      } else {
+        ctx.fillStyle = fill;
+      }
+      ctx.fill();
+    }
+    ctx.globalAlpha = alpha;
+    if (stroke !== "none") {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = n.strokeWidth ?? 1;
+      ctx.stroke();
+    }
+    if ((n.corner === "top" || n.corner === "bottom") && h >= 6 && w >= 4) {
+      const radius = Math.min(2.5, w / 2, h);
+      const sheenY = n.corner === "bottom" ? y + h : y;
+      ctx.beginPath();
+      ctx.moveTo(x + radius + 0.5, hair(sheenY));
+      ctx.lineTo(x + w - radius - 0.5, hair(sheenY));
+      ctx.strokeStyle = "rgba(244,238,225,0.28)";
+      ctx.lineWidth = 1;
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+    return;
+  }
+  if (n.type === "circle") {
+    ctx.beginPath();
+    ctx.arc(n.x ?? 0, n.y ?? 0, n.r ?? 3, 0, TAU);
+    if (fill !== "none") {
+      const alpha = ctx.globalAlpha;
+      ctx.globalAlpha = n.fillOpacity ?? 1;
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.globalAlpha = alpha;
+    }
+    if (stroke !== "none") {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = n.strokeWidth ?? 1;
+      ctx.stroke();
+    }
+    return;
+  }
+  if (n.type === "rule") {
+    if (stroke === "none") return;
+    ctx.beginPath();
+    ctx.moveTo(hair(n.x ?? 0), hair(n.y ?? 0));
+    ctx.lineTo(hair(n.x2 ?? 0), hair(n.y2 ?? 0));
+    ctx.strokeStyle = stroke;
+    ctx.setLineDash(n.dashed === false ? [] : [3.5, 3]);
+    ctx.lineWidth = n.strokeWidth ?? 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    return;
+  }
+  if (n.type === "arc") {
+    if (!traceArcNode(ctx, n)) return;
+    if (fill !== "none") {
+      const alpha = ctx.globalAlpha;
+      ctx.globalAlpha = n.fillOpacity ?? 1;
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.globalAlpha = alpha;
+    }
+    if (stroke !== "none") {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = n.strokeWidth ?? 1;
+      ctx.stroke();
+    }
+    return;
+  }
+  if (n.type === "text" && n.label) {
+    const size = n.fontSize ?? 11;
+    ctx.fillStyle = n.fill || theme.muted;
+    ctx.font = `${size >= 18 ? "600 " : ""}${size}px ${theme.font}`;
+    ctx.textAlign = n.anchor === "middle" ? "center" : (n.anchor ?? "start");
+    ctx.textBaseline = "middle";
+    ctx.fillText(n.label, n.x ?? 0, n.y ?? 0);
+  }
+}
+
+function paintLegendCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void {
+  const { legend, legendPlacement, plot, theme } = c;
+  if (!legend.length || legendPlacement === "hidden") return;
+  if (legendPlacement === "right") {
+    const x = plot.x + plot.w + 18;
+    const rowHeight = 40;
+    const y0 = plot.y + Math.max(0, (plot.h - legend.length * rowHeight) / 2);
+    legend.forEach((item, i) => {
+      const y = y0 + i * rowHeight;
+      ctx.fillStyle = item.color;
+      ctx.fillRect(x, y + 2, 8, 8);
+      ctx.font = `11px ${theme.font}`;
+      ctx.textAlign = "start";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = theme.text;
+      ctx.fillText(item.name, x + 14, y + 6);
+      if (item.detail) {
+        ctx.font = `9px ${theme.font}`;
+        ctx.fillStyle = theme.muted;
+        ctx.fillText(item.detail, x + 14, y + 22);
+      }
+    });
+    return;
+  }
+  let x = plot.x;
+  for (const item of legend) {
+    ctx.fillStyle = item.color;
+    ctx.fillRect(x, 9, 7, 7);
+    ctx.font = `10px ${theme.font}`;
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = theme.text;
+    const label = `${item.name}${item.detail ? `  ${item.detail}` : ""}`;
+    ctx.fillText(label, x + 11, 14);
+    x += 16 + item.name.length * 6.2 + (item.detail ? item.detail.length * 5.6 : 0) + 10;
+  }
+}
+
+function paintAxesCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void {
+  if (c.polar) return;
+  const { plot, theme, width, height } = c;
+  const axisWidth = Math.max(44, width - plot.x - plot.w);
+  if (!c.heatmap) {
+    ctx.fillStyle = theme.background;
+    ctx.fillRect(plot.x + plot.w, 0, axisWidth, height);
+  }
+  ctx.beginPath();
+  ctx.moveTo(hair(c.heatmap ? plot.x : plot.x + plot.w), plot.y);
+  ctx.lineTo(hair(c.heatmap ? plot.x : plot.x + plot.w), plot.y + plot.h);
+  ctx.strokeStyle = theme.axis;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  ctx.stroke();
+  ctx.font = `9px ${theme.font}`;
+  ctx.fillStyle = theme.muted;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "end";
+  for (const tick of c.yTicks) ctx.fillText(tick.label, c.heatmap ? plot.x - 8 : width - 7, tick.px);
+
+  ctx.fillStyle = theme.background;
+  ctx.fillRect(0, plot.y + plot.h, width, Math.max(0, height - plot.y - plot.h));
+  ctx.beginPath();
+  ctx.moveTo(c.heatmap ? plot.x : 0, hair(plot.y + plot.h));
+  ctx.lineTo(c.heatmap ? plot.x + plot.w : width, hair(plot.y + plot.h));
+  ctx.strokeStyle = theme.axis;
+  ctx.stroke();
+  ctx.font = `9px ${theme.font}`;
+  ctx.fillStyle = theme.muted;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  for (const tick of c.xTicks) ctx.fillText(tick.label, tick.px, plot.y + plot.h + 14);
+}
+
+function paintChipCanvas(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  background: string,
+  foreground: string,
+  label: string,
+  font: string,
+): void {
+  ctx.beginPath();
+  traceRoundRect(ctx, x, y, w, h, 2.5);
+  ctx.fillStyle = background;
+  ctx.fill();
+  ctx.fillStyle = foreground;
+  ctx.font = `600 10px ${font}`;
+  ctx.textAlign = "end";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x + w - 6, y + h / 2 + 0.5);
+}
+
+function paintLastValuesCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void {
+  if (c.polar || c.heatmap) return;
+  const { plot, theme, width } = c;
+  const axisWidth = Math.max(44, width - plot.x - plot.w);
+  const placed: number[] = [];
+  for (const value of c.lastValues) {
+    let top = Math.max(plot.y, Math.min(plot.y + plot.h - 15, value.y - 7.5));
+    while (placed.some((position) => Math.abs(position - top) < 16)) {
+      top = Math.min(plot.y + plot.h - 15, top + 16);
+    }
+    placed.push(top);
+    if (value.dash !== false) {
+      ctx.beginPath();
+      ctx.moveTo(plot.x, hair(value.y));
+      ctx.lineTo(plot.x + plot.w, hair(value.y));
+      ctx.strokeStyle = chartColorWithOpacity(value.color, 0.8);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3.5, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    paintChipCanvas(ctx, plot.x + plot.w + 3, top, axisWidth - 6, 15, value.color, readableTextColor(value.color, theme), value.label, theme.font);
+  }
+}
+
+function paintColorBarCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void {
+  if (!c.colorBar || c.polar) return;
+  const { plot, theme } = c;
+  const x = plot.x + plot.w + 10;
+  const y = plot.y;
+  const w = 7;
+  const h = plot.h;
+  const { min, max } = c.colorBar;
+  const gradient = ctx.createLinearGradient(0, y + h, 0, y);
+  for (let i = 0; i <= 12; i++) {
+    const t = i / 12;
+    gradient.addColorStop(t, heatFill(min + (max - min) * t, min, max, theme));
+  }
+  ctx.beginPath();
+  traceRoundRect(ctx, x, y, w, h, 1);
+  ctx.fillStyle = gradient;
+  ctx.fill();
+  const format = (value: number): string => value.toFixed(Math.abs(value) < 10 ? 1 : 0);
+  ctx.font = `9px ${theme.font}`;
+  ctx.fillStyle = theme.muted;
+  ctx.textAlign = "start";
+  ctx.textBaseline = "top";
+  ctx.fillText(format(max), x + w + 5, y + 1);
+  if (min < 0 && max > 0) {
+    ctx.textBaseline = "middle";
+    ctx.fillText("0", x + w + 5, y + h * (max / (max - min)));
+  }
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(format(min), x + w + 5, y + h - 1);
+}
+
+/** Paint the same compiled scene and chrome as the SVG renderer. */
 export function paintChartCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void {
-  const theme = c.theme;
+  const { theme, plot } = c;
   ctx.save();
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.globalAlpha = 1;
   ctx.fillStyle = theme.background;
   ctx.fillRect(0, 0, c.width, c.height);
-  ctx.font = `11px ${theme.font}`;
+  paintLegendCanvas(ctx, c);
   if (c.grid && !c.polar) {
     ctx.strokeStyle = theme.grid;
     ctx.lineWidth = 1;
-    for (const t of c.yTicks) {
+    ctx.setLineDash([]);
+    for (const tick of c.yTicks) {
       ctx.beginPath();
-      ctx.moveTo(c.plot.x, hair(t.px));
-      ctx.lineTo(c.plot.x + c.plot.w, hair(t.px));
+      ctx.moveTo(plot.x, hair(tick.px));
+      ctx.lineTo(plot.x + plot.w, hair(tick.px));
       ctx.stroke();
     }
-  }
-  ctx.fillStyle = theme.muted;
-  if (!c.polar) {
-    ctx.textAlign = "end";
-    ctx.textBaseline = "middle";
-    for (const t of c.yTicks) ctx.fillText(t.label, c.width - 8, t.px);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    for (const t of c.xTicks) ctx.fillText(t.label, t.px, c.plot.y + c.plot.h + 8);
   }
   ctx.save();
   ctx.beginPath();
-  ctx.rect(c.plot.x, c.plot.y, c.plot.w, c.plot.h);
+  ctx.rect(plot.x, plot.y, plot.w, plot.h);
   ctx.clip();
-  for (const n of c.nodes) {
-    if (n.type === "line" && n.points) {
-      ctx.beginPath();
-      n.points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-      ctx.strokeStyle = n.stroke || theme.accent;
-      ctx.lineWidth = n.strokeWidth ?? 1.5;
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      ctx.setLineDash(n.dashed ? [5, 4] : []);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    } else if ((n.type === "area" || n.type === "polygon") && n.points) {
-      ctx.beginPath();
-      n.points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-      ctx.closePath();
-      if (n.fill && n.fill !== "none") {
-        ctx.fillStyle = n.fill;
-        ctx.globalAlpha = n.fillOpacity ?? 1;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-      if (n.stroke && n.stroke !== "none") {
-        ctx.strokeStyle = n.stroke;
-        ctx.lineWidth = n.strokeWidth ?? 1;
-        ctx.stroke();
-      }
-    } else if (n.type === "rect") {
-      ctx.fillStyle = n.fill || theme.accent;
-      ctx.fillRect(n.x ?? 0, n.y ?? 0, n.w ?? 0, n.h ?? 0);
-    } else if (n.type === "circle") {
-      ctx.beginPath();
-      ctx.arc(n.x ?? 0, n.y ?? 0, n.r ?? 3, 0, Math.PI * 2);
-      ctx.fillStyle = n.fill || theme.accent;
-      ctx.globalAlpha = n.fillOpacity ?? 1;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      if (n.stroke && n.stroke !== "none") {
-        ctx.strokeStyle = n.stroke;
-        ctx.lineWidth = n.strokeWidth ?? 1;
-        ctx.stroke();
-      }
-    } else if (n.type === "rule") {
-      ctx.beginPath();
-      ctx.moveTo(n.x ?? 0, n.y ?? 0);
-      ctx.lineTo(n.x2 ?? 0, n.y2 ?? 0);
-      ctx.strokeStyle = n.stroke || theme.down;
-      ctx.setLineDash(n.dashed === false ? [] : [3, 3]);
-      ctx.lineWidth = n.strokeWidth ?? 1;
-      ctx.stroke();
-      ctx.setLineDash([]);
-    } else if (n.type === "arc") {
-      const p = new Path2D(arcPath(n));
-      ctx.fillStyle = n.fill || theme.accent;
-      ctx.fill(p);
-    }
-  }
+  for (const node of c.nodes) if (node.clip !== false) paintNodeCanvas(ctx, node, theme);
   ctx.restore();
+  for (const node of c.nodes) if (node.clip === false) paintNodeCanvas(ctx, node, theme);
+  paintAxesCanvas(ctx, c);
+  paintLastValuesCanvas(ctx, c);
+  paintColorBarCanvas(ctx, c);
   ctx.restore();
 }
 
+export interface MountChartOptions {
+  width?: number;
+  height?: number;
+  renderer?: "svg" | "canvas";
+  /** Stable DOM/SVG id prefix; useful for hydration and deterministic tests. */
+  idPrefix?: string;
+}
+
 export interface MountHandle {
-  update(definition: ChartDefinition): void;
+  /** Update in place. The mounted host and interaction state are preserved. */
+  update(definition: ChartDefinition, options?: MountChartOptions): void;
+  /** Latest renderer-neutral scene, useful for diagnostics and deterministic tests. */
+  getScene(): CompiledChart | null;
   destroy(): void;
 }
 
@@ -637,11 +1231,15 @@ function nearestLabel(ticks: { px: number; label: string }[], px: number): strin
 export function mountChart(
   el: HTMLElement,
   definition: ChartDefinition,
-  opts?: { width?: number; height?: number; renderer?: "svg" | "canvas" },
+  opts?: MountChartOptions,
 ): MountHandle {
-  const renderer = opts?.renderer ?? "svg";
+  let currentOptions: MountChartOptions = { ...opts };
+  const autoId = `mounted-${++svgSeq}`;
   let current = definition;
   let compiledRef: CompiledChart | null = null;
+  let lastInputWidth = Number.NaN;
+  let lastInputHeight = Number.NaN;
+  let destroyed = false;
   const wrap = document.createElement("div");
   wrap.style.cssText = "position:relative;width:100%;height:100%;overflow:hidden;";
   const stage = document.createElement("div");
@@ -653,7 +1251,20 @@ export function mountChart(
   const tip = document.createElement("div");
   const dot = document.createElement("div");
   const cell = document.createElement("div");
-  wrap.append(stage, hairV, hairH, chipY, chipX, cell, dot, tip);
+  const a11y = document.createElement("div");
+  a11y.className = "raze-chart-sr-summary";
+  a11y.style.cssText = [
+    "position:absolute",
+    "width:1px",
+    "height:1px",
+    "padding:0",
+    "margin:-1px",
+    "overflow:hidden",
+    "clip:rect(0,0,0,0)",
+    "white-space:nowrap",
+    "border:0",
+  ].join(";");
+  wrap.append(stage, hairV, hairH, chipY, chipX, cell, dot, tip, a11y);
   el.appendChild(wrap);
 
   const applyTheme = (theme: DashboardTheme): void => {
@@ -685,8 +1296,6 @@ export function mountChart(
       `box-shadow:inset 0 0 0 1.5px ${theme.text}, 0 0 0 1px ${theme.background}`,
     ].join(";");
   };
-  applyTheme(compileChart(current, { width: 320, height: 200 }).theme);
-
   const hideOverlay = (): void => {
     hairV.style.display = "none";
     hairH.style.display = "none";
@@ -700,28 +1309,54 @@ export function mountChart(
     });
   };
 
+  const inputSize = (): { width: number; height: number } => ({
+    width: currentOptions.width ?? Math.max(1, wrap.clientWidth || el.clientWidth || 640),
+    height: currentOptions.height ?? Math.max(1, wrap.clientHeight || el.clientHeight || 320),
+  });
+
   const paint = (): void => {
-    const w = opts?.width ?? Math.max(1, wrap.clientWidth || el.clientWidth || 640);
-    const h = opts?.height ?? Math.max(1, wrap.clientHeight || el.clientHeight || 320);
+    if (destroyed) throw new Error("[@razedotbot/charts] Cannot paint a destroyed chart mount.");
+    const renderer = currentOptions.renderer ?? "svg";
+    const idPrefix = safeId(currentOptions.idPrefix ?? autoId);
+    const { width: w, height: h } = inputSize();
     const compiled = compileChart(current, { width: w, height: h });
-    compiledRef = compiled;
-    applyTheme(compiled.theme);
-    stage.replaceChildren();
     if (renderer === "canvas") {
       const canvas = document.createElement("canvas");
       const dpr = Math.max(1, window.devicePixelRatio || 1);
-      canvas.width = Math.floor(w * dpr);
-      canvas.height = Math.floor(h * dpr);
-      canvas.style.cssText = `width:${w}px;height:${h}px;display:block`;
+      canvas.width = Math.floor(compiled.width * dpr);
+      canvas.height = Math.floor(compiled.height * dpr);
+      canvas.style.cssText = "width:100%;height:100%;display:block";
+      const summaryParts = [
+        compiled.ariaDescription,
+        compiled.legend.length
+          ? `Series: ${compiled.legend.map((item) => item.name).join(", ")}.`
+          : "",
+        ...Array.from(new Set(compiled.nodes.map((node) => node.tip).filter((tip): tip is string => !!tip))).slice(0, 50),
+      ].filter(Boolean);
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", compiled.ariaLabel);
+      if (summaryParts.length) canvas.setAttribute("aria-describedby", `raze-summary-${idPrefix}`);
       const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         paintChartCanvas(ctx, compiled);
       }
-      stage.appendChild(canvas);
+      applyTheme(compiled.theme);
+      a11y.id = `raze-summary-${idPrefix}`;
+      a11y.textContent = summaryParts.join(" ");
+      a11y.hidden = false;
+      stage.replaceChildren(canvas);
     } else {
-      stage.innerHTML = svgFromCompiled(compiled);
+      const markup = svgFromCompiled(compiled, { idPrefix });
+      applyTheme(compiled.theme);
+      a11y.hidden = true;
+      a11y.textContent = "";
+      stage.innerHTML = markup;
     }
+    compiledRef = compiled;
+    lastInputWidth = w;
+    lastInputHeight = h;
+    hideOverlay();
   };
 
   const onMove = (ev: PointerEvent): void => {
@@ -731,11 +1366,15 @@ export function mountChart(
       return;
     }
     const box = wrap.getBoundingClientRect();
-    const x = ev.clientX - box.left;
-    const y = ev.clientY - box.top;
+    const cssX = ev.clientX - box.left;
+    const cssY = ev.clientY - box.top;
+    const scaleX = (box.width || compiled.width) / compiled.width;
+    const scaleY = (box.height || compiled.height) / compiled.height;
+    const x = cssX / scaleX;
+    const y = cssY / scaleY;
     const { plot, theme } = compiled;
     const inPlot = compiled.polar
-      ? x >= 0 && y >= 0 && x <= box.width && y <= box.height
+      ? x >= 0 && y >= 0 && x <= compiled.width && y <= compiled.height
       : x >= plot.x && x <= plot.x + plot.w && y >= plot.y && y <= plot.y + plot.h;
     if (!inPlot && !compiled.polar) {
       hideOverlay();
@@ -748,6 +1387,21 @@ export function mountChart(
 
     let sample = nearestSample(compiled, x, y);
     const hit = hitTestCompiled(compiled, x, y);
+    if (hit?.role === "point" && hit.type === "circle") {
+      let index = sampleIndexes.get(compiled);
+      if (!index || index.samples !== compiled.samples || index.length !== compiled.samples.length) {
+        index = createSampleIndex(compiled);
+      }
+      sample = nearestSpatial(
+        index,
+        x,
+        y,
+        Math.max(8, (hit.r ?? 4) + 4),
+        (candidate) => candidate.kind === "point" && candidate.series === hit.series,
+      ) ?? sample;
+    } else if (hit?.role === "bar" || hit?.role === "heat" || hit?.role === "slice") {
+      sample = null;
+    }
     const accentNode = hit && hit.type !== "rule" ? hit : null;
     const isBar = hit?.role === "bar";
     const isHeat = hit?.role === "heat";
@@ -769,21 +1423,21 @@ export function mountChart(
         : isPoint && sample
           ? sample.y
           : isBar && hit?.y != null
-            ? hit.y
+            ? hit.valueY ?? hit.y
             : isLine && sample
               ? sample.y
               : y;
 
       hairV.style.display = "block";
-      hairV.style.left = `${Math.round(scanX)}px`;
-      hairV.style.top = `${plot.y}px`;
-      hairV.style.height = `${plot.h}px`;
+      hairV.style.left = `${Math.round(scanX * scaleX)}px`;
+      hairV.style.top = `${plot.y * scaleY}px`;
+      hairV.style.height = `${plot.h * scaleY}px`;
 
       if (isHeat || isPoint || isBar) {
         hairH.style.display = "block";
-        hairH.style.top = `${Math.round(scanY)}px`;
-        hairH.style.left = `${plot.x}px`;
-        hairH.style.width = `${plot.w}px`;
+        hairH.style.top = `${Math.round(scanY * scaleY)}px`;
+        hairH.style.left = `${plot.x * scaleX}px`;
+        hairH.style.width = `${plot.w * scaleX}px`;
       } else {
         hairH.style.display = "none";
       }
@@ -802,9 +1456,12 @@ export function mountChart(
       }
       chipY.style.display = "block";
       chipY.style.left = compiled.heatmap
-        ? `${Math.max(2, plot.x - 42)}px`
-        : `${plot.x + plot.w + 3}px`;
-      chipY.style.top = `${Math.max(plot.y, Math.min(plot.y + plot.h - 16, scanY - 8))}px`;
+        ? `${Math.max(2, (plot.x - 42) * scaleX)}px`
+        : `${(plot.x + plot.w) * scaleX + 3}px`;
+      const cssPlotTop = plot.y * scaleY;
+      const cssPlotBottom = (plot.y + plot.h) * scaleY;
+      const cssScanY = scanY * scaleY;
+      chipY.style.top = `${Math.max(cssPlotTop, Math.min(cssPlotBottom - 16, cssScanY - 8))}px`;
 
       if (isLine && sample) {
         const first = sample.tip.split("\n")[1];
@@ -817,8 +1474,11 @@ export function mountChart(
       }
       chipX.style.display = "block";
       const cw = Math.max(36, (chipX.textContent?.length ?? 0) * 6.6 + 14);
-      chipX.style.left = `${Math.max(plot.x, Math.min(plot.x + plot.w - cw, scanX - cw / 2))}px`;
-      chipX.style.top = `${plot.y + plot.h + 2}px`;
+      const cssPlotLeft = plot.x * scaleX;
+      const cssPlotRight = (plot.x + plot.w) * scaleX;
+      const cssScanX = scanX * scaleX;
+      chipX.style.left = `${Math.max(cssPlotLeft, Math.min(cssPlotRight - cw, cssScanX - cw / 2))}px`;
+      chipX.style.top = `${cssPlotBottom + 2}px`;
     } else {
       hairV.style.display = "none";
       hairH.style.display = "none";
@@ -828,10 +1488,10 @@ export function mountChart(
 
     if (hit?.role === "heat" && hit.w && hit.h) {
       cell.style.display = "block";
-      cell.style.left = `${hit.x}px`;
-      cell.style.top = `${hit.y}px`;
-      cell.style.width = `${hit.w}px`;
-      cell.style.height = `${hit.h}px`;
+      cell.style.left = `${(hit.x ?? 0) * scaleX}px`;
+      cell.style.top = `${(hit.y ?? 0) * scaleY}px`;
+      cell.style.width = `${hit.w * scaleX}px`;
+      cell.style.height = `${hit.h * scaleY}px`;
     } else {
       cell.style.display = "none";
     }
@@ -850,8 +1510,8 @@ export function mountChart(
 
     if (sample && (sample.kind === "line" || sample.kind === "point" || sample.kind === "radar")) {
       dot.style.display = "block";
-      dot.style.left = `${sample.x}px`;
-      dot.style.top = `${sample.y}px`;
+      dot.style.left = `${sample.x * scaleX}px`;
+      dot.style.top = `${sample.y * scaleY}px`;
       dot.style.background = sample.color;
     } else {
       dot.style.display = "none";
@@ -873,29 +1533,59 @@ export function mountChart(
     tip.textContent = text;
     tip.style.display = "block";
     const tw = Math.min(220, Math.max(72, text.split("\n").reduce((a, l) => Math.max(a, l.length), 0) * 6.6 + 22));
-    let left = x + 12;
-    let top = y + 12;
-    if (left + tw > box.width - 6) left = x - tw - 10;
-    if (top + 44 > box.height - 6) top = y - 40;
+    let left = cssX + 12;
+    let top = cssY + 12;
+    if (left + tw > box.width - 6) left = cssX - tw - 10;
+    if (top + 44 > box.height - 6) top = cssY - 40;
     tip.style.left = `${Math.max(4, left)}px`;
     tip.style.top = `${Math.max(4, top)}px`;
     tip.style.background = theme.chipBg;
     tip.style.boxShadow = `inset 2px 0 0 ${accent}, 0 0 0 1px ${theme.axis}`;
   };
 
-  wrap.addEventListener("pointermove", onMove);
-  wrap.addEventListener("pointerleave", hideOverlay);
-
-  const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => paint()) : null;
-  ro?.observe(wrap);
-  paint();
+  const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+    const next = inputSize();
+    if (next.width === lastInputWidth && next.height === lastInputHeight) return;
+    paint();
+  }) : null;
+  try {
+    paint();
+    wrap.addEventListener("pointermove", onMove);
+    wrap.addEventListener("pointerleave", hideOverlay);
+    ro?.observe(wrap);
+  } catch (error) {
+    ro?.disconnect();
+    wrap.removeEventListener("pointermove", onMove);
+    wrap.removeEventListener("pointerleave", hideOverlay);
+    wrap.remove();
+    throw error;
+  }
   return {
-    update(next) { current = next; paint(); },
+    update(next, nextOptions) {
+      if (destroyed) throw new Error("[@razedotbot/charts] Cannot update a destroyed chart mount.");
+      const previous = current;
+      const previousOptions = currentOptions;
+      const previousScene = compiledRef;
+      current = next;
+      if (nextOptions) currentOptions = { ...currentOptions, ...nextOptions };
+      try {
+        paint();
+      } catch (error) {
+        current = previous;
+        currentOptions = previousOptions;
+        compiledRef = previousScene;
+        throw error;
+      }
+    },
+    getScene() { return destroyed ? null : compiledRef; },
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
       ro?.disconnect();
       wrap.removeEventListener("pointermove", onMove);
       wrap.removeEventListener("pointerleave", hideOverlay);
       wrap.remove();
+      compiledRef = null;
     },
   };
 }

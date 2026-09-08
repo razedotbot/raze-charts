@@ -120,7 +120,7 @@ assert(chart.resolution() === "5", "setResolution changed resolution");
 assert(intervalFired === "5", "onIntervalChanged fired with new resolution");
 
 // P3: header interval selector rendered + a user click drives the change
-const toolbarBtns = [...container.querySelectorAll(".raze-chart-toolbar div")]
+const toolbarBtns = [...container.querySelectorAll('.raze-chart-toolbar button[aria-label^="Interval "]')]
   .filter((d) => ["1s", "1m", "5m", "15m", "1h", "4h", "1D"].includes(d.textContent));
 assert(toolbarBtns.length >= 3, `interval selector rendered favorites (${toolbarBtns.length})`);
 const oneMinBtn = toolbarBtns.find((d) => d.textContent === "1m");
@@ -264,7 +264,7 @@ assert(window.document.querySelector(".raze-chart-style-menu") === null, "Esc cl
 assert(container2.querySelector(".raze-chart-scale-bar") === null, "disabled_features scale_bar hides the scale bar");
 
 // favorites.intervals drives the header row: 1m + 5m inline, rest behind "⋯"
-const favBtns = [...container2.querySelectorAll(".raze-chart-toolbar div")]
+const favBtns = [...container2.querySelectorAll('.raze-chart-toolbar button[aria-label^="Interval "]')]
   .filter((d) => ["1s", "5s", "1m", "5m", "15m", "1h", "1D"].includes(d.textContent));
 assert(
   favBtns.length === 2 && favBtns.every((d) => ["1m", "5m"].includes(d.textContent)),

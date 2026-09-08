@@ -59,6 +59,9 @@ export class Widget implements IChartingLibraryWidget {
   private contextMenuCb: ContextMenuCallback | null = null;
   private destroyed = false;
   private compactRO: ResizeObserver | null = null;
+  /** Only the newest imperative data change may run its completion callback. */
+  private dataChangeId = 0;
+  private headerReadySettled = false;
 
   constructor(options: ChartingLibraryWidgetOptions) {
     const containerEl =
@@ -168,6 +171,7 @@ export class Widget implements IChartingLibraryWidget {
     for (const def of raze?.custom_studies ?? []) registry.register(def);
     this.studies = new StudyStore(this.context, registry);
     this.engine = new ChartEngine(this.chartArea, this.context);
+    this.syncAccessibility();
     this.renderer = new ChartRenderer(this.context, this.engine, this.shapes, this.data, this.studies);
     this.renderer.setToolDoneHandler((tool) => {
       this.context.drawingTool = tool;
@@ -196,13 +200,19 @@ export class Widget implements IChartingLibraryWidget {
       clearMarks: () => this.data.clearMarks(),
       resetData: () => this.data.resetData(),
       setResolution: (res, cb) => {
-        void this.data.changeResolution(res).then(() => cb?.());
+        this.runDataChange(
+          `change resolution to ${res}`,
+          () => this.data.changeResolution(res),
+          cb,
+        );
       },
       setSymbol: (sym, cb) => {
-        void this.data.changeSymbol(sym).then(() => {
-          this.intervalSelector?.refresh();
-          cb?.();
-        });
+        this.runDataChange(
+          `change symbol to ${sym}`,
+          () => this.data.changeSymbol(sym),
+          cb,
+          () => this.intervalSelector?.refresh(),
+        );
       },
       createShape: (point, opts) => this.shapes.create(point, opts),
       createMultipointShape: (points, opts) => this.shapes.createPoints(points, opts),
@@ -265,7 +275,7 @@ export class Widget implements IChartingLibraryWidget {
     try {
       await this.data.resolveAndLoad();
     } catch (e) {
-      console.error("[raze-charts] failed to load symbol", e);
+      if (!this.destroyed) console.error("[raze-charts] failed to load symbol", e);
     }
     if (this.destroyed) return;
 
@@ -273,7 +283,12 @@ export class Widget implements IChartingLibraryWidget {
       this.intervalSelector = new IntervalSelector(
         this.context,
         this.toolbar.intervalSlot,
-        (res) => { void this.data.changeResolution(res); },
+        (res) => {
+          this.runDataChange(
+            `change resolution to ${res}`,
+            () => this.data.changeResolution(res),
+          );
+        },
         this.context.options.favorites?.intervals?.map(String),
       );
       this.context.intervalChanged.subscribe(null, ((res: ResolutionString) => {
@@ -283,9 +298,50 @@ export class Widget implements IChartingLibraryWidget {
 
     this.loading?.hide();
     this.loading = null;
-    this.headerReadyResolve();
+    this.resolveHeaderReady();
     this.isChartReady = true;
     this.chartReady.fire();
+  }
+
+  private resolveHeaderReady(): void {
+    if (this.headerReadySettled) return;
+    this.headerReadySettled = true;
+    this.headerReadyResolve();
+  }
+
+  private syncAccessibility(): void {
+    this.engine.syncAccessibility();
+    this.root.setAttribute("role", "region");
+    this.root.setAttribute("aria-label", this.engine.accessibilityLabel);
+    this.root.setAttribute("aria-describedby", this.engine.accessibilityDescriptionId);
+  }
+
+  private runDataChange(
+    description: string,
+    start: () => Promise<void>,
+    callback?: () => void,
+    after?: () => void,
+  ): void {
+    if (this.destroyed) return;
+    const requestId = ++this.dataChangeId;
+    let request: Promise<void>;
+    try {
+      request = start();
+    } catch (error) {
+      console.error(`[raze-charts] failed to ${description}`, error);
+      return;
+    }
+    void request
+      .then(() => {
+        if (this.destroyed || requestId !== this.dataChangeId) return;
+        this.syncAccessibility();
+        after?.();
+        callback?.();
+      })
+      .catch((error: unknown) => {
+        if (this.destroyed || requestId !== this.dataChangeId) return;
+        console.error(`[raze-charts] failed to ${description}`, error);
+      });
   }
 
   onChartReady(callback: () => void): void {
@@ -351,18 +407,28 @@ export class Widget implements IChartingLibraryWidget {
   }
 
   setSymbol(symbol: string, interval: ResolutionString, callback?: () => void): void {
-    this.context.resolution = interval;
-    void this.data.changeSymbol(symbol).then(() => callback?.());
+    this.runDataChange(
+      `change symbol to ${symbol}`,
+      () => this.data.changeSymbol(symbol, interval),
+      callback,
+      () => this.intervalSelector?.refresh(),
+    );
   }
 
   remove(): void {
+    if (this.destroyed) return;
     this.destroyed = true;
+    this.dataChangeId += 1;
+    // Cancel datafeed callbacks before tearing down the render/event surfaces.
+    this.data.destroy();
+    // Consumers awaiting headerReady must not hang when a widget is removed
+    // while its datafeed is still booting.
+    this.resolveHeaderReady();
     closeContextMenu();
     this.compactRO?.disconnect();
     this.compactRO = null;
     this.renderer.destroy();
     this.engine.destroy();
-    this.data.destroy();
     this.studies.destroy();
     this.intervalSelector?.destroy();
     this.indicatorsMenu?.destroy();

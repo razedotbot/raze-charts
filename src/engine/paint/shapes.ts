@@ -1,17 +1,20 @@
-import { formatAxisPrice, priceForY, xForIndex, yForPrice } from "../plotScale";
+import { formatAxisPrice, indexForX, priceForY, xForIndex, yForPrice } from "../plotScale";
 import { resolutionToMs } from "../../util/resolution";
+import { TimeIndex } from "../../data/TimeIndex";
 import type { ShapePoint } from "../../types/charting_library";
 import type { StoredShape } from "../../core/ShapeStore";
 import type { DrawingTool } from "../../core/context";
 import { drawAxisTag } from "./primitives";
 import type { FinanceView } from "./view";
 
-export function pointXY(v: FinanceView, p: ShapePoint): { x: number; y: number } | null {
+export function pointXY(
+  v: FinanceView,
+  p: ShapePoint,
+  timeIndex = new TimeIndex(v.context.bars, resolutionToMs(v.context.resolution)),
+): { x: number; y: number } | null {
   if (typeof p.price !== "number" || !Number.isFinite(p.price)) return null;
-  const bars = v.context.bars;
-  if (!bars.length) return null;
-  const resMs = resolutionToMs(v.context.resolution);
-  const idx = (p.time * 1000 - bars[0]!.time) / resMs;
+  const idx = timeIndex.indexAt(p.time * 1000);
+  if (idx === null) return null;
   return { x: xForIndex(v, idx), y: yForPrice(v, p.price) };
 }
 
@@ -30,7 +33,8 @@ export function drawComplexShape(ctx: CanvasRenderingContext2D, v: FinanceView, 
   const color = (o.linecolor as string) ?? (o.color as string) ?? "#2962ff";
   const width = (o.linewidth as number) ?? 1;
   const selected = v.selectedShapeId === (s.id as unknown as string);
-  const pts = s.points.map((p) => pointXY(v, p)).filter(Boolean) as { x: number; y: number }[];
+  const timeIndex = new TimeIndex(v.context.bars, resolutionToMs(v.context.resolution));
+  const pts = s.points.map((p) => pointXY(v, p, timeIndex)).filter(Boolean) as { x: number; y: number }[];
 
   ctx.save();
   ctx.strokeStyle = color;
@@ -208,11 +212,9 @@ export function drawDraft(ctx: CanvasRenderingContext2D, v: FinanceView): void {
     const bars = v.context.bars;
     let unixTime = 0;
     if (bars.length) {
-      const resMs = resolutionToMs(v.context.resolution);
-      const { from } = v.visibleRange;
-      const spacing = v.plotW / (v.visibleRange.to - v.visibleRange.from || 1);
-      const idx = from + (v.crosshair.x - v.plotL) / spacing - 0.5;
-      unixTime = (bars[0]!.time + idx * resMs) / 1000;
+      const timeIndex = new TimeIndex(bars, resolutionToMs(v.context.resolution));
+      const idx = indexForX(v, v.crosshair.x);
+      unixTime = (timeIndex.timeAt(idx) ?? 0) / 1000;
     }
     const price = priceForY(v, v.crosshair.y);
     ghost.points = [...v.draft.points, { time: unixTime, price }];
@@ -249,7 +251,8 @@ export function distToSegment(
 }
 
 export function hitComplexShape(v: FinanceView, shape: StoredShape, x: number, y: number, tolMul = 1): boolean {
-  const pts = shape.points.map((p) => pointXY(v, p)).filter(Boolean) as { x: number; y: number }[];
+  const timeIndex = new TimeIndex(v.context.bars, resolutionToMs(v.context.resolution));
+  const pts = shape.points.map((p) => pointXY(v, p, timeIndex)).filter(Boolean) as { x: number; y: number }[];
   if (pts.length === 0) return false;
   for (const p of pts) {
     if (Math.abs(p.x - x) <= 6 * tolMul && Math.abs(p.y - y) <= 6 * tolMul) return true;

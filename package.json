@@ -1,31 +1,52 @@
 {
   "name": "@razedotbot/charts",
   "version": "0.3.1",
-  "description": "Open, dependency-free Canvas-2D financial charting library — TradingView widget drop-in plus SVG dashboard charts.",
+  "description": "Dependency-free financial and dashboard charts with a documented TradingView-shaped compatibility subset, typed native grammar, and React adapter.",
   "license": "MIT",
   "author": "Raze",
   "type": "module",
   "sideEffects": false,
-  "main": "dist/charting_library.cjs.js",
+  "main": "dist/charting_library.cjs",
   "module": "dist/charting_library.esm.js",
+  "browser": "dist/charting_library.esm.js",
+  "unpkg": "dist/charting_library.standalone.js",
+  "jsdelivr": "dist/charting_library.standalone.js",
   "types": "dist/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "import": "./dist/charting_library.esm.js",
-      "require": "./dist/charting_library.cjs.js",
+      "import": {
+        "browser": "./dist/charting_library.esm.js",
+        "default": "./dist/charting_library.esm.js"
+      },
+      "require": {
+        "browser": "./dist/charting_library.cjs",
+        "default": "./dist/charting_library.cjs"
+      },
       "default": "./dist/charting_library.esm.js"
     },
     "./chart": {
       "types": "./dist/types/chart/index.d.ts",
-      "import": "./dist/chart.esm.js",
-      "require": "./dist/chart.cjs.js",
+      "import": {
+        "browser": "./dist/chart.esm.js",
+        "default": "./dist/chart.esm.js"
+      },
+      "require": {
+        "browser": "./dist/chart.cjs",
+        "default": "./dist/chart.cjs"
+      },
       "default": "./dist/chart.esm.js"
     },
     "./react": {
       "types": "./dist/types/react/index.d.ts",
-      "import": "./dist/react.esm.js",
-      "require": "./dist/react.cjs.js",
+      "import": {
+        "browser": "./dist/react.esm.js",
+        "default": "./dist/react.esm.js"
+      },
+      "require": {
+        "browser": "./dist/react.cjs",
+        "default": "./dist/react.cjs"
+      },
       "default": "./dist/react.esm.js"
     },
     "./package.json": "./package.json"
@@ -38,6 +59,9 @@
   },
   "files": [
     "dist",
+    "docs",
+    "benchmarks",
+    "CONTRIBUTING.md",
     "README.md",
     "LICENSE"
   ],
@@ -47,15 +71,19 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "typecheck": "tsc --noEmit",
-    "test": "node build.mjs && node examples/smoke.mjs && node tests/chart.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.type-tests.json",
+    "test": "npm run typecheck && node build.mjs && node examples/smoke.mjs && node tests/time-index.mjs && node tests/study-store.mjs && node tests/chart.mjs && node tests/chart-edge-cases.mjs && node tests/color-theme.mjs && node tests/renderer-parity.mjs && node tests/react-adapter.mjs && node tests/data-source.mjs && node tests/data-manager.mjs && node tests/financial-runtime.mjs && node tests/build-watch.mjs && node tests/package-contract.mjs",
     "test:visual": "node build.mjs && npx playwright test",
     "test:visual:update": "node build.mjs && npx playwright test --update-snapshots",
+    "check:docs": "node scripts/check-docs.mjs",
+    "check:size": "node scripts/check-bundle-size.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
+    "quality": "npm test && npm run check:docs && npm run check:size && npm run benchmark -- --check",
     "dev": "node build.mjs --watch",
     "sync": "node scripts/sync-to-app.mjs",
     "prepare": "node scripts/prepare.mjs",
     "prepack": "node build.mjs",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm run quality"
   },
   "repository": {
     "type": "git",
@@ -93,9 +121,13 @@
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "@types/react": "^18.3.12",
-    "esbuild": "^0.24.0",
+    "@types/react-dom": "^18.3.1",
+    "@types/scheduler": "^0.16.8",
+    "esbuild": "^0.28.2",
     "jsdom": "^25.0.1",
     "react": "^18.3.1",
+    "react17-types": "npm:@types/react@17.0.93",
+    "react-dom": "^18.3.1",
     "typescript": "^5.6.0"
   }
 }

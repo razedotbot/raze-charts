@@ -40,10 +40,35 @@ export type {
 
 // ── Data ────────────────────────────────────────────────────────────────────
 export { DataManager } from "./data/DataManager";
+export { TimeIndex } from "./data/TimeIndex";
+export type { TimePoint } from "./data/TimeIndex";
+export { createDatafeed, defineDataSource } from "./data/dataSource";
+export type {
+  DefineDataSourceOptions,
+  HistoryRequest,
+  HistoryResult,
+  MarksRequest,
+  MaybePromise,
+  RazeDataSource,
+  RealtimeCleanup,
+  RealtimeHandlers,
+  RealtimeRequest,
+  SymbolSearchRequest,
+} from "./data/dataSource";
 
 // ── Engine ──────────────────────────────────────────────────────────────────
 export { ChartEngine } from "./engine/ChartEngine";
 export { ChartRenderer } from "./engine/ChartRenderer";
+export type { GestureHost } from "./engine/gestures";
+export type { SubPaneGeom } from "./engine/layout";
+export type { PlotScale } from "./engine/plotScale";
+export type {
+  Crosshair,
+  DraftShape,
+  FinanceView,
+  MarkHit,
+  ShapeHit,
+} from "./engine/paint/view";
 
 // ── Studies (indicator math is pure and dependency-free) ────────────────────
 export { closesFromBars, ema, rsi, sma } from "./studies/calc";
