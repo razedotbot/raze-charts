@@ -17,7 +17,13 @@ export function asNumber(value: unknown): number {
   return NaN;
 }
 
-export type MarkKind = "line" | "area" | "bar" | "point" | "ruleY" | "pie" | "radar" | "heatmap";
+export type MarkKind = "line" | "area" | "bar" | "point" | "ruleY" | "ruleX" | "pie" | "radar" | "heatmap";
+export type ChartCurve = "monotone" | "linear" | "step";
+export type ChartViewportX = readonly [number | Date, number | Date] | readonly (string | number)[];
+export interface ChartViewport {
+  x?: ChartViewportX;
+  y?: readonly [number, number];
+}
 
 export type ChartCompileErrorCode =
   | "E_CHART_SPEC"
@@ -134,13 +140,15 @@ export interface ChartMarkBase {
   dashed?: boolean;
   /** Histogram fade: later bars read as “now”. */
   fade?: boolean;
+  curve?: ChartCurve;
+  y0?: Accessor<never> | string;
 }
 
 type BuiltinBase = Omit<
   ChartMarkBase,
   "x" | "y" | "key" | "stroke" | "fill" | "fillOpacity" | "strokeWidth" | "r"
   | "stackId" | "innerRadius" | "outerRadius" | "angleKey" | "valueKey" | "labelKey"
-  | "lastValue" | "dashed" | "fade"
+  | "lastValue" | "dashed" | "fade" | "curve" | "y0"
 > & { plugin?: never; pluginOptions?: never };
 type BuiltinCartesian = BuiltinBase & { x: Accessor<never> | string; y: Accessor<never> | string };
 
@@ -150,6 +158,7 @@ export type LineChartMark = BuiltinCartesian & {
   strokeWidth?: number;
   lastValue?: boolean;
   dashed?: boolean;
+  curve?: ChartCurve;
 };
 export type AreaChartMark = BuiltinCartesian & {
   kind: "area";
@@ -159,6 +168,8 @@ export type AreaChartMark = BuiltinCartesian & {
   strokeWidth?: number;
   lastValue?: boolean;
   dashed?: boolean;
+  curve?: ChartCurve;
+  y0?: Accessor<never> | string;
 };
 export type BarChartMark = BuiltinCartesian & {
   kind: "bar";
@@ -176,6 +187,12 @@ export type PointChartMark = BuiltinCartesian & {
 export type RuleYChartMark = BuiltinBase & {
   kind: "ruleY";
   y: Accessor<never> | string;
+  stroke?: string;
+  strokeWidth?: number;
+};
+export type RuleXChartMark = BuiltinBase & {
+  kind: "ruleX";
+  x: Accessor<never> | string;
   stroke?: string;
   strokeWidth?: number;
 };
@@ -205,6 +222,7 @@ export type BuiltinChartMark =
   | BarChartMark
   | PointChartMark
   | RuleYChartMark
+  | RuleXChartMark
   | PieChartMark
   | RadarChartMark
   | HeatmapChartMark;
@@ -250,6 +268,7 @@ export interface LineMarkOptions<T> extends CartesianMarkOptions<T> {
   strokeWidth?: number;
   lastValue?: boolean;
   dashed?: boolean;
+  curve?: ChartCurve;
 }
 
 export interface AreaMarkOptions<T> extends CartesianMarkOptions<T> {
@@ -259,6 +278,8 @@ export interface AreaMarkOptions<T> extends CartesianMarkOptions<T> {
   strokeWidth?: number;
   lastValue?: boolean;
   dashed?: boolean;
+  curve?: ChartCurve;
+  y0?: Accessor<T>;
 }
 
 export interface BarMarkOptions<T> extends CartesianMarkOptions<T> {
@@ -275,6 +296,11 @@ export interface PointMarkOptions<T> extends CartesianMarkOptions<T> {
 }
 
 export interface RuleYMarkOptions extends NamedMarkOptions {
+  stroke?: string;
+  strokeWidth?: number;
+}
+
+export interface RuleXMarkOptions extends NamedMarkOptions {
   stroke?: string;
   strokeWidth?: number;
 }
@@ -313,6 +339,12 @@ export function point<T>(data: readonly T[], opts: PointMarkOptions<T>): PointCh
 }
 export function ruleY(values: readonly number[], opts?: RuleYMarkOptions): RuleYChartMark {
   return { kind: "ruleY", data: values.map((y) => ({ y })), y: "y", ...opts };
+}
+export function ruleX(
+  values: readonly (number | string | Date)[],
+  opts?: RuleXMarkOptions,
+): RuleXChartMark {
+  return { kind: "ruleX", data: values.map((x) => ({ x })), x: "x", ...opts };
 }
 export function pie<T>(data: readonly T[], opts: PieMarkOptions<T>): PieChartMark {
   return { kind: "pie", data, ...opts } as PieChartMark;
@@ -373,6 +405,7 @@ export interface LinearScaleSpec {
   nice?: boolean;
   padding?: never;
   domain?: readonly [number, number];
+  tickFormat?: (value: unknown) => string;
 }
 
 export interface AutoLinearScaleSpec {
@@ -380,6 +413,7 @@ export interface AutoLinearScaleSpec {
   nice?: boolean;
   padding?: never;
   domain?: readonly [number, number];
+  tickFormat?: (value: unknown) => string;
 }
 
 export interface LogScaleSpec {
@@ -387,6 +421,7 @@ export interface LogScaleSpec {
   nice?: never;
   padding?: never;
   domain?: readonly [number, number];
+  tickFormat?: (value: unknown) => string;
 }
 
 export interface TimeScaleSpec {
@@ -394,6 +429,7 @@ export interface TimeScaleSpec {
   nice?: never;
   padding?: never;
   domain?: readonly [number | Date, number | Date];
+  tickFormat?: (value: unknown) => string;
 }
 
 export interface BandScaleSpec {
@@ -401,6 +437,7 @@ export interface BandScaleSpec {
   nice?: never;
   padding?: number;
   domain?: readonly (string | number)[];
+  tickFormat?: (value: unknown) => string;
 }
 
 export type XScaleSpec = LinearScaleSpec | LogScaleSpec | TimeScaleSpec | BandScaleSpec;
@@ -424,6 +461,10 @@ export interface ChartSpec {
   performance?: ChartPerformanceOptions;
   /** `"dark"` (default) matches the raze trading widget pane. */
   theme?: ChartThemeInput;
+  /** Visible X/Y window applied before geometry and decimation. */
+  viewport?: ChartViewport;
+  /** Series names omitted from geometry (legend toggle). */
+  hiddenSeries?: readonly string[];
 }
 
 export interface ChartPerformanceOptions {
@@ -505,6 +546,7 @@ export interface SceneNodeBase {
   highlight?: boolean;
   /** Plot-space endpoint representing the datum value (for example a negative bar bottom). */
   valueY?: number;
+  curve?: ChartCurve;
 }
 
 /** Renderer-neutral geometry with required fields encoded by primitive kind. */
@@ -556,11 +598,14 @@ export interface CompiledChart {
   legendPlacement: "top" | "right" | "hidden";
   samples: HoverSample[];
   diagnostics: ChartDiagnostics;
+  viewport: ChartViewport | null;
 }
 
 export interface ChartDiagnostics {
   /** Rows presented to all marks, before validity filtering or decimation. */
   sourceRows: number;
+  /** Rows retained after viewport windowing. */
+  visibleRows: number;
   /** Renderer-neutral primitives emitted by the compiler. */
   renderedNodes: number;
   /** Interactive samples retained for nearest-point lookup. */
@@ -830,15 +875,16 @@ function decimateExtrema<T>(
 }
 
 const BUILTIN_MARK_KINDS = new Set<MarkKind>([
-  "line", "area", "bar", "point", "ruleY", "pie", "radar", "heatmap",
+  "line", "area", "bar", "point", "ruleY", "ruleX", "pie", "radar", "heatmap",
 ]);
 
 const BUILTIN_MARK_KEYS: Record<MarkKind, ReadonlySet<string>> = {
-  line: new Set(["kind", "data", "x", "y", "name", "stroke", "strokeWidth", "lastValue", "dashed"]),
-  area: new Set(["kind", "data", "x", "y", "name", "stroke", "fill", "fillOpacity", "strokeWidth", "lastValue", "dashed"]),
+  line: new Set(["kind", "data", "x", "y", "name", "stroke", "strokeWidth", "lastValue", "dashed", "curve"]),
+  area: new Set(["kind", "data", "x", "y", "y0", "name", "stroke", "fill", "fillOpacity", "strokeWidth", "lastValue", "dashed", "curve"]),
   bar: new Set(["kind", "data", "x", "y", "name", "fill", "stackId", "lastValue", "fade"]),
   point: new Set(["kind", "data", "x", "y", "name", "fill", "fillOpacity", "r"]),
   ruleY: new Set(["kind", "data", "y", "name", "stroke", "strokeWidth"]),
+  ruleX: new Set(["kind", "data", "x", "name", "stroke", "strokeWidth"]),
   pie: new Set(["kind", "data", "name", "valueKey", "labelKey", "innerRadius", "outerRadius"]),
   radar: new Set(["kind", "data", "x", "y", "name", "stroke", "fill", "fillOpacity", "strokeWidth"]),
   heatmap: new Set(["kind", "data", "x", "y", "name", "valueKey"]),
@@ -891,6 +937,13 @@ function validateBuiltinMarkOptions(mark: BuiltinChartMark, index: number): void
     if (value !== undefined && typeof value !== "boolean") {
       throw new ChartCompileError("E_MARK_OPTION", `marks[${index}].${key} must be boolean.`);
     }
+  }
+  const curve = values.curve;
+  if (curve !== undefined && curve !== "monotone" && curve !== "linear" && curve !== "step") {
+    throw new ChartCompileError("E_MARK_OPTION", `marks[${index}].curve must be "monotone", "linear", or "step".`);
+  }
+  if (values.y0 !== undefined && typeof values.y0 !== "string" && typeof values.y0 !== "function") {
+    throw new ChartCompileError("E_MARK_CHANNEL", `marks[${index}].y0 must be a property name or accessor function.`);
   }
 }
 
@@ -1123,6 +1176,7 @@ type RuntimeScaleSpec = {
   nice?: unknown;
   padding?: unknown;
   domain?: unknown;
+  tickFormat?: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1140,7 +1194,7 @@ function validateScaleSpec(
   }
   const scale = value as RuntimeScaleSpec;
   for (const key of Object.keys(value)) {
-    if (!["type", "nice", "padding", "domain"].includes(key)) {
+    if (!["type", "nice", "padding", "domain", "tickFormat"].includes(key)) {
       throw new ChartCompileError("E_SCALE_TYPE", `scales.${axis} does not support option "${key}".`);
     }
   }
@@ -1192,6 +1246,7 @@ function validateScaleSpec(
         throw new ChartCompileError("E_SCALE_DOMAIN", `scales.${axis}.domain cannot contain duplicate categories.`);
       }
     }
+    validateTickFormat(axis, scale.tickFormat);
     return;
   }
   if (scale.padding !== undefined) {
@@ -1231,6 +1286,13 @@ function validateScaleSpec(
       );
     }
   }
+  validateTickFormat(axis, scale.tickFormat);
+}
+
+function validateTickFormat(axis: "x" | "y", tickFormat: unknown): void {
+  if (tickFormat !== undefined && typeof tickFormat !== "function") {
+    throw new ChartCompileError("E_SCALE_TYPE", `scales.${axis}.tickFormat must be a function when provided.`);
+  }
 }
 
 function validateChartSpec(spec: ChartSpec, width: number, height: number): void {
@@ -1239,7 +1301,7 @@ function validateChartSpec(spec: ChartSpec, width: number, height: number): void
   }
   const allowedSpecKeys = new Set([
     "marks", "scales", "width", "height", "margin", "grid", "tooltip", "legend",
-    "ariaLabel", "ariaDescription", "performance", "theme",
+    "ariaLabel", "ariaDescription", "performance", "theme", "viewport", "hiddenSeries",
   ]);
   for (const key of Object.keys(spec)) {
     if (!allowedSpecKeys.has(key)) {
@@ -1322,6 +1384,30 @@ function validateChartSpec(spec: ChartSpec, width: number, height: number): void
   if (spec.ariaDescription !== undefined && typeof spec.ariaDescription !== "string") {
     throw new ChartCompileError("E_CHART_SPEC", "ChartSpec.ariaDescription must be a string when provided.");
   }
+  if (spec.hiddenSeries !== undefined) {
+    if (!isRuntimeArray(spec.hiddenSeries) || spec.hiddenSeries.some((name) => typeof name !== "string")) {
+      throw new ChartCompileError("E_CHART_SPEC", "ChartSpec.hiddenSeries must be an array of strings when provided.");
+    }
+  }
+  if (spec.viewport !== undefined) {
+    const viewport = spec.viewport;
+    for (const key of Object.keys(viewport)) {
+      if (key !== "x" && key !== "y") {
+        throw new ChartCompileError("E_CHART_SPEC", `ChartSpec.viewport does not support option "${key}".`);
+      }
+    }
+    if (viewport.x !== undefined) {
+      if (!isRuntimeArray(viewport.x) || viewport.x.length < 1) {
+        throw new ChartCompileError("E_CHART_SPEC", "ChartSpec.viewport.x must be a non-empty range.");
+      }
+    }
+    if (viewport.y !== undefined) {
+      const y = viewport.y;
+      if (!isRuntimeArray(y) || y.length !== 2 || !y.every((value) => typeof value === "number" && Number.isFinite(value))) {
+        throw new ChartCompileError("E_CHART_SPEC", "ChartSpec.viewport.y must be a [min, max] numeric pair.");
+      }
+    }
+  }
   const performance = spec.performance as ChartPerformanceOptions | undefined;
   const maxRenderedPoints = performance?.maxRenderedPoints;
   const decimation = performance?.decimation;
@@ -1384,10 +1470,10 @@ function validateChartSpec(spec: ChartSpec, width: number, height: number): void
       }
       continue;
     }
-    if (Object.prototype.hasOwnProperty.call(mark, "y0")) {
+    if (Object.prototype.hasOwnProperty.call(mark, "y0") && mark.kind !== "area") {
       throw new ChartCompileError(
         "E_MARK_CHANNEL",
-        `marks[${index}] (${mark.kind}) uses unsupported channel y0. Model ranged areas with a custom mark plugin.`,
+        `marks[${index}] (${mark.kind}) uses unsupported channel y0. Model ranged areas with an area mark or a custom mark plugin.`,
       );
     }
     validateBuiltinMarkOptions(mark as BuiltinChartMark, index);
@@ -1405,6 +1491,9 @@ function validateChartSpec(spec: ChartSpec, width: number, height: number): void
     }
     if (mark.kind === "ruleY" && mark.y == null) {
       throw new ChartCompileError("E_MARK_CHANNEL", `marks[${index}] (ruleY) requires a y channel.`);
+    }
+    if (mark.kind === "ruleX" && mark.x == null) {
+      throw new ChartCompileError("E_MARK_CHANNEL", `marks[${index}] (ruleX) requires an x channel.`);
     }
     if (mark.kind === "pie" && mark.valueKey == null) {
       throw new ChartCompileError(
@@ -1523,6 +1612,89 @@ function validateChartSpec(spec: ChartSpec, width: number, height: number): void
   }
 }
 
+function isQuantitativeViewportX(
+  x: NonNullable<ChartViewport["x"]>,
+): x is readonly [number | Date, number | Date] {
+  return x.length === 2 && Number.isFinite(asNumber(x[0])) && Number.isFinite(asNumber(x[1]));
+}
+
+function markSeriesName(mark: ChartMark): string {
+  return mark.name ?? ("y" in mark && typeof mark.y === "string" ? mark.y : mark.kind);
+}
+
+function rowXValue(mark: ChartMark, row: unknown): unknown {
+  if (isPluginMark(mark) || mark.kind === "ruleY" || mark.kind === "pie") return undefined;
+  const x = "x" in mark ? mark.x : undefined;
+  if (x == null) return undefined;
+  return readChannel(row as never, x as never);
+}
+
+function windowMarkData(mark: ChartMark, viewport: ChartViewport | undefined): readonly unknown[] {
+  if (!viewport?.x) return mark.data;
+  const xWin = viewport.x;
+  if (isQuantitativeViewportX(xWin)) {
+    const lo = Math.min(asNumber(xWin[0]), asNumber(xWin[1]));
+    const hi = Math.max(asNumber(xWin[0]), asNumber(xWin[1]));
+    const values = mark.data.map((row) => asNumber(rowXValue(mark, row)));
+    const keep = new Set<number>();
+    for (let i = 0; i < values.length; i++) {
+      const x = values[i]!;
+      if (Number.isFinite(x) && x >= lo && x <= hi) keep.add(i);
+    }
+    if (mark.kind === "line" || mark.kind === "area") {
+      const indices = Array.from(keep).sort((a, b) => a - b);
+      if (indices.length) {
+        const first = indices[0]!;
+        const last = indices[indices.length - 1]!;
+        if (first > 0 && Number.isFinite(values[first - 1])) keep.add(first - 1);
+        if (last < values.length - 1 && Number.isFinite(values[last + 1])) keep.add(last + 1);
+      }
+    }
+    return mark.data.filter((_, index) => keep.has(index));
+  }
+  const allowed = new Set(xWin.map(String));
+  return mark.data.filter((row) => {
+    const x = rowXValue(mark, row);
+    return x == null || !isBandCategory(x) || allowed.has(String(x));
+  });
+}
+
+function windowChartSpec(spec: ChartSpec): ChartSpec {
+  const hidden = new Set(spec.hiddenSeries ?? []);
+  let marks = spec.marks;
+  if (hidden.size) {
+    marks = marks.filter((mark) => !hidden.has(markSeriesName(mark)));
+  }
+  const viewport = spec.viewport;
+  if (!viewport?.x && !viewport?.y && marks === spec.marks) return spec;
+  marks = marks.map((mark) => ({ ...mark, data: windowMarkData(mark, viewport) }));
+  const scales = { ...spec.scales };
+  if (viewport?.x) {
+    if (isQuantitativeViewportX(viewport.x)) {
+      const lo = Math.min(asNumber(viewport.x[0]), asNumber(viewport.x[1]));
+      const hi = Math.max(asNumber(viewport.x[0]), asNumber(viewport.x[1]));
+      const type = spec.scales?.x?.type ?? (lo > 1e11 ? "time" : "linear");
+      scales.x = {
+        ...scales.x,
+        type,
+        domain: [lo, hi],
+      } as XScaleSpec;
+    } else {
+      scales.x = {
+        type: "band",
+        ...(spec.scales?.x?.type === "band" ? spec.scales.x : {}),
+        domain: [...viewport.x],
+      };
+    }
+  }
+  if (viewport?.y) {
+    const yLo = Math.min(viewport.y[0], viewport.y[1]);
+    const yHi = Math.max(viewport.y[0], viewport.y[1]);
+    scales.y = { ...scales.y, domain: [yLo, yHi] };
+  }
+  return { ...spec, marks, scales };
+}
+
 export function compileChart(definition: ChartDefinition, size: { width: number; height: number }): CompiledChart {
   if (!definition || typeof definition.spec !== "function") {
     throw new ChartCompileError("E_CHART_SPEC", "compileChart() requires a definition created by defineChart().");
@@ -1530,13 +1702,21 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
   if (!isRecord(size) || typeof size.width !== "number" || typeof size.height !== "number") {
     throw new ChartCompileError("E_CHART_SIZE", "compileChart() requires numeric width and height.");
   }
-  const spec = definition.spec(size);
-  if (!spec || !isRuntimeArray(spec.marks)) {
+  const inputSpec = definition.spec(size);
+  if (!inputSpec || !isRuntimeArray(inputSpec.marks)) {
     throw new ChartCompileError("E_CHART_SPEC", "ChartSpec.marks must be an array.");
   }
-  const width = spec.width ?? size.width;
-  const height = spec.height ?? size.height;
-  validateChartSpec(spec, width, height);
+  const width = inputSpec.width ?? size.width;
+  const height = inputSpec.height ?? size.height;
+  validateChartSpec(inputSpec, width, height);
+  const polarPreview = inputSpec.marks.some((m) => m.kind === "pie" || m.kind === "radar");
+  const heatmapPreview = inputSpec.marks.some((m) => m.kind === "heatmap");
+  if (inputSpec.viewport && (polarPreview || heatmapPreview)) {
+    throw new ChartCompileError("E_CHART_SPEC", "viewport is supported on Cartesian charts only.");
+  }
+  const sourceRows = inputSpec.marks.reduce((total, mark) => total + mark.data.length, 0);
+  const spec = windowChartSpec(inputSpec);
+  const visibleRows = spec.marks.reduce((total, mark) => total + mark.data.length, 0);
   // Every compiled scene owns its theme. Exported presets are immutable
   // inputs, never shared mutable runtime state.
   const theme: DashboardTheme = { ...resolveChartTheme(spec.theme) };
@@ -1625,6 +1805,10 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       xValues.push(x);
       const y = asNumber(readChannel(row as never, m.y as never));
       if (Number.isFinite(y)) yValues.push(y);
+      if (m.kind === "area" && m.y0 != null) {
+        const y0 = asNumber(readChannel(row as never, m.y0 as never));
+        if (Number.isFinite(y0)) yValues.push(y0);
+      }
     }
   }
   for (const contribution of pluginDomains.values()) {
@@ -1643,6 +1827,12 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       if (Number.isFinite(y)) yValues.push(y);
     }
   }
+  for (const m of spec.marks.filter((mark) => isBuiltinKind(mark, "ruleX"))) {
+    for (const row of m.data) {
+      const x = readChannel(row as never, m.x as never);
+      if (isBandCategory(x) || x instanceof Date) xValues.push(x);
+    }
+  }
   const explicitXType = spec.scales?.x?.type;
   const configuredXDomain = spec.scales?.x?.domain as readonly unknown[] | undefined;
   const configuredDomainIsQuantitative = configuredXDomain?.length === 2
@@ -1652,7 +1842,14 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
   const xType = explicitXType ?? (
     xIsTime ? "time" : !xIsNumeric && !configuredDomainIsQuantitative ? "band" : "linear"
   );
-  const formatX = (value: unknown): string => xType === "time" ? formatDateTick(value) : formatTick(value);
+  const formatX = (value: unknown): string => {
+    if (spec.scales?.x?.tickFormat) return spec.scales.x.tickFormat(value);
+    return xType === "time" ? formatDateTick(value) : formatTick(value);
+  };
+  const formatY = (value: unknown): string => {
+    if (spec.scales?.y?.tickFormat) return spec.scales.y.tickFormat(value);
+    return typeof value === "number" ? formatNum(value) : formatTick(value);
+  };
 
   const stackTotals = new Map<string, { positive: number; negative: number }>();
   for (const m of spec.marks.filter((mark): mark is BarChartMark => isBuiltinKind(mark, "bar") && !!mark.stackId)) {
@@ -1919,7 +2116,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
   const yTickBudget = Math.max(2, Math.min(6, Math.floor(plot.h / 52)));
   const xTicks = xScale.kind === "band"
     ? thinBandTicks((xScale as BandScale).domain, plot.w, heatmap).map((value) => ({
-      value, px: xScale.map(value), label: formatTick(value),
+      value, px: xScale.map(value), label: formatX(value),
     }))
     : (xType === "time"
       ? utcTimeTicks((xScale as LinearScale).domain[0], (xScale as LinearScale).domain[1], xTickBudget)
@@ -1929,9 +2126,9 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     }));
 
   const yTicks = yScale.kind === "band"
-    ? (yScale as BandScale).domain.map((value) => ({ value, px: yScale.map(value), label: formatTick(value) }))
+    ? (yScale as BandScale).domain.map((value) => ({ value, px: yScale.map(value), label: formatY(value) }))
     : (yScale as LinearScale).ticks(yTickBudget).map((value) => ({
-      value, px: yScale.map(value), label: formatNum(value),
+      value, px: yScale.map(value), label: formatY(value),
     }));
 
   let numericBarClusterWidth = Math.max(2, plot.w * 0.62);
@@ -2021,7 +2218,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       if (output.lastValues) for (const value of output.lastValues) lastValues.push(value);
       continue;
     }
-    if (m.kind !== "ruleY" && m.kind !== "pie" && m.kind !== "heatmap") legend.push({ name, color: markFill(m) || color });
+    if (m.kind !== "ruleY" && m.kind !== "ruleX" && m.kind !== "pie" && m.kind !== "heatmap") legend.push({ name, color: markFill(m) || color });
 
     if (m.kind === "line" || m.kind === "area") {
       const rawSegments: { points: { x: number; y: number }[]; rows: unknown[] }[] = [];
@@ -2121,23 +2318,45 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
 
       for (const current of segments) {
         const { points: pts, rows } = current;
+        const curve = m.curve ?? "monotone";
         if (m.kind === "area" && pts.length) {
           const mappedZero = yScale.kind === "linear" ? yScale.map(0) : plot.y + plot.h;
           const baseline = Math.max(plot.y, Math.min(plot.y + plot.h, mappedZero));
-          nodes.push({
-            type: "area",
-            points: [
-              { x: pts[0]!.x, y: baseline },
-              ...pts,
-              { x: pts[pts.length - 1]!.x, y: baseline },
-            ],
-            fill: m.fill || color,
-            fillOpacity: m.fillOpacity ?? 0.28,
-            stroke: "none",
-            series: name,
-            hit: false,
-            role: "area",
-          });
+          if (m.y0) {
+            const lower: { x: number; y: number }[] = [];
+            for (let i = 0; i < pts.length; i++) {
+              const y0 = asNumber(readChannel(rows[i] as never, m.y0 as never));
+              const y = Number.isFinite(y0) && yScale.kind === "linear" ? yScale.map(y0) : baseline;
+              lower.push({ x: pts[i]!.x, y });
+            }
+            nodes.push({
+              type: "area",
+              points: [...pts, ...lower.slice().reverse()],
+              fill: m.fill || color,
+              fillOpacity: m.fillOpacity ?? 0.28,
+              stroke: "none",
+              series: name,
+              hit: false,
+              role: "ranged-area",
+              curve: "linear",
+            });
+          } else {
+            nodes.push({
+              type: "area",
+              points: [
+                { x: pts[0]!.x, y: baseline },
+                ...pts,
+                { x: pts[pts.length - 1]!.x, y: baseline },
+              ],
+              fill: m.fill || color,
+              fillOpacity: m.fillOpacity ?? 0.28,
+              stroke: "none",
+              series: name,
+              hit: false,
+              role: "area",
+              curve,
+            });
+          }
         }
         nodes.push({
           type: "line",
@@ -2149,6 +2368,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
           series: name,
           hit: true,
           role: "line",
+          curve,
         });
         if (pts.length === 1) {
           const row = rows[0];
@@ -2269,6 +2489,33 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
           label: formatNum(yv),
           color: m.stroke || color,
           dash: false,
+        });
+      }
+    } else if (m.kind === "ruleX") {
+      for (const row of m.data) {
+        const x = mapXValue(readChannel(row as never, m.x as never));
+        if (!Number.isFinite(x)) continue;
+        const xv = readChannel(row as never, m.x as never);
+        nodes.push({
+          type: "rule",
+          x, y: plot.y, x2: x, y2: plot.y + plot.h,
+          stroke: m.stroke || color,
+          strokeWidth: m.strokeWidth ?? 1,
+          dashed: true,
+          series: name,
+          hit: false,
+          role: "rule",
+        });
+        nodes.push({
+          type: "text",
+          x: x + 6,
+          y: plot.y + 12,
+          label: `${name}  ${formatX(xv)}`,
+          fill: m.stroke || theme.gold,
+          fontSize: 9,
+          anchor: "start",
+          hit: false,
+          clip: true,
         });
       }
     } else if (m.kind === "bar") {
@@ -2617,8 +2864,10 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     theme,
     lastValues,
     samples,
+    viewport: inputSpec.viewport ?? null,
     diagnostics: {
-      sourceRows: spec.marks.reduce((total, mark) => total + mark.data.length, 0),
+      sourceRows,
+      visibleRows,
       renderedNodes: nodes.length,
       hoverSamples: samples.length,
       decimatedPoints,

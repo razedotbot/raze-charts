@@ -1,21 +1,19 @@
-// Header interval selector. Renders the symbol's supported resolutions as a
-// compact row of buttons (favorites) plus a "more" dropdown, highlights the
-// active one, and calls back on selection. Stays in sync with programmatic
-// resolution changes via setActive().
+// Header interval selector. Renders the symbol's supported resolutions as one
+// inline row of toolbar buttons, highlights the active one, and calls back on
+// selection. `favorites.intervals` only affects order (favorites first).
+// Stays in sync with programmatic resolution changes via setActive().
 
 import type { ResolutionString } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
-import { resolutionLabel } from "../util/resolution";
-import { isCoarsePointer, openPopup, popupRow, type PopupHandle } from "./popup";
+import { isCoarsePointer } from "./popup";
+import { parseResolution, resolutionLabel } from "../util/resolution";
 
-/** Default inline favorites (others go in the dropdown). Overridden by the
- *  TV-compatible `options.favorites.intervals`. */
+/** Default leading intervals when `options.favorites.intervals` is omitted. */
 export const DEFAULT_INTERVAL_FAVORITES = ["1S", "1", "5", "15", "60", "240", "1D"];
 
 export class IntervalSelector {
   private buttons = new Map<string, HTMLButtonElement>();
   private active: string;
-  private dropdown: PopupHandle | null = null;
   private readonly favorites: string[];
 
   constructor(
@@ -33,58 +31,40 @@ export class IntervalSelector {
 
   private supported(): string[] {
     const sr = this.context.symbolInfo?.supported_resolutions;
-    if (sr && sr.length) return sr.map(String);
-    return this.favorites;
+    const values = sr && sr.length ? sr.map(String) : this.favorites;
+    return Array.from(new Set(values));
+  }
+
+  private ordered(): string[] {
+    return this.supported()
+      .slice()
+      .sort((a, b) => parseResolution(a).ms - parseResolution(b).ms);
   }
 
   private render(): void {
     this.mount.innerHTML = "";
     this.buttons.clear();
-    const supported = this.supported();
-    const favorites = supported.filter((r) => this.favorites.includes(r));
-    const rest = supported.filter((r) => !this.favorites.includes(r));
-    // Ensure the active resolution is always directly visible.
-    if (!favorites.includes(this.active) && supported.includes(this.active)) {
-      favorites.push(this.active);
-    }
-
-    for (const res of favorites) {
-      this.mount.appendChild(this.makeButton(res, resolutionLabel(res)));
-    }
-    if (rest.length) {
-      this.mount.appendChild(this.makeMoreButton(rest));
+    for (const res of this.ordered()) {
+      this.mount.appendChild(this.makeButton(res));
     }
     this.repaint();
   }
 
-  private makeButton(res: string, label: string): HTMLButtonElement {
+  private makeButton(res: string): HTMLButtonElement {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "raze-chart-focusable";
-    b.textContent = label;
-    b.setAttribute("aria-label", `Interval ${label}`);
+    b.textContent = resolutionLabel(res);
+    b.setAttribute("aria-label", `Interval ${resolutionLabel(res)}`);
     b.style.cssText = this.btnCss();
     b.addEventListener("click", () => this.select(res));
-    b.addEventListener("mouseenter", () => { if (res !== this.active) b.style.background = "var(--tv-color-toolbar-button-background-hover, rgba(255,255,255,0.06))"; });
-    b.addEventListener("mouseleave", () => { if (res !== this.active) b.style.background = "transparent"; });
-    this.buttons.set(res, b);
-    return b;
-  }
-
-  private makeMoreButton(rest: string[]): HTMLButtonElement {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "raze-chart-focusable";
-    b.textContent = "⋯";
-    b.title = "More intervals";
-    b.setAttribute("aria-label", "More intervals");
-    b.setAttribute("aria-haspopup", "menu");
-    b.setAttribute("aria-expanded", "false");
-    b.style.cssText = this.btnCss();
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.toggleDropdown(b, rest);
+    b.addEventListener("mouseenter", () => {
+      if (res !== this.active) b.style.background = "var(--tv-color-toolbar-button-background-hover, rgba(255,255,255,0.06))";
     });
+    b.addEventListener("mouseleave", () => {
+      if (res !== this.active) b.style.background = "transparent";
+    });
+    this.buttons.set(res, b);
     return b;
   }
 
@@ -93,6 +73,7 @@ export class IntervalSelector {
     return [
       "display:flex",
       "align-items:center",
+      "justify-content:center",
       coarse ? "height:30px" : "height:24px",
       coarse ? "padding:0 10px" : "padding:0 7px",
       "margin:0 1px",
@@ -114,14 +95,12 @@ export class IntervalSelector {
     if (res === this.active) return;
     this.setActive(res);
     this.onSelect(res as unknown as ResolutionString);
-    this.closeDropdown();
   }
 
   /** Reflect an externally-driven resolution change (no callback). */
   setActive(res: string): void {
     this.active = res;
     if (!this.buttons.has(res)) {
-      // The active resolution isn't a visible favorite — re-render to surface it.
       this.render();
       return;
     }
@@ -145,41 +124,5 @@ export class IntervalSelector {
     }
   }
 
-  private toggleDropdown(anchor: HTMLElement, rest: string[]): void {
-    if (this.dropdown) { this.closeDropdown(); return; }
-    const popup = openPopup({
-      fontFamily: this.context.fontFamily,
-      className: "raze-chart-interval-menu",
-      minWidth: 80,
-      padding: "4px",
-      anchor,
-      place: "below-start",
-      role: "menu",
-      label: "Chart intervals",
-      onClose: () => {
-        if (this.dropdown === popup) this.dropdown = null;
-      },
-    });
-    this.dropdown = popup;
-    for (const res of rest) {
-      const label = resolutionLabel(res);
-      const row = popupRow(label, () => this.select(res), {
-        role: "menuitemradio",
-        checked: res === this.active,
-        label: `Interval ${label}`,
-      });
-      if (!isCoarsePointer()) row.style.padding = "6px 10px";
-      popup.el.appendChild(row);
-    }
-    popup.reposition();
-  }
-
-  private closeDropdown(): void {
-    this.dropdown?.close();
-    this.dropdown = null;
-  }
-
-  destroy(): void {
-    this.closeDropdown();
-  }
+  destroy(): void {}
 }

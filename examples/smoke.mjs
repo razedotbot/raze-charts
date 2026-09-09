@@ -263,12 +263,16 @@ assert(window.document.querySelector(".raze-chart-style-menu") === null, "Esc cl
 
 assert(container2.querySelector(".raze-chart-scale-bar") === null, "disabled_features scale_bar hides the scale bar");
 
-// favorites.intervals drives the header row: 1m + 5m inline, rest behind "⋯"
+// every supported interval sits in the header row, ordered by duration
 const favBtns = [...container2.querySelectorAll('.raze-chart-toolbar button[aria-label^="Interval "]')]
   .filter((d) => ["1s", "5s", "1m", "5m", "15m", "1h", "1D"].includes(d.textContent));
 assert(
-  favBtns.length === 2 && favBtns.every((d) => ["1m", "5m"].includes(d.textContent)),
-  `favorites.intervals drives the header row (${favBtns.map((d) => d.textContent).join(",")})`,
+  favBtns.map((d) => d.textContent).join(",") === "1s,5s,1m,5m,15m,1h,1D",
+  `interval row is inline (${favBtns.map((d) => d.textContent).join(",")})`,
+);
+assert(
+  container2.querySelector('[aria-label="More intervals"]') === null,
+  "the interval row has no overflow dropdown",
 );
 
 // custom study: createStudy by name + pane rendering path

@@ -9,6 +9,8 @@ import {
   ResponsiveContainer,
   Tooltip,
   XAxis,
+  Brush,
+  ReferenceLine,
   createChartComponents,
   defineChart,
   line,
@@ -380,6 +382,87 @@ assert(
 assert(activeObservers === 0, "an onReady exception rolls back its observer and mounted DOM");
 await act(async () => { readyFailureRoot.unmount(); });
 readyFailureContainer.remove();
+
+const brushHandles = [];
+const brushContainer = document.createElement("div");
+document.body.appendChild(brushContainer);
+const brushRoot = createRoot(brushContainer);
+await act(async () => {
+  brushRoot.render(createElement(
+    LineChart,
+    {
+      data: [
+        { month: "Jan", revenue: 10 },
+        { month: "Feb", revenue: 20 },
+        { month: "Mar", revenue: 30 },
+      ],
+      width: 420,
+      height: 240,
+      ariaLabel: "Brushed revenue",
+      onReady: (handle) => brushHandles.push(handle),
+    },
+    createElement(Line, { dataKey: "revenue", name: "Revenue" }),
+    createElement(XAxis, { dataKey: "month" }),
+    createElement(Brush, { startIndex: 0, endIndex: 1, height: 32 }),
+  ));
+});
+assert(brushHandles.length === 1, "Brush mounts without throwing");
+assert(brushContainer.querySelector("[data-raze-chart-host]"), "Brush chart still mounts a host");
+await act(async () => { brushRoot.unmount(); });
+brushContainer.remove();
+
+{
+  const invalidBrushContainer = document.createElement("div");
+  document.body.appendChild(invalidBrushContainer);
+  const invalidBrushRoot = createRoot(invalidBrushContainer);
+  console.error = () => {};
+  try {
+    await act(async () => {
+      invalidBrushRoot.render(createElement(
+        ErrorBoundary,
+        null,
+        createElement(
+          LineChart,
+          { data: [{ month: "Jan", revenue: 10 }], width: 320, height: 180 },
+          createElement(Line, { dataKey: "revenue" }),
+          createElement(Brush, { travellerWidth: 8 }),
+        ),
+      ));
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert(
+    invalidBrushContainer.querySelector("[data-test-error]")?.textContent.includes("travellerWidth"),
+    "Brush fails actionably instead of ignoring unsupported travellerWidth",
+  );
+  await act(async () => { invalidBrushRoot.unmount(); });
+  invalidBrushContainer.remove();
+}
+
+const refContainer = document.createElement("div");
+document.body.appendChild(refContainer);
+const refRoot = createRoot(refContainer);
+await act(async () => {
+  refRoot.render(createElement(
+    LineChart,
+    {
+      data: [
+        { month: "Jan", revenue: 10 },
+        { month: "Feb", revenue: 20 },
+      ],
+      width: 320,
+      height: 180,
+      ariaLabel: "Vertical reference",
+    },
+    createElement(Line, { dataKey: "revenue" }),
+    createElement(XAxis, { dataKey: "month" }),
+    createElement(ReferenceLine, { x: "Feb" }),
+  ));
+});
+assert(refContainer.querySelector("[data-raze-chart-host]"), "vertical ReferenceLine mounts");
+await act(async () => { refRoot.unmount(); });
+refContainer.remove();
 
 dom.window.close();
 console.log("REACT ADAPTER: PASS");

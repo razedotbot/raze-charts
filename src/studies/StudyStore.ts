@@ -3,7 +3,7 @@
 // Which studies exist at all is the StudyRegistry's business — this store only
 // tracks live instances.
 
-import type { Bar, EntityId, StudyDefinition } from "../types/charting_library";
+import type { Bar, EntityId, StudyDefinition, StudySeries } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
 import { BUILTIN_STUDIES, StudyRegistry } from "./registry";
 
@@ -17,6 +17,9 @@ export interface StudySpec {
   length?: number;
   /** "" / absent → the definition's default color. */
   color?: string;
+  lock?: boolean;
+  forceOverlay?: boolean;
+  inputs?: Record<string, number | string>;
 }
 
 export interface StudyInstance {
@@ -28,6 +31,10 @@ export interface StudyInstance {
   color: string;
   /** Values aligned with context.bars; null during warm-up. */
   values: (number | null)[];
+  series: StudySeries[];
+  lock: boolean;
+  forceOverlay: boolean;
+  inputs: Record<string, number | string>;
 }
 
 const FALLBACK_COLORS = ["#f5a623", "#26a69a", "#2962ff", "#e040fb", "#7E57C2"];
@@ -134,7 +141,7 @@ export class StudyStore {
   paneDefs(): StudyDefinition[] {
     const out: StudyDefinition[] = [];
     for (const s of this.items.values()) {
-      if (s.def.pane === "pane" && !out.includes(s.def)) out.push(s.def);
+      if (s.def.pane === "pane" && !s.forceOverlay && !out.includes(s.def)) out.push(s.def);
     }
     return out;
   }
@@ -157,6 +164,10 @@ export class StudyStore {
       length: Math.max(1, Math.floor(rawLength)),
       color: spec.color || def.defaults?.color || FALLBACK_COLORS[this.items.size % FALLBACK_COLORS.length]!,
       values: [],
+      series: [],
+      lock: spec.lock ?? false,
+      forceOverlay: spec.forceOverlay ?? false,
+      inputs: spec.inputs ?? {},
     };
     const builtin = BUILTIN_KINDS.get(def);
     this.runtimes.set(id, {
@@ -197,6 +208,7 @@ export class StudyStore {
     for (const study of this.items.values()) {
       if ((mutation === "append" || mutation === "replace-last")
           && this.updateBuiltinLastValue(study, mutation)) {
+        study.series = [{ values: study.values, style: "line", color: study.color }];
         continue;
       }
       this.recompute(study);
@@ -206,8 +218,17 @@ export class StudyStore {
 
   private recompute(study: StudyInstance): void {
     try {
-      const values = study.def.compute(this.context.bars, { length: study.length });
-      study.values = Array.isArray(values) ? values : [];
+      const raw = study.def.compute(this.context.bars, { length: study.length, ...study.inputs });
+      if (Array.isArray(raw)) {
+        study.values = raw;
+        study.series = [{ values: raw, style: "line", color: study.color }];
+      } else {
+        study.series = raw.series.map((item) => ({
+          ...item,
+          color: item.color || study.color,
+        }));
+        study.values = study.series[0]?.values ?? [];
+      }
       const runtime = this.runtimes.get(study.id);
       if (runtime) {
         runtime.rsi = runtime.kind === "rsi" ? this.buildRsiRuntime(study.length) : null;
@@ -215,6 +236,7 @@ export class StudyStore {
     } catch (e) {
       console.warn(`[raze-charts] study "${study.name}" compute failed`, e);
       study.values = [];
+      study.series = [];
       const runtime = this.runtimes.get(study.id);
       if (runtime) runtime.rsi = null;
     }

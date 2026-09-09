@@ -6,6 +6,7 @@ import type { Bar, Mark } from "../types/charting_library";
 import type { ChartContext, DrawingTool } from "../core/context";
 import type { ChartEngine } from "./ChartEngine";
 import type { ShapeStore } from "../core/ShapeStore";
+import type { TradingStore } from "../core/TradingStore";
 import type { DataManager } from "../data/DataManager";
 import type { StudyStore } from "../studies/StudyStore";
 import { heikinAshi } from "../util/heikinAshi";
@@ -19,9 +20,10 @@ import {
   computePriceTicks,
   computeTimeTicks,
   type PlotScale,
+  toDisplay,
 } from "./plotScale";
 import { adjustPriceAxisWidth } from "./paint/axes";
-import type { Crosshair, DraftShape, FinanceView, MarkHit, ShapeHit } from "./paint/view";
+import type { Crosshair, DraftShape, FinanceView, MarkHit, ShapeHit, TradingHit } from "./paint/view";
 import { paintFinanceScene } from "./scene";
 import { GestureController, type GestureHost } from "./gestures";
 
@@ -33,16 +35,20 @@ export class ChartRenderer implements GestureHost {
   plotW = 0;
   plotH = 0;
   subPanes: SubPaneGeom[] = [];
+  volumePane: { top: number; h: number } | null = null;
   priceAxisW = PRICE_AXIS_W_DEFAULT;
   priceMin = 0;
   priceMax = 1;
   hoverShapeId: string | null = null;
+  hoverTradingLineId: string | null = null;
+  hoverTradingHit: "body" | "cancel" | null = null;
   hoverMark: Mark | null = null;
   lastPointerType = "mouse";
   onToolDone: ((tool: DrawingTool) => void) | null = null;
   draft: DraftShape | null = null;
   markScreen: MarkHit[] = [];
   shapeScreen: ShapeHit[] = [];
+  tradingScreen: TradingHit[] = [];
 
   private pctBase = 1;
   private seriesBars: Bar[] = [];
@@ -53,6 +59,7 @@ export class ChartRenderer implements GestureHost {
     readonly context: ChartContext,
     readonly engine: ChartEngine,
     readonly shapes: ShapeStore,
+    readonly trading: TradingStore,
     readonly data: DataManager,
     readonly studies: StudyStore,
   ) {
@@ -144,15 +151,19 @@ export class ChartRenderer implements GestureHost {
       cssHeight: this.engine.cssHeight,
       priceAxisW: this.priceAxisW,
       subPanes: this.subPanes,
+      volumePane: this.volumePane,
       seriesBars: this.seriesBars,
       studies: this.studies,
       shapes: this.shapes,
+      trading: this.trading,
       markScreen: this.markScreen,
       shapeScreen: this.shapeScreen,
+      tradingScreen: this.tradingScreen,
       crosshair: this.crosshair,
       hoverMark: this.hoverMark,
       draft: this.draft,
       selectedShapeId: this.context.selectedShapeId,
+      selectedTradingLineId: this.context.selectedTradingLineId,
       fontFamily: this.context.fontFamily,
     };
   }
@@ -179,12 +190,19 @@ export class ChartRenderer implements GestureHost {
     const H = this.engine.cssHeight;
     if (W <= 0 || H <= 0) return;
 
-    const layout = computePlotLayout(W, H, this.priceAxisW, this.studies.paneDefs());
+    const layout = computePlotLayout(
+      W,
+      H,
+      this.priceAxisW,
+      this.studies.paneDefs(),
+      this.context.volumeMode,
+    );
     this.plotL = layout.plotL;
     this.plotT = layout.plotT;
     this.plotW = layout.plotW;
     this.plotH = layout.plotH;
     this.subPanes = layout.subPanes;
+    this.volumePane = layout.volumePane;
 
     this.refreshSeriesBars();
     const bars = this.seriesBars.length ? this.seriesBars : this.context.bars;
@@ -197,6 +215,19 @@ export class ChartRenderer implements GestureHost {
     this.pctBase = fitted.pctBase;
     this.priceMin = fitted.priceMin;
     this.priceMax = fitted.priceMax;
+    if (this.context.autoScalePrice) {
+      const scale = { ...this.plotScale(), pctBase: fitted.pctBase };
+      const levels = this.trading.autoScalePrices()
+        .map((price) => toDisplay(scale, price))
+        .filter(Number.isFinite);
+      if (levels.length) {
+        const low = Math.min(this.priceMin, ...levels);
+        const high = Math.max(this.priceMax, ...levels);
+        const pad = Math.max((high - low) * 0.06, Math.abs(high) * 0.001, 1e-9);
+        this.priceMin = low - pad;
+        this.priceMax = high + pad;
+      }
+    }
 
     const v = this.financeView();
     const priceTicks = computePriceTicks(v);

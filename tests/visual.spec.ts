@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-const CASES = ["dark", "light", "rsi", "drawings", "compact"] as const;
+const CASES = ["dark", "light", "rsi", "drawings", "trading", "compact"] as const;
 
 async function openCase(page: Page, name: string): Promise<void> {
   await page.goto(`http://127.0.0.1:8799/examples/visual.html?case=${name}`, {

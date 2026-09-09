@@ -59,7 +59,7 @@
       custom_font_family: "Arial, Helvetica, sans-serif",
       loading_screen: { backgroundColor: light ? "#ffffff" : "#181615", foregroundColor: "#d8aa5b" },
       enabled_features: ["seconds_resolution", "mark_on_bars"],
-      disabled_features: ["header_symbol_search", "popup_hints"],
+      disabled_features: ["header_symbol_search", "popup_hints", "countdown"],
       overrides: light ? {} : darkOverrides,
       favorites: { intervals: ["1S", "1", "5", "15"] },
       raze: {
@@ -83,6 +83,22 @@
           [{ time: t0 - 600 * 60, price: 5500 }, { time: t0, price: 7200 }],
           { shape: "trend_line", overrides: { linecolor: "#66d89e", linewidth: 1 } },
         );
+      }
+      if (testCase === "trading") {
+        await chart.createBracketOrder({
+          side: "buy",
+          entryPrice: 6500,
+          stopLossPrice: 6100,
+          takeProfitPrice: 7100,
+          quantity: 2,
+          currency: "USD",
+        });
+        await chart.createOrderLine({
+          side: "sell",
+          price: 6800,
+          quantity: 1,
+          text: "Reduce",
+        });
       }
       window.__razeReady = true;
       window.__razeChart = w;

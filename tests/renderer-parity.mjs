@@ -238,6 +238,7 @@ wrapper.dispatchEvent(new dom.window.MouseEvent("pointermove", {
 const tooltip = [...wrapper.children].find((element) => element.style.zIndex === "5");
 assert.equal(tooltip?.textContent, expectedSample.tip, "indexed nearest-sample lookup preserves tooltip selection");
 assert.equal(tooltip?.style.display, "block", "indexed tooltip remains visible at a matching sample");
+assert.equal(wrapper.style.userSelect, "none", "mounted charts disable text selection during pan");
 
 wrapper.dispatchEvent(new dom.window.MouseEvent("pointerleave", { bubbles: true }));
 wrapper.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 960, bottom: 560, width: 960, height: 560, toJSON() {} });
@@ -290,6 +291,8 @@ const mountedCanvas = canvasHost.querySelector("canvas");
 assert.equal(mountedCanvas?.width, 800 * Math.max(1, window.devicePixelRatio || 1), "Canvas backing width follows compiled scene dimensions");
 assert.equal(mountedCanvas?.height, 400 * Math.max(1, window.devicePixelRatio || 1), "Canvas backing height follows compiled scene dimensions");
 assert.equal(mountedCanvas?.style.width, "100%", "Canvas scales through CSS like the SVG renderer");
+canvasMount.update(fixedSceneDefinition, { width: 400, height: 200, renderer: "canvas" });
+assert.equal(canvasHost.querySelector("canvas"), mountedCanvas, "canvas paints reuse the backing surface");
 canvasMount.destroy();
 canvasHost.remove();
 
@@ -317,6 +320,69 @@ const mixedTooltip = [...mixedWrapper.children].find((element) => element.style.
 assert.equal(mixedTooltip?.textContent, scatterSample.tip, "an exact scatter hit wins over a distant line sample in composed charts");
 mixedMount.destroy();
 mixedHost.remove();
+
+const panHost = document.createElement("div");
+document.body.appendChild(panHost);
+const panDefinition = defineChart({
+  marks: [line(Array.from({ length: 24 }, (_, i) => ({ t: i * 86_400_000, v: 50 + i })), { x: "t", y: "v", name: "Sales" })],
+  scales: { x: { type: "time" } },
+  legend: false,
+  ariaLabel: "Revenue",
+});
+const panMount = mountChart(panHost, panDefinition, { width: 400, height: 200, interaction: { pan: true } });
+const panWrap = panHost.firstElementChild;
+const panBox = { x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, toJSON() {} };
+panWrap.getBoundingClientRect = () => panBox;
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientX: 220, clientY: 80 }));
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientX: 160, clientY: 80 }));
+const panPlot = panWrap.querySelector("[data-role='plot']");
+const panLabels = panWrap.querySelector("[data-role='x-labels']");
+assert.match(panPlot?.getAttribute("transform") ?? "", /translate\(-60/, "svg pan translates plot geometry with the pointer");
+assert.equal(panPlot?.getAttribute("transform"), panLabels?.getAttribute("transform"), "svg pan keeps x labels locked to the plot");
+const livePan = panMount.getViewport()?.x;
+assert(Array.isArray(livePan) && livePan.length === 2, "svg pan updates the live viewport while dragging");
+assert(Number(livePan[0]) > 0, "dragging left shifts the window toward later values");
+const panSvgBeforeCommit = panWrap.querySelector("svg");
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, clientX: 160, clientY: 80 }));
+assert.equal(panWrap.querySelector("[data-role='plot']")?.getAttribute("transform"), null, "svg pan clears the preview transform after commit");
+assert.notEqual(panWrap.querySelector("svg"), panSvgBeforeCommit, "svg pan commits by rewriting the scene once");
+assert.equal(panWrap.style.cursor, "", "svg pan restores the cursor after release");
+panMount.destroy();
+panHost.remove();
+
+const rangeHost = document.createElement("div");
+document.body.appendChild(rangeHost);
+const t0 = Date.UTC(2026, 7, 1);
+const rangeDefinition = defineChart({
+  marks: [line(Array.from({ length: 48 }, (_, i) => ({ t: t0 + i * 86_400_000, v: 50 + i })), { x: "t", y: "v", name: "Sales" })],
+  scales: { x: { type: "time" } },
+  legend: false,
+  ariaLabel: "Revenue",
+});
+const rangeMount = mountChart(rangeHost, rangeDefinition, {
+  width: 400,
+  height: 200,
+  interaction: { pan: true, rangePresets: true },
+});
+const rangeWrap = rangeHost.firstElementChild;
+const rangeBox = { x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, toJSON() {} };
+rangeWrap.getBoundingClientRect = () => rangeBox;
+const presetButtons = [...rangeWrap.querySelectorAll("button")];
+const byLabel = Object.fromEntries(presetButtons.map((btn) => [btn.textContent, btn]));
+assert.equal(Boolean(byLabel["1D"] && byLabel.ALL), true, "range preset bar renders named buttons");
+assert.equal(byLabel["3M"]?.hidden, true, "3M hides when it cannot zoom the series");
+assert.equal(byLabel.YTD?.hidden, true, "YTD hides when it cannot zoom the series");
+byLabel["1D"].dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientX: 24, clientY: 190 }));
+assert.equal(rangeWrap.style.cursor, "", "clicking a range preset does not start a pan");
+byLabel["1D"].dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+const dayView = rangeMount.getViewport()?.x;
+assert(Array.isArray(dayView) && dayView.length === 2, "1D preset writes a viewport");
+assert(Number(dayView[1]) - Number(dayView[0]) <= 86_400_000 * 1.05, "1D preset windows about one day");
+assert.equal(byLabel["1D"].getAttribute("aria-pressed"), "true", "the active range preset is pressed");
+byLabel.ALL.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+assert.equal(byLabel.ALL.getAttribute("aria-pressed"), "true", "ALL restores the full window");
+rangeMount.destroy();
+rangeHost.remove();
 dom.window.close();
 
 console.log(`RENDERER PARITY: PASS (band ${bandElapsed.toFixed(1)}ms, dense hit ${hitElapsed.toFixed(1)}ms)`);

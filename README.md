@@ -30,8 +30,8 @@ points, see [architecture](./docs/architecture.md).
 
 - **Native first.** The typed chart definition and data source own behavior;
   compatibility layers translate into those contracts.
-- **No silent compatibility.** A supported component works, while a known
-  unsupported component such as React `Brush` fails with guidance.
+- **No silent compatibility.** A supported component works; a known
+  unsupported Recharts prop such as `Line fill` fails with guidance.
 - **One explicit lifecycle.** Mounted charts update in place and expose cleanup;
   stale async work cannot regain ownership after a target change or teardown.
 - **One semantic scene.** SVG and Canvas consume the same compiled chart, with
@@ -163,6 +163,50 @@ financialChart.onChartReady(() => {
 // Required when the host unmounts.
 financialChart.remove();
 ```
+
+### Trading overlays
+
+Orders and positions are first-class broker primitives rather than drawings.
+They stay above the price series, participate in auto-scale, support mouse and
+touch dragging, and can be nudged one minimum tick with Up/Down while selected.
+The fluent order/position adapters mirror the TradingView integration style;
+`createBracketOrder` links entry, stop-loss, and take-profit with live
+risk/reward shading and callbacks.
+
+```ts
+financialChart.onChartReady(async () => {
+  const chart = financialChart.activeChart();
+  const bracket = await chart.createBracketOrder({
+    side: "buy",
+    entryPrice: 101.5,
+    stopLossPrice: 98,
+    takeProfitPrice: 108.5,
+    quantity: 2,
+    currency: "USD",
+    onChange: (snapshot, event) => {
+      sendOrderAmendment(event.line.id, event.line.price);
+      updateRiskPreview(snapshot.riskRewardRatio);
+    },
+    onCancel: (snapshot) => cancelOrderGroup(snapshot.id),
+  });
+
+  bracket.stopLoss
+    ?.setLineColor("#ef5350")
+    .onMove((line) => console.log("new stop", line.getPrice()));
+
+  const limit = await chart.createOrderLine({
+    side: "sell",
+    price: 112,
+    quantity: 1,
+    text: "Reduce",
+  });
+  limit.onCancel(() => cancelOrder(limit.id));
+});
+```
+
+`trading_event` subscriptions receive a detached line snapshot plus the event
+type. Trading overlays are deliberately excluded from `widget.save()` because
+broker state must be rehydrated from the execution backend, not a chart layout.
 
 For a standalone browser bundle, `dist/charting_library.standalone.js` assigns
 `window.TradingView.widget`:
@@ -301,7 +345,7 @@ Percent-scale ticks keep percent notation. Overlay studies may still own their
 legend value through `StudyDefinition.formatValue`.
 
 The root also exports `DataManager`, `TimeIndex`, `ChartEngine`,
-`ChartRenderer`, `ShapeStore`, `StudyStore`, indicator math, formatting and
+`ChartRenderer`, `ShapeStore`, `TradingStore`, `StudyStore`, indicator math, formatting and
 resolution helpers, `defineDataSource` / `createDatafeed`, and the default UI
 chrome. These pieces are useful for a custom financial shell, but currently
 share the widget's mutable `ChartContext`; they are not separate package
@@ -342,10 +386,11 @@ export function RevenueChart({ data }: { data: Sale[] }) {
 ```
 
 `Tooltip` and `Legend` are functional configuration toggles consumed by the
-parent chart. They are not customizable overlay components. `Brush` is
-explicitly unsupported and throws a descriptive error when used; it is never
-silently ignored. The adapter is a migration convenience, not a drop-in
-implementation of the full Recharts API. See the
+parent chart. They are not customizable overlay components. `Brush` windows
+the native viewport through `startIndex`/`endIndex` (or a time domain) and
+throws on unknown Recharts brush props; it is never silently ignored. The
+adapter is a migration convenience, not a drop-in implementation of the full
+Recharts API. See the
 [Recharts migration matrix](./docs/migration.md#recharts-shaped-jsx).
 
 Each series component accepts only the options it implements, both in

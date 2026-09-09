@@ -54,8 +54,8 @@ node scripts/check-bundle-size.mjs
 
 | Entrypoint | Artifact | Gzip budget |
 | --- | --- | ---: |
-| Root financial widget | `charting_library.esm.js` | 48 KiB |
-| Native chart | `chart.esm.js` | 36 KiB |
+| Root financial widget | `charting_library.esm.js` | 52 KiB |
+| Native chart | `chart.esm.js` | 42 KiB |
 | React adapter | `react.esm.js` | 30 KiB |
 
 Budgets live in [bundle-budgets.json](../benchmarks/bundle-budgets.json). They

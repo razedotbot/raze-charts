@@ -8,9 +8,10 @@ import type {
   LibrarySymbolInfo,
   ResolutionString,
   SidebarToolId,
+  TradingLineSnapshot,
 } from "../types/charting_library";
 import { Delegate } from "../util/delegate";
-import type { Bar, Mark } from "../types/charting_library";
+import type { Bar, Mark, TimescaleMark, VolumeMode } from "../types/charting_library";
 import { createPriceFormatter, type PriceFormatFn } from "../util/format";
 
 export interface ThemeColors {
@@ -70,6 +71,7 @@ export interface ChartContext {
 
   /** Bar marks for the current visible range (rendered when `mark_on_bars` is on). */
   marks: Mark[];
+  timescaleMarks: TimescaleMark[];
 
   /** Current visible range in bar-index space. */
   visibleRange: IndexRange;
@@ -84,10 +86,17 @@ export interface ChartContext {
   logScale: boolean;
   /** Percent scale (relative to first visible close). */
   percentScale: boolean;
+  volumeMode: VolumeMode;
+  magnet: boolean;
+  stayInDrawingMode: boolean;
+  compare: { id: string; symbol: string; bars: Bar[]; color: string }[];
+  syncedCrosshair: { unixTime: number; price: number; active: boolean } | null;
   /** Active left-toolbar drawing tool. */
   drawingTool: DrawingTool;
   /** Currently selected shape entity id (for delete / highlight), or null. */
   selectedShapeId: string | null;
+  /** Currently selected broker/order primitive, kept separate from drawings. */
+  selectedTradingLineId: string | null;
 
   /** Fired (resolution, timeframeObj) when the interval changes. */
   readonly intervalChanged: Delegate<[ResolutionString, unknown]>;
@@ -95,6 +104,10 @@ export interface ChartContext {
   readonly dataChanged: Delegate<[]>;
   /** Fired (entityId, eventType) for shape drawing events. */
   readonly drawingEvent: Delegate<[string, string]>;
+  /** Fired (snapshot, eventType) for order/position line lifecycle events. */
+  readonly tradingEvent: Delegate<[TradingLineSnapshot, string]>;
+  readonly viewportChanged: Delegate<[{ from: number; to: number }]>;
+  readonly crosshairMoved: Delegate<[{ unixTime: number; price: number; active: boolean }]>;
 
   /** Request an animation-frame repaint. Set by the engine. */
   requestPaint(): void;
@@ -104,6 +117,10 @@ export interface ChartContext {
 const FEATURE_DEFAULTS_ON = new Set<string>([
   "header_widget",
   "header_resolutions",
+  "header_symbol_search",
+  "time_frames_toolbar",
+  "timezone_display",
+  "countdown",
   "left_toolbar",
   "legend_widget",
   "scale_bar",

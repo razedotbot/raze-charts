@@ -134,4 +134,23 @@ const makeContext = (bars) => {
   assert.equal(calls, 2, "destroy unsubscribes from ChartContext.dataChanged");
 }
 
+{
+  const defs = BUILTIN_STUDIES.filter((definition) =>
+    ["VWAP", "Bollinger Bands", "MACD"].includes(definition.name),
+  );
+  const bars = [10, 12, 11, 13, 14, 12, 15, 16].map((close, i) => bar(i * 60_000, close));
+  const test = makeContext(bars);
+  const store = new StudyStore(test.context, new StudyRegistry(defs));
+  assert.ok(store.add({ name: "VWAP" }));
+  assert.ok(store.add({ name: "Bollinger Bands", length: 3 }));
+  assert.ok(store.add({ name: "MACD" }));
+  const vwap = store.list().find((s) => s.name === "VWAP");
+  const bb = store.list().find((s) => s.name === "Bollinger Bands");
+  const macd = store.list().find((s) => s.name === "MACD");
+  assert.ok(vwap.series.length === 1 && vwap.values.some((v) => typeof v === "number"), "VWAP emits a line series");
+  assert.ok(bb.series.some((s) => s.style === "band") && bb.series.some((s) => s.style === "line"), "Bollinger emits band plus midline");
+  assert.ok(macd.series.some((s) => s.style === "histogram") && macd.def.pane === "pane", "MACD emits a pane histogram");
+  store.destroy();
+}
+
 console.log("STUDY STORE: PASS");

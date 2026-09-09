@@ -45,10 +45,10 @@ exports are the stable resolver contract.
 | `getMarks` | Supported | Async callback results are accepted and scoped to the active request. |
 | `createShape`, `createMultipointShape` | Supported subset | Use only the drawing kinds in the capability matrix. |
 | `getShapeById`, `removeEntity`, `removeAllShapes` | Supported | Shape point editing and removal are implemented. |
-| `createStudy` | Supported subset | EMA/SMA/RSI plus studies registered through `raze.custom_studies`. |
+| `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. `forceOverlay` / `lock` are stored but not separately enforced. |
 | `createButton` | Supported | Use it for small host actions; own complex UI outside the widget. |
-| save/load layout, templates | Unsupported | Persist host configuration and domain state separately. |
-| compare/multi-symbol | Unsupported | Compose separate widgets or keep the comparison in product code. |
+| `save()` / `load()` | Supported | Versioned JSON snapshot of symbol, interval, range, style, shapes, and studies. The host owns storage. |
+| `createCompare(symbol)` | Supported | Overlay another symbol on the same pane; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair across panes. |
 | unlisted TradingView option or event | Not guaranteed | A permissive compatibility type is not proof of runtime support. |
 
 ### Datafeed checklist
@@ -113,8 +113,9 @@ not execute arbitrary Recharts props.
 3. Replace custom tooltip/legend renderers with product UI outside the chart,
    or use the native built-in presentation.
 4. Remove unsupported event, animation, custom-shape, and axis formatter props.
-5. Replace `Brush` with host-controlled filtering before data reaches the
-   chart.
+5. Use `<Brush startIndex endIndex />` or native `viewport` when the chart
+   should window data before geometry; keep host-side filtering when you need
+   a different aggregation.
 6. Adopt `createChartComponents<T>({ xKey, valueKey })` so defaults and invalid
    `dataKey` values fail during type checking. Add `heatmapYKey` when a typed
    heatmap does not declare `<YAxis dataKey="..." />`.
@@ -149,9 +150,9 @@ export function Trend({ data }: { data: Point[] }) {
 | `CartesianGrid` | Enable grid | No line-style prop mapping. |
 | `Tooltip` | Enable built-in pointer tooltip | It is a configuration descriptor, not a rendered React overlay. |
 | `Legend` | Enable built-in legend | It is a configuration descriptor, not a customizable React child. |
-| `ReferenceLine` | Add numeric horizontal rule | Vertical/category reference lines are not mapped. |
+| `ReferenceLine` | Add a numeric horizontal or vertical rule | Exactly one of `y` or `x`. |
 | `ResponsiveContainer` | Measure the wrapper and inject numeric width/height into one chart child | It requires exactly one valid chart child and does not mirror every Recharts sizing behavior. |
-| `Brush` | Throws when parsed | Filter or window data in the host application. |
+| `Brush` | Window the native viewport | `startIndex`/`endIndex` or a time domain; it is not the Recharts brush overlay API. |
 
 ### Exact React prop surface
 
@@ -160,8 +161,8 @@ implemented props are deliberately small and exact:
 
 | Component | Additional series props |
 | --- | --- |
-| `Line` | `name`, `stroke`, `strokeWidth`, `lastValue`, `dashed` |
-| `Area` | `name`, `stroke`, `fill`, `fillOpacity`, `strokeWidth`, `lastValue`, `dashed` |
+| `Line` | `name`, `stroke`, `strokeWidth`, `lastValue`, `dashed`, `curve` |
+| `Area` | `name`, `stroke`, `fill`, `fillOpacity`, `strokeWidth`, `lastValue`, `dashed`, `curve`, `y0` |
 | `Bar` | `name`, `fill`, `stackId`, `lastValue`, `fade` |
 | `Scatter` | `name`, `fill`, `fillOpacity`, `r` |
 | `Pie` | `name`, `innerRadius`, `outerRadius` |

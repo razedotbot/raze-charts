@@ -47,9 +47,108 @@ export function strokeStudyLine(
 
 export function drawOverlayStudies(ctx: CanvasRenderingContext2D, v: FinanceView): void {
   for (const s of v.studies.list()) {
-    if (s.def.pane !== "overlay") continue;
-    strokeStudyLine(ctx, v, s.values, s.color, (val) => yForPrice(v, val), v.plotT, v.plotT + v.plotH);
+    if (s.def.pane !== "overlay" && !s.forceOverlay) continue;
+    paintStudySeries(ctx, v, s, (val) => yForPrice(v, val), v.plotT, v.plotT + v.plotH);
   }
+}
+
+function paintStudySeries(
+  ctx: CanvasRenderingContext2D,
+  v: FinanceView,
+  s: { color: string; values: (number | null)[]; series?: { values: (number | null)[]; style?: string; color?: string }[] },
+  yFor: (val: number) => number,
+  clipTop: number,
+  clipBot: number,
+): void {
+  const series = s.series?.length ? s.series : [{ values: s.values, style: "line", color: s.color }];
+  const bands = series.filter((item) => item.style === "band");
+  if (bands.length >= 2) {
+    fillBand(ctx, v, bands[0]!.values, bands[1]!.values, bands[0]!.color || s.color, yFor, clipTop, clipBot);
+  }
+  for (const item of series) {
+    const color = item.color || s.color;
+    if (item.style === "histogram") {
+      fillHistogram(ctx, v, item.values, color, yFor, clipTop, clipBot);
+    } else if (item.style !== "band") {
+      strokeStudyLine(ctx, v, item.values, color, yFor, clipTop, clipBot);
+    } else if (bands.length < 2) {
+      strokeStudyLine(ctx, v, item.values, color, yFor, clipTop, clipBot);
+    }
+  }
+}
+
+function fillBand(
+  ctx: CanvasRenderingContext2D,
+  v: FinanceView,
+  upper: (number | null)[],
+  lower: (number | null)[],
+  color: string,
+  yFor: (val: number) => number,
+  clipTop: number,
+  clipBot: number,
+): void {
+  const bars = v.context.bars;
+  const { from, to } = v.visibleRange;
+  const start = Math.max(0, Math.floor(from) - 1);
+  const end = Math.min(bars.length - 1, Math.ceil(to) + 1);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(v.plotL, clipTop, v.plotW, Math.max(1, clipBot - clipTop));
+  ctx.clip();
+  ctx.beginPath();
+  let started = false;
+  for (let i = start; i <= end; i++) {
+    const val = upper[i];
+    if (val == null || !Number.isFinite(val)) { started = false; continue; }
+    const x = xForIndex(v, i);
+    const y = yFor(val);
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
+  }
+  started = false;
+  for (let i = end; i >= start; i--) {
+    const val = lower[i];
+    if (val == null || !Number.isFinite(val)) { started = false; continue; }
+    const x = xForIndex(v, i);
+    const y = yFor(val);
+    if (!started) { ctx.lineTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color.length === 7 ? `${color}33` : color;
+  ctx.fill();
+  ctx.restore();
+}
+
+function fillHistogram(
+  ctx: CanvasRenderingContext2D,
+  v: FinanceView,
+  values: (number | null)[],
+  color: string,
+  yFor: (val: number) => number,
+  clipTop: number,
+  clipBot: number,
+): void {
+  const bars = v.context.bars;
+  const { from, to } = v.visibleRange;
+  const start = Math.max(0, Math.floor(from) - 1);
+  const end = Math.min(bars.length - 1, Math.ceil(to) + 1);
+  const zero = yFor(0);
+  const w = Math.max(1, (v.plotW / Math.max(1, to - from)) * 0.6);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(v.plotL, clipTop, v.plotW, Math.max(1, clipBot - clipTop));
+  ctx.clip();
+  for (let i = start; i <= end; i++) {
+    const val = values[i];
+    if (val == null || !Number.isFinite(val)) continue;
+    const x = xForIndex(v, i);
+    const y = yFor(val);
+    ctx.fillStyle = val >= 0 ? color : "#e57359";
+    const top = Math.min(y, zero);
+    ctx.fillRect(x - w / 2, top, w, Math.max(1, Math.abs(y - zero)));
+  }
+  ctx.restore();
 }
 
 export function subPaneRange(v: FinanceView, def: StudyDefinition): { min: number; max: number } {
@@ -59,12 +158,15 @@ export function subPaneRange(v: FinanceView, def: StudyDefinition): { min: numbe
   let lo = Infinity;
   let hi = -Infinity;
   for (const s of v.studies.paneStudies(def)) {
+    const series = s.series?.length ? s.series : [{ values: s.values }];
     const end = Math.min(s.values.length - 1, Math.ceil(to) + 1);
-    for (let i = start; i <= end; i++) {
-      const val = s.values[i];
-      if (val == null || !Number.isFinite(val)) continue;
-      if (val < lo) lo = val;
-      if (val > hi) hi = val;
+    for (const item of series) {
+      for (let i = start; i <= end; i++) {
+        const val = item.values[i];
+        if (val == null || !Number.isFinite(val)) continue;
+        if (val < lo) lo = val;
+        if (val > hi) hi = val;
+      }
     }
   }
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { min: 0, max: 1 };
@@ -116,7 +218,7 @@ export function drawSubPanes(
     ctx.stroke();
 
     for (const s of v.studies.paneStudies(def)) {
-      strokeStudyLine(ctx, v, s.values, s.color, yFor, pane.top, pane.top + pane.h);
+      paintStudySeries(ctx, v, s, yFor, pane.top, pane.top + pane.h);
     }
 
     ctx.fillStyle = t.scaleText;

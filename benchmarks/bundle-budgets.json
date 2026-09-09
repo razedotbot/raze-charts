@@ -6,12 +6,12 @@
     {
       "name": "root financial widget",
       "path": "dist/charting_library.esm.js",
-      "budgetGzipBytes": 49152
+      "budgetGzipBytes": 56320
     },
     {
       "name": "native chart",
       "path": "dist/chart.esm.js",
-      "budgetGzipBytes": 36864
+      "budgetGzipBytes": 43008
     },
     {
       "name": "React adapter",

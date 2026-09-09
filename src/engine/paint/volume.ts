@@ -3,6 +3,8 @@ import { barSpacing, xForIndex } from "../plotScale";
 import type { FinanceView } from "./view";
 
 export function drawVolume(ctx: CanvasRenderingContext2D, v: FinanceView): void {
+  const mode = v.context.volumeMode ?? "overlay";
+  if (mode === "hidden") return;
   const bars = v.context.bars;
   if (!bars.length) return;
   const t = v.context.theme;
@@ -17,10 +19,21 @@ export function drawVolume(ctx: CanvasRenderingContext2D, v: FinanceView): void 
   }
   if (maxVol <= 0) return;
 
-  const volH = v.plotH * VOLUME_FRACTION;
-  const baseY = v.plotT + v.plotH;
+  const pane = mode === "pane" ? v.volumePane : null;
+  const volH = pane ? pane.h : v.plotH * VOLUME_FRACTION;
+  const baseY = pane ? pane.top + pane.h : v.plotT + v.plotH;
+  const topClip = pane ? pane.top : baseY - volH;
   const spacing = barSpacing(v);
   const w = Math.max(1, Math.min(CANDLE_MAX_WIDTH, spacing * 0.74));
+
+  ctx.save();
+  if (pane) {
+    ctx.fillStyle = t.paneBackground;
+    ctx.fillRect(v.plotL, pane.top, v.plotW, pane.h);
+  }
+  ctx.beginPath();
+  ctx.rect(v.plotL, topClip, v.plotW, volH);
+  ctx.clip();
   for (let i = start; i <= end; i++) {
     const b = bars[i];
     if (!b || !b.volume) continue;
@@ -30,4 +43,5 @@ export function drawVolume(ctx: CanvasRenderingContext2D, v: FinanceView): void 
     ctx.fillStyle = up ? t.volUp : t.volDown;
     ctx.fillRect(Math.round(x - w / 2), Math.round(baseY - h), Math.round(w), Math.round(h));
   }
+  ctx.restore();
 }

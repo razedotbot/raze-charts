@@ -26,7 +26,8 @@ export class ChartEngine {
   ) {
     this.canvas = document.createElement("canvas");
     this.canvas.className = "raze-chart-canvas";
-    this.canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;";
+    this.canvas.style.cssText =
+      "position:absolute;inset:0;width:100%;height:100%;display:block;user-select:none;-webkit-user-select:none;outline:none;";
     this.canvas.tabIndex = 0;
     host.appendChild(this.canvas);
     const c2d = this.canvas.getContext("2d");
@@ -182,7 +183,8 @@ let chartAccessibilitySequence = 0;
 
 const KEYBOARD_INSTRUCTIONS =
   "Keyboard controls: Left and Right Arrow pan, Plus and Minus zoom, F fits all data, "
-  + "Escape cancels drawing, and Delete or Backspace removes the selected drawing.";
+  + "Escape cancels drawing or selection, Delete or Backspace removes the selected item, "
+  + "and Up or Down Arrow adjusts a selected trading line by one tick.";
 
 function createVisuallyHiddenElement(): HTMLDivElement {
   const el = document.createElement("div");
@@ -196,6 +198,8 @@ function createVisuallyHiddenElement(): HTMLDivElement {
     "clip:rect(0,0,0,0)",
     "white-space:nowrap",
     "border:0",
+    "user-select:none",
+    "-webkit-user-select:none",
   ].join(";");
   return el;
 }

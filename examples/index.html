@@ -51,7 +51,7 @@
         "mainSeriesProperties.candleStyle.wickUpColor": "#66d89e",
         "mainSeriesProperties.candleStyle.wickDownColor": "#e57359",
       },
-      // TV-compatible: which intervals sit inline in the header.
+      // TV-compatible: leading intervals in the header row.
       favorites: { intervals: ["1S", "5S", "1", "5", "15"] },
       // Raze-charts chrome configuration — everything is composable: sidebar
       // items (incl. custom buttons), chart types, indicator presets, and
@@ -92,10 +92,15 @@
 
     w.onChartReady(() => {
       const chart = w.activeChart();
-      // A horizontal "limit line" the way the app draws them.
-      chart.createShape({ time: Math.floor(Date.now() / 1000), price: 11200 }, {
-        shape: "horizontal_line", lock: false, text: "Limit Buy ↕",
-        overrides: { linecolor: "#66d89e", linestyle: 1, linewidth: 1, textcolor: "#66d89e", showPrice: true },
+      // Drag any linked line; use × to cancel the complete bracket.
+      chart.createBracketOrder({
+        side: "buy",
+        entryPrice: 6500,
+        stopLossPrice: 6200,
+        takeProfitPrice: 7100,
+        quantity: 2,
+        currency: "USD",
+        onChange: (bracket, event) => console.log("bracket changed", bracket, event),
       });
       window.__razeChart = w;
     });

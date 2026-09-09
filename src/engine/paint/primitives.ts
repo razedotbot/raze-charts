@@ -53,7 +53,9 @@ export function drawAxisTag(
 
 export function timeAxisTopOf(v: FinanceView): number {
   const last = v.subPanes[v.subPanes.length - 1];
-  return last ? last.top + last.h : v.plotT + v.plotH;
+  if (last) return last.top + last.h;
+  if (v.volumePane) return v.volumePane.top + v.volumePane.h;
+  return v.plotT + v.plotH;
 }
 
 export function timeAxisHeight(): number {

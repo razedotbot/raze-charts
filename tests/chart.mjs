@@ -1,4 +1,4 @@
-import { defineChart, defineMarkPlugin, customMark, line, bar, area, point, ruleY, pie, radar, heatmap, compileChart, renderChartSvg, scaleLinear, scaleBand, scaleLog, scaleTime, hitTestCompiled } from "../dist/chart.esm.js";
+import { defineChart, defineMarkPlugin, customMark, line, bar, area, point, ruleY, ruleX, pie, radar, heatmap, compileChart, renderChartSvg, scaleLinear, scaleBand, scaleLog, scaleTime, hitTestCompiled, viewportFromPreset, presetZoomsIn } from "../dist/chart.esm.js";
 
 const assert = (cond, msg) => {
   if (!cond) { console.error("✗ " + msg); process.exitCode = 1; }
@@ -37,6 +37,8 @@ assert(compiled.legend.some((l) => l.name === "Sales"), "legend includes series 
 const svg = renderChartSvg(def, { width: 640, height: 320 });
 assert(svg.startsWith("<svg"), "renderChartSvg returns svg");
 assert(svg.includes("aria-label=\"Sales\""), "svg has aria-label");
+assert(svg.includes("user-select:none"), "svg axis labels are not selectable while panning");
+assert(svg.includes('data-role="plot"'), "svg plot geometry is grouped for live pan");
 assert(svg.includes("<rect"), "svg contains bars");
 assert(svg.includes("<path"), "svg contains series paths");
 assert(svg.includes("#181615"), "dark pane matches the trading widget");
@@ -297,12 +299,64 @@ for (const invalidBudget of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
 let unsupportedChannelError;
 try {
   compileChart(defineChart({
-    marks: [{ kind: "area", data: rows, x: "month", y: "value", y0: "other" }],
+    marks: [{ kind: "line", data: rows, x: "month", y: "value", y0: "other" }],
   }), { width: 320, height: 180 });
 } catch (error) {
   unsupportedChannelError = error;
 }
 assert(unsupportedChannelError?.code === "E_MARK_CHANNEL", "unsupported mark channels fail explicitly instead of rendering misleading geometry");
+
+const ranged = compileChart(defineChart({
+  marks: [area(rows, { x: "month", y: "value", y0: "other" })],
+}), { width: 400, height: 200 });
+assert(ranged.nodes.some((n) => n.role === "ranged-area"), "area y0 emits a ranged fill");
+
+const windowed = compileChart(defineChart({
+  marks: [line(Array.from({ length: 10 }, (_, x) => ({ x, y: x + 1 })), { x: "x", y: "y" })],
+  viewport: { x: [2, 4] },
+}), { width: 320, height: 180 });
+assert(windowed.diagnostics.sourceRows === 10, "viewport diagnostics keep the source row count");
+assert(windowed.diagnostics.visibleRows < 10 && windowed.diagnostics.visibleRows >= 3, "viewport windows rows before geometry");
+assert(windowed.xScale.kind === "linear" && windowed.xScale.domain[0] === 2 && windowed.xScale.domain[1] === 4, "viewport becomes the quantitative x domain");
+
+const domainOnly = compileChart(defineChart({
+  marks: [line(Array.from({ length: 10 }, (_, x) => ({ x, y: x + 1 })), { x: "x", y: "y" })],
+  scales: { x: { type: "linear", domain: [2, 4] } },
+}), { width: 320, height: 180 });
+assert(domainOnly.diagnostics.sourceRows === 10 && domainOnly.diagnostics.visibleRows === 10, "scale domain does not window source rows");
+assert(windowed.diagnostics.visibleRows < domainOnly.diagnostics.visibleRows, "viewport windows rows before geometry unlike domain-only");
+
+const denseWindow = Array.from({ length: 400 }, (_, x) => ({ x, y: Math.sin(x / 8) }));
+const windowDecimated = compileChart(defineChart({
+  marks: [line(denseWindow, { x: "x", y: "y" })],
+  viewport: { x: [10, 40] },
+  performance: { maxRenderedPoints: 16 },
+}), { width: 80, height: 80 });
+assert(windowDecimated.diagnostics.sourceRows === 400, "windowed decimation still reports the source row count");
+assert(windowDecimated.diagnostics.visibleRows < 80, "decimation runs against the windowed rows, not the full series");
+const windowedLinePoints = windowDecimated.nodes
+  .filter((node) => node.type === "line")
+  .reduce((total, node) => total + (node.points?.length ?? 0), 0);
+assert(windowedLinePoints <= 16, "maxRenderedPoints is measured after viewport windowing");
+
+const stepped = compileChart(defineChart({
+  marks: [line(rows, { x: "month", y: "value", curve: "step" })],
+}), { width: 400, height: 200 });
+assert(stepped.nodes.some((n) => n.type === "line" && n.curve === "step"), "line curve reaches the scene");
+
+const vertical = compileChart(defineChart({
+  marks: [
+    line(rows, { x: "month", y: "value" }),
+    ruleX(["Feb"], { name: "Event" }),
+  ],
+}), { width: 400, height: 200 });
+assert(vertical.nodes.some((n) => n.type === "rule" && n.x === n.x2), "ruleX emits a vertical reference");
+
+const formatted = compileChart(defineChart({
+  marks: [line(rows, { x: "month", y: "value" })],
+  scales: { y: { type: "linear", tickFormat: (value) => `$${value}` } },
+}), { width: 400, height: 200 });
+assert(formatted.yTicks.some((tick) => String(tick.label).startsWith("$")), "scale tickFormat labels the axis");
 
 let reservedKindError;
 try {
@@ -344,5 +398,26 @@ try {
   invalidSizeError = error;
 }
 assert(invalidSizeError?.code === "E_CHART_SIZE", "invalid runtime dimensions fail with a stable actionable error");
+
+{
+  const t0 = Date.UTC(2026, 7, 1);
+  const t1 = t0 + 47 * 86_400_000;
+  const day = viewportFromPreset("1D", [t0, t1]);
+  assert(Math.abs(Number(day.x[1]) - Number(day.x[0]) - 86_400_000) < 1, "1D preset is one day anchored to the series end");
+  assert(Number(day.x[1]) === t1, "range presets ignore wall-clock now outside the series");
+  const month = viewportFromPreset("1M", [t0, t1]);
+  assert(Number(month.x[0]) > t0 && Number(month.x[1]) === t1, "1M preset zooms into a 48-day series");
+  const all = viewportFromPreset("ALL", [t0, t1]);
+  assert(Number(all.x[0]) === t0 && Number(all.x[1]) === t1, "ALL preset restores the full extent");
+  assert(presetZoomsIn("1D", [t0, t1]) && presetZoomsIn("1W", [t0, t1]) && presetZoomsIn("1M", [t0, t1]), "day/week/month zoom a 48-day series");
+  assert(!presetZoomsIn("3M", [t0, t1]) && !presetZoomsIn("YTD", [t0, t1]), "3M and YTD are no-ops on a 48-day window");
+  const s0 = t0 / 1000;
+  const s1 = t1 / 1000;
+  const secDay = viewportFromPreset("1D", [s0, s1]);
+  assert(Math.abs(Number(secDay.x[1]) - Number(secDay.x[0]) - 86_400) < 1, "unix-second domains use second units");
+  const year = Date.UTC(2025, 8, 9);
+  const yearEnd = year + 364 * 86_400_000;
+  assert(presetZoomsIn("3M", [year, yearEnd]) && presetZoomsIn("YTD", [year, yearEnd]), "3M and YTD zoom a twelve-month series");
+}
 
 console.log(process.exitCode ? "\nCHART: FAIL" : "\nCHART: PASS");

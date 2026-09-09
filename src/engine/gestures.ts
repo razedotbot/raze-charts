@@ -21,7 +21,7 @@ import {
   priceForY,
 } from "./plotScale";
 import { hitComplexShape, neededPoints, pointXY } from "./paint/shapes";
-import type { Crosshair, DraftShape, FinanceView, MarkHit, ShapeHit } from "./paint/view";
+import type { Crosshair, DraftShape, FinanceView, MarkHit, ShapeHit, TradingHit } from "./paint/view";
 import { resolutionToMs } from "../util/resolution";
 import { TimeIndex } from "../data/TimeIndex";
 
@@ -30,6 +30,7 @@ export interface GestureHost {
   readonly context: ChartContext;
   readonly engine: ChartEngine;
   readonly shapes: ShapeStore;
+  readonly trading: import("../core/TradingStore").TradingStore;
   readonly data: DataManager;
   plotL: number;
   plotT: number;
@@ -37,13 +38,17 @@ export interface GestureHost {
   plotH: number;
   plotScale(): PlotScale;
   subPanes: SubPaneGeom[];
+  volumePane: { top: number; h: number } | null;
   priceMin: number;
   priceMax: number;
   crosshair: Crosshair;
   hoverMark: MarkHit["mark"] | null;
   hoverShapeId: string | null;
+  hoverTradingLineId: string | null;
+  hoverTradingHit: TradingHit["hit"] | null;
   markScreen: MarkHit[];
   shapeScreen: ShapeHit[];
+  tradingScreen: TradingHit[];
   draft: DraftShape | null;
   lastPointerType: string;
   selectedShapeId: string | null;
@@ -57,6 +62,7 @@ type DragState =
   | null
   | { kind: "pan"; startX: number; startFrom: number; startTo: number }
   | { kind: "shape"; id: string; startY: number; pointIndex: number }
+  | { kind: "trading"; id: string }
   | { kind: "priceScale"; startY: number; startMin: number; startMax: number }
   | { kind: "timeScale"; startX: number; startFrom: number; startTo: number };
 
@@ -73,6 +79,8 @@ export class GestureController {
   private longPressTimer: number | null = null;
   private longPressStart = { x: 0, y: 0 };
   private touchCrosshair = false;
+  /** True while focus came from a pointer so the UA/keyboard ring stays off. */
+  private pointerFocus = false;
 
   private boundMove: (e: PointerEvent) => void;
   private boundDown: (e: PointerEvent) => void;
@@ -84,6 +92,7 @@ export class GestureController {
   private boundKey: (e: KeyboardEvent) => void;
   private boundFocus: () => void;
   private boundBlur: () => void;
+  private boundSelectStart: (e: Event) => void;
 
   constructor(private readonly host: GestureHost) {
     this.boundMove = (e) => this.onPointerMove(e);
@@ -96,11 +105,13 @@ export class GestureController {
     this.boundKey = (e) => this.onKeyDown(e);
     this.boundFocus = () => this.onFocus();
     this.boundBlur = () => this.onBlur();
+    this.boundSelectStart = (e) => e.preventDefault();
   }
 
   attach(): void {
     const canvas = this.host.canvas;
     canvas.style.touchAction = "none";
+    canvas.style.outline = "none";
     canvas.addEventListener("pointermove", this.boundMove);
     canvas.addEventListener("pointerdown", this.boundDown);
     window.addEventListener("pointerup", this.boundUp);
@@ -111,6 +122,7 @@ export class GestureController {
     canvas.addEventListener("keydown", this.boundKey);
     canvas.addEventListener("focus", this.boundFocus);
     canvas.addEventListener("blur", this.boundBlur);
+    canvas.addEventListener("selectstart", this.boundSelectStart);
     canvas.tabIndex = 0;
   }
 
@@ -127,18 +139,15 @@ export class GestureController {
     canvas.removeEventListener("keydown", this.boundKey);
     canvas.removeEventListener("focus", this.boundFocus);
     canvas.removeEventListener("blur", this.boundBlur);
+    canvas.removeEventListener("selectstart", this.boundSelectStart);
     this.onBlur();
   }
 
   private onFocus(): void {
-    const canvas = this.host.canvas;
-    let focusVisible = true;
-    try {
-      focusVisible = canvas.matches(":focus-visible");
-    } catch {
-      // Older engines do not support :focus-visible; showing the ring is safer.
+    if (this.pointerFocus) {
+      this.hideFocusRing();
+      return;
     }
-    if (!focusVisible) return;
     this.showFocusRing();
   }
 
@@ -148,10 +157,16 @@ export class GestureController {
     canvas.style.outlineOffset = "-2px";
   }
 
-  private onBlur(): void {
+  private hideFocusRing(): void {
     const canvas = this.host.canvas;
-    canvas.style.removeProperty("outline");
+    // Keep outline:none so the UA orange :focus-visible ring cannot return.
+    canvas.style.outline = "none";
     canvas.style.removeProperty("outline-offset");
+  }
+
+  private onBlur(): void {
+    this.pointerFocus = false;
+    this.hideFocusRing();
   }
 
   pointerXY(e: MouseEvent): { x: number; y: number } {
@@ -170,16 +185,37 @@ export class GestureController {
     const s = this.host.plotScale();
     const bars = this.host.context.bars;
     let unixTime = 0;
+    let idx = 0;
     if (bars.length) {
-      const idx = indexForX(s, x);
+      idx = indexForX(s, x);
       const timeIndex = new TimeIndex(bars, resolutionToMs(this.host.context.resolution));
       unixTime = (timeIndex.timeAt(idx) ?? 0) / 1000;
     }
-    return { unixTime, price: priceForY(s, y) };
+    let price = priceForY(s, y);
+    if (this.host.context.magnet && bars.length) {
+      const bar = bars[Math.max(0, Math.min(bars.length - 1, Math.round(idx)))];
+      if (bar) {
+        let best = bar.close;
+        let bestD = Math.abs(price - bar.close);
+        for (const candidate of [bar.open, bar.high, bar.low]) {
+          const d = Math.abs(price - candidate);
+          if (d < bestD) {
+            bestD = d;
+            best = candidate;
+          }
+        }
+        price = best;
+      }
+    }
+    return { unixTime, price };
   }
 
   private contentBottom(): number {
-    return timeAxisTop(this.host.plotT, this.host.plotH, this.host.subPanes);
+    return timeAxisTop(this.host.plotT, this.host.plotH, this.host.subPanes, this.host.volumePane);
+  }
+
+  private emitViewport(): void {
+    this.host.context.viewportChanged.fire(this.host.data.visibleUnixRange());
   }
 
   private hitTestAt(x: number, y: number, tolMul: number): void {
@@ -188,8 +224,17 @@ export class GestureController {
     const inPriceAxis = x > h.plotL + h.plotW && y < h.plotT + h.plotH;
     const inTimeAxis = y >= contentBottom && x < h.plotL + h.plotW;
     h.hoverShapeId = null;
+    h.hoverTradingLineId = null;
+    h.hoverTradingHit = null;
     h.hoverMark = null;
     if (inPriceAxis || inTimeAxis || y > h.plotT + h.plotH) return;
+    for (const hit of h.tradingScreen) {
+      if (x >= hit.x1 && x <= hit.x2 && Math.abs(hit.y - y) <= 7 * tolMul) {
+        h.hoverTradingLineId = hit.line.id;
+        h.hoverTradingHit = hit.hit;
+        break;
+      }
+    }
     const view = h.financeView();
     for (const m of h.markScreen) {
       const dx = x - m.x;
@@ -200,7 +245,7 @@ export class GestureController {
         break;
       }
     }
-    if (!h.hoverMark) {
+    if (!h.hoverMark && !h.hoverTradingLineId) {
       for (const { shape, y: sy } of h.shapeScreen) {
         if (shape.lock || shape.disableSelection) continue;
         if (shape.shape === "horizontal_line" && Math.abs(sy - y) <= 4 * tolMul && x <= h.plotL + h.plotW) {
@@ -218,6 +263,7 @@ export class GestureController {
   }
 
   private onPointerMove(e: PointerEvent): void {
+    if (this.dragging || this.pinch) e.preventDefault();
     const h = this.host;
     const { x, y } = this.pointerXY(e);
     const contentBottom = this.contentBottom();
@@ -250,6 +296,8 @@ export class GestureController {
         y,
         active: x >= h.plotL && x <= h.plotL + h.plotW && y >= h.plotT && y <= contentBottom,
       };
+      const tp = this.timePriceAt(x, y);
+      h.context.crosshairMoved.fire({ unixTime: tp.unixTime, price: tp.price, active: h.crosshair.active });
     }
 
     const s = h.plotScale();
@@ -262,6 +310,7 @@ export class GestureController {
         to: this.dragging.startTo - dxBars,
       };
       void h.data.maybeLoadMoreHistory();
+      this.emitViewport();
     } else if (this.dragging?.kind === "priceScale") {
       const dy = y - this.dragging.startY;
       const factor = Math.min(20, Math.max(0.05, 1 + dy / (h.plotH * 0.5)));
@@ -281,6 +330,7 @@ export class GestureController {
       const newSpan = Math.min(maxSpan, Math.max(minSpan, span * factor));
       h.context.visibleRange = { from: this.dragging.startTo - newSpan, to: this.dragging.startTo };
       void h.data.maybeLoadMoreHistory();
+      this.emitViewport();
     } else if (this.dragging?.kind === "shape") {
       const sh = h.shapes.get(this.dragging.id as never);
       if (sh) {
@@ -295,6 +345,9 @@ export class GestureController {
           }
         }
       }
+    } else if (this.dragging?.kind === "trading") {
+      const line = h.trading.get(this.dragging.id);
+      if (line?.editable) h.trading.move(line.id, this.timePriceAt(x, y).price, "moving", "drag");
     } else if (e.pointerType === "mouse") {
       const inPriceAxis = x > h.plotL + h.plotW && y < h.plotT + h.plotH;
       const inTimeAxis = y >= contentBottom && x < h.plotL + h.plotW;
@@ -302,10 +355,18 @@ export class GestureController {
       const drawing = h.context.drawingTool !== "cursor";
       const hoverShape = h.hoverShapeId ? h.shapes.get(h.hoverShapeId as never) : undefined;
       const shapeCursor = hoverShape?.shape === "horizontal_line" ? "ns-resize" : "move";
+      const tradingLine = h.hoverTradingLineId ? h.trading.get(h.hoverTradingLineId) : undefined;
+      h.canvas.title = tradingLine
+        ? h.hoverTradingHit === "cancel" ? tradingLine.cancelTooltip : `${tradingLine.tooltip}. ${tradingLine.modifyTooltip}`
+        : "";
       h.canvas.style.cursor = inPriceAxis
         ? "ns-resize"
         : inTimeAxis
           ? "ew-resize"
+          : h.hoverTradingHit === "cancel"
+            ? "pointer"
+            : tradingLine
+              ? tradingLine.editable ? "ns-resize" : "pointer"
           : h.hoverShapeId
             ? shapeCursor
             : drawing
@@ -322,12 +383,14 @@ export class GestureController {
     const h = this.host;
     const { x, y } = this.pointerXY(e);
     h.lastPointerType = e.pointerType || "mouse";
+    this.pointerFocus = true;
     h.canvas.focus({ preventScroll: true });
     // Pointer focus should not masquerade as keyboard focus. A subsequent key
     // press restores the guaranteed high-contrast ring below.
-    this.onBlur();
+    this.hideFocusRing();
     this.activePointers.set(e.pointerId, { x, y, type: e.pointerType });
     try { h.canvas.setPointerCapture?.(e.pointerId); } catch { /* detached/test env */ }
+    window.getSelection?.()?.removeAllRanges();
 
     if (this.activePointers.size === 2) {
       this.clearLongPress();
@@ -337,13 +400,13 @@ export class GestureController {
       return;
     }
 
+    this.hitTestAt(x, y, e.pointerType === "mouse" ? 1 : 2);
     if (e.pointerType !== "mouse") {
-      this.hitTestAt(x, y, 2);
       if (h.crosshair.active && !this.touchCrosshair) {
         h.crosshair.active = false;
         h.requestPaint();
       }
-      if (h.context.drawingTool === "cursor" && !h.hoverShapeId) {
+      if (h.context.drawingTool === "cursor" && !h.hoverShapeId && !h.hoverTradingLineId) {
         this.armLongPress(x, y);
       }
     }
@@ -430,6 +493,21 @@ export class GestureController {
       return;
     }
 
+    if (h.hoverTradingLineId) {
+      const line = h.trading.get(h.hoverTradingLineId);
+      if (h.hoverTradingHit === "cancel") {
+        h.trading.cancel(h.hoverTradingLineId);
+        h.engine.announce(`${line?.text ?? "Trading line"} cancelled.`);
+        return;
+      }
+      h.context.selectedShapeId = null;
+      h.context.selectedTradingLineId = h.hoverTradingLineId;
+      if (line?.editable) this.dragging = { kind: "trading", id: line.id };
+      else h.trading.modify(h.hoverTradingLineId);
+      h.requestPaint();
+      return;
+    }
+
     if (h.hoverShapeId) {
       const sh = h.shapes.get(h.hoverShapeId as never);
       let pointIndex = 0;
@@ -445,6 +523,7 @@ export class GestureController {
         }
       }
       h.context.selectedShapeId = h.hoverShapeId;
+      h.context.selectedTradingLineId = null;
       this.dragging = { kind: "shape", id: h.hoverShapeId, startY: y, pointIndex };
       return;
     }
@@ -468,6 +547,7 @@ export class GestureController {
       return;
     }
     h.context.selectedShapeId = null;
+    h.context.selectedTradingLineId = null;
     if (x <= h.plotL + h.plotW && y <= h.plotT + h.plotH) {
       this.dragging = {
         kind: "pan",
@@ -483,12 +563,22 @@ export class GestureController {
     if (!h.draft) return;
     const { tool, points } = h.draft;
     h.draft = null;
+    const stay = h.context.stayInDrawingMode;
+    const resetTool = (): void => {
+      if (stay) return;
+      h.context.drawingTool = "cursor";
+      h.onToolDone?.("cursor");
+    };
+    if (tool === "measure") {
+      resetTool();
+      h.requestPaint();
+      return;
+    }
     let text = "";
     if (tool === "text") {
       text = window.prompt("Label text", "Note") ?? "";
       if (!text.trim()) {
-        h.onToolDone?.("cursor");
-        h.context.drawingTool = "cursor";
+        resetTool();
         h.requestPaint();
         return;
       }
@@ -496,7 +586,7 @@ export class GestureController {
     const defaults: Record<string, unknown> = {
       linecolor: tool === "fib_retracement" ? "#f5a623" : "#66d89e",
       linewidth: 1,
-      linestyle: tool === "horizontal_line" ? 2 : 0,
+      linestyle: tool === "horizontal_line" || tool === "vertical_line" ? 2 : 0,
       showPrice: tool === "horizontal_line",
     };
     void h.shapes.createPoints(points, {
@@ -507,8 +597,7 @@ export class GestureController {
     }).then((id) => {
       h.context.selectedShapeId = id as unknown as string;
     });
-    h.context.drawingTool = "cursor";
-    h.onToolDone?.("cursor");
+    resetTool();
     h.requestPaint();
   }
 
@@ -523,6 +612,9 @@ export class GestureController {
     if (this.activePointers.size === 0) {
       if (this.dragging?.kind === "shape") {
         h.context.drawingEvent.fire(this.dragging.id, "points_changed");
+      } else if (this.dragging?.kind === "trading") {
+        const line = h.trading.get(this.dragging.id);
+        if (line) h.trading.move(line.id, line.price, "moved", "drag");
       }
       this.dragging = null;
       this.touchCrosshair = false;
@@ -544,6 +636,10 @@ export class GestureController {
     const h = this.host;
     h.crosshair.active = false;
     h.hoverMark = null;
+    h.hoverTradingLineId = null;
+    h.hoverTradingHit = null;
+    h.canvas.title = "";
+    h.context.crosshairMoved.fire({ unixTime: 0, price: 0, active: false });
     if (!this.dragging) h.canvas.style.cursor = "default";
     h.requestPaint();
   }
@@ -564,6 +660,7 @@ export class GestureController {
       to: pivot + (1 - leftFrac) * newSpan,
     };
     void h.data.maybeLoadMoreHistory();
+    this.emitViewport();
     h.requestPaint();
   }
 
@@ -571,6 +668,12 @@ export class GestureController {
     const h = this.host;
     const { x, y } = this.pointerXY(e);
     const inPriceAxis = x > h.plotL + h.plotW && y < h.plotT + h.plotH;
+    this.hitTestAt(x, y, 1);
+    if (h.hoverTradingLineId && h.hoverTradingHit === "body") {
+      h.trading.modify(h.hoverTradingLineId);
+      e.preventDefault();
+      return;
+    }
     h.context.priceRange = null;
     h.context.autoScalePrice = true;
     if (!inPriceAxis) h.fitContent();
@@ -588,6 +691,7 @@ export class GestureController {
       h.draft = null;
       h.context.drawingTool = "cursor";
       h.context.selectedShapeId = null;
+      h.context.selectedTradingLineId = null;
       h.onToolDone?.("cursor");
       h.requestPaint();
       h.engine.announce("Drawing cancelled.");
@@ -595,10 +699,29 @@ export class GestureController {
       return;
     }
     if (e.key === "Delete" || e.key === "Backspace") {
+      if (h.context.selectedTradingLineId) {
+        h.trading.cancel(h.context.selectedTradingLineId);
+        h.engine.announce("Selected trading order cancelled.");
+        e.preventDefault();
+        return;
+      }
       if (h.context.selectedShapeId) {
         h.shapes.remove(h.context.selectedShapeId as never);
         h.requestPaint();
         h.engine.announce("Selected drawing removed.");
+        e.preventDefault();
+      }
+      return;
+    }
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && h.context.selectedTradingLineId) {
+      const line = h.trading.get(h.context.selectedTradingLineId);
+      if (line?.editable) {
+        const info = h.context.symbolInfo;
+        const tick = (info?.minmov ?? 1) / (info?.pricescale ?? 100);
+        const direction = e.key === "ArrowUp" ? 1 : -1;
+        const price = line.price + direction * tick * (e.shiftKey ? 10 : 1);
+        h.trading.move(line.id, price, "moved", "keyboard");
+        h.engine.announce(`${line.text} moved to ${h.context.formatPrice(price, info?.pricescale ?? 100)}.`);
         e.preventDefault();
       }
       return;
@@ -612,6 +735,7 @@ export class GestureController {
     if (e.key === "+" || e.key === "=") {
       const newSpan = Math.max(h.plotW / MAX_BAR_SPACING, span / 1.15);
       h.context.visibleRange = { from: to - newSpan, to };
+      this.emitViewport();
       h.requestPaint();
       h.engine.announce("Zoomed in.");
       e.preventDefault();
@@ -621,6 +745,7 @@ export class GestureController {
       const newSpan = Math.min(h.plotW / MIN_BAR_SPACING, span * 1.15);
       h.context.visibleRange = { from: to - newSpan, to };
       void h.data.maybeLoadMoreHistory();
+      this.emitViewport();
       h.requestPaint();
       h.engine.announce("Zoomed out.");
       e.preventDefault();
@@ -631,6 +756,7 @@ export class GestureController {
       const shift = span * 0.08 * dir;
       h.context.visibleRange = { from: from + shift, to: to + shift };
       void h.data.maybeLoadMoreHistory();
+      this.emitViewport();
       h.requestPaint();
       h.engine.announce(dir < 0 ? "Panned left." : "Panned right.");
       e.preventDefault();

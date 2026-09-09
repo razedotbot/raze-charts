@@ -22,7 +22,10 @@ export const DEFAULT_INDICATOR_PRESETS: IndicatorPreset[] = [
   { label: "EMA 21", name: "EMA", length: 21, color: "#26a69a" },
   { label: "SMA 20", name: "SMA", length: 20, color: "#2962ff" },
   { label: "SMA 50", name: "SMA", length: 50, color: "#e040fb" },
-  { label: "RSI 14", name: "RSI", length: 14, color: "#7E57C2" },
+    { label: "RSI 14", name: "RSI", length: 14, color: "#7E57C2" },
+  { label: "VWAP", name: "VWAP", color: "#e040fb" },
+  { label: "Bollinger 20", name: "Bollinger Bands", length: 20, color: "#2962ff" },
+  { label: "MACD", name: "MACD", length: 26, color: "#2962ff" },
 ];
 
 /** Resolve the panel rows: explicit `indicator_presets`, or the defaults plus

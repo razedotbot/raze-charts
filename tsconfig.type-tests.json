@@ -4,6 +4,7 @@
     "declaration": false,
     "emitDeclarationOnly": false,
     "noEmit": true,
+    "rootDir": ".",
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },

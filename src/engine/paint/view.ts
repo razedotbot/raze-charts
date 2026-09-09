@@ -4,6 +4,7 @@
 import type { Bar, Mark, ShapePoint } from "../../types/charting_library";
 import type { ChartContext, DrawingTool } from "../../core/context";
 import type { ShapeStore, StoredShape } from "../../core/ShapeStore";
+import type { StoredTradingLine, TradingStore } from "../../core/TradingStore";
 import type { StudyStore } from "../../studies/StudyStore";
 import type { SubPaneGeom } from "../layout";
 import type { PlotScale } from "../plotScale";
@@ -27,6 +28,14 @@ export interface ShapeHit {
   hit: "body" | "p0" | "p1";
 }
 
+export interface TradingHit {
+  line: StoredTradingLine;
+  y: number;
+  x1: number;
+  x2: number;
+  hit: "body" | "cancel";
+}
+
 export interface DraftShape {
   tool: DrawingTool;
   points: ShapePoint[];
@@ -38,14 +47,18 @@ export interface FinanceView extends PlotScale {
   cssHeight: number;
   priceAxisW: number;
   subPanes: SubPaneGeom[];
+  volumePane: { top: number; h: number } | null;
   seriesBars: Bar[];
   studies: StudyStore;
   shapes: ShapeStore;
+  trading: TradingStore;
   markScreen: MarkHit[];
   shapeScreen: ShapeHit[];
+  tradingScreen: TradingHit[];
   crosshair: Crosshair;
   hoverMark: Mark | null;
   draft: DraftShape | null;
   selectedShapeId: string | null;
+  selectedTradingLineId: string | null;
   fontFamily: string;
 }

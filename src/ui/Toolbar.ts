@@ -15,6 +15,8 @@ export class Toolbar {
   private removeKeyboardNavigation: () => void;
   /** Anchor where the interval selector mounts (P3), kept left of custom buttons. */
   readonly intervalSlot: HTMLDivElement;
+  readonly searchSlot: HTMLDivElement;
+  readonly rangeSlot: HTMLDivElement;
 
   constructor(private readonly context: ChartContext) {
     this.el = document.createElement("div");
@@ -57,8 +59,12 @@ export class Toolbar {
     this.intervalSlot.style.flex = "0 0 auto";
     this.intervalSlot.setAttribute("role", "group");
     this.intervalSlot.setAttribute("aria-label", "Chart interval");
+    this.searchSlot = mkSlot("flex-start");
+    this.searchSlot.style.flex = "0 0 auto";
+    this.rangeSlot = mkSlot("flex-start");
+    this.rangeSlot.style.flex = "0 0 auto";
 
-    this.leftSlot.appendChild(this.intervalSlot);
+    this.leftSlot.append(this.searchSlot, this.intervalSlot, this.rangeSlot);
     this.el.appendChild(this.leftSlot);
     this.el.appendChild(this.rightSlot);
     this.removeKeyboardNavigation = enableToolbarKeyboardNavigation(this.el, "horizontal");

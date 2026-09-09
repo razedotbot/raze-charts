@@ -35,6 +35,21 @@ test.describe("widget accessibility", () => {
     await expect(fiveMinutes).toHaveAttribute("aria-current", "true");
     await expect(oneMinute).not.toHaveAttribute("aria-current", "true");
 
+    await expect(toolbar.getByRole("group", { name: "Visible time range" })).toBeVisible();
+    const rangeDay = toolbar.getByRole("button", { name: "Range 1D" });
+    await expect(rangeDay).toBeVisible();
+    await rangeDay.click();
+    await expect(rangeDay).toHaveAttribute("aria-pressed", "true");
+    await expect(toolbar.getByRole("button", { name: "Go to date" })).toBeVisible();
+
+    const vertical = sidebar.getByRole("button", { name: "Vertical line" });
+    await vertical.click();
+    await expect(vertical).toHaveAttribute("aria-pressed", "true");
+    await expect(sidebar.getByRole("button", { name: "Objects tree" })).toBeVisible();
+
+    await expect(toolbar.getByRole("button", { name: "Interval 5s" })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "More intervals" })).toHaveCount(0);
+
     const percent = scale.getByRole("button", { name: "Percent scale" });
     const logarithmic = scale.getByRole("button", { name: "Logarithmic scale" });
     await logarithmic.click();
@@ -121,5 +136,70 @@ test.describe("widget accessibility", () => {
       spinnerHidden: "true",
     });
     expect(state.after).toEqual({ busy: "false", label: "Chart data loaded" });
+  });
+
+  test("clicking the plot does not show a focus ring", async ({ page }) => {
+    await openWidget(page);
+    const canvas = page.locator("canvas.raze-chart-canvas");
+    await canvas.click();
+    await expect(canvas).toBeFocused();
+    const pointer = await canvas.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { inline: (el as HTMLElement).style.outline, computed: `${style.outlineStyle} ${style.outlineWidth}` };
+    });
+    expect(pointer.inline === "none" || pointer.inline === "").toBeTruthy();
+    expect(pointer.computed.startsWith("none") || pointer.computed.endsWith("0px")).toBeTruthy();
+
+    await canvas.press("ArrowRight");
+    const keyboard = await canvas.evaluate((el) => (el as HTMLElement).style.outline);
+    expect(keyboard).toMatch(/solid/);
+  });
+
+  test("dragging the plot with the cursor does not select timestamps", async ({ page }) => {
+    await openWidget(page);
+    const canvas = page.locator("canvas.raze-chart-canvas");
+    const box = await canvas.boundingBox();
+    expect(box).toBeTruthy();
+    const startX = box!.x + box!.width * 0.55;
+    const endX = box!.x + box!.width * 0.28;
+    const y = box!.y + box!.height * 0.45;
+    await page.mouse.move(startX, y);
+    await page.mouse.down();
+    await page.mouse.move(endX, y, { steps: 12 });
+    const selected = await page.evaluate(() => document.getSelection()?.toString() ?? "");
+    await page.mouse.up();
+    expect(selected.trim()).toBe("");
+  });
+});
+
+test.describe("native dashboard range presets", () => {
+  test("revenue range presets zoom the chart", async ({ page }) => {
+    await page.goto("http://127.0.0.1:8799/examples/dashboard.html", {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForFunction(
+      () => (window as unknown as { __razeDashboardReady?: boolean }).__razeDashboardReady === true,
+      { timeout: 30_000 },
+    );
+    const line = page.locator("#line");
+    const oneDay = line.getByRole("button", { name: "Range 1D" });
+    const threeMonths = line.getByRole("button", { name: "Range 3M" });
+    const ytd = line.getByRole("button", { name: "Range YTD" });
+    const all = line.getByRole("button", { name: "Range ALL" });
+    await expect(oneDay).toBeVisible();
+    await expect(line.getByRole("button", { name: "Range 1W" })).toBeVisible();
+    await expect(line.getByRole("button", { name: "Range 1M" })).toBeVisible();
+    await expect(threeMonths).toBeVisible();
+    await expect(ytd).toBeVisible();
+    const before = await line.locator("svg").evaluate((svg) => svg.innerHTML);
+    await oneDay.click();
+    await expect(oneDay).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(async () => line.locator("svg").evaluate((svg) => svg.innerHTML)).not.toBe(before);
+    await threeMonths.click();
+    await expect(threeMonths).toHaveAttribute("aria-pressed", "true");
+    await ytd.click();
+    await expect(ytd).toHaveAttribute("aria-pressed", "true");
+    await all.click();
+    await expect(all).toHaveAttribute("aria-pressed", "true");
   });
 });

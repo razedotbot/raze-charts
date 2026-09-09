@@ -22,6 +22,7 @@ export const LEFT_SIDEBAR_W = 42;
 export interface LeftSidebarCallbacks {
   onTool(tool: DrawingTool): void;
   onIndicatorsClick(anchor: HTMLElement): void;
+  onObjectsTreeClick?(anchor: HTMLElement): void;
   onFit(): void;
   onScreenshot(): void;
   onFullscreen(): void;
@@ -37,6 +38,11 @@ const ICON = {
   fib: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 3.5H15M3 7H15M3 11H15M3 14.5H15" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M3 3.5V14.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
   rect: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3.5" y="4.5" width="11" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/></svg>`,
   text: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 4.5H14M9 4.5V14.5M6.5 14.5H11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+  vline: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2V16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 9H13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.35"/></svg>`,
+  ray: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 14L15 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="3" cy="14" r="1.4" fill="currentColor"/></svg>`,
+  extended: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 15L16 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="3 2"/></svg>`,
+  measure: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 14H15M3 14V11M15 14V11M9 14V6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+  objects: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 5H14M4 9H14M4 13H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
   indicators: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 12.5L6.5 8.5L9.5 11L15 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 14.5H15" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/></svg>`,
   fit: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 6V3.5H6M12 3.5H15V6M15 12V14.5H12M6 14.5H3V12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
   camera: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2.5" y="5" width="13" height="9.5" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="9" cy="9.5" r="2.4" stroke="currentColor" stroke-width="1.4"/><path d="M6.5 5L7.5 3.5H10.5L11.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
@@ -45,7 +51,8 @@ const ICON = {
 };
 
 const TOOL_IDS: ReadonlySet<string> = new Set([
-  "cursor", "trend_line", "horizontal_line", "fib_retracement", "rectangle", "text",
+  "cursor", "trend_line", "horizontal_line", "vertical_line", "ray", "extended_line", "measure",
+  "fib_retracement", "rectangle", "text",
 ]);
 
 /** Builtin item id → button title + icon. */
@@ -56,6 +63,11 @@ const BUILTIN: Record<string, { title: string; svg: string }> = {
   fib_retracement: { title: "Fib retracement", svg: ICON.fib },
   rectangle: { title: "Rectangle", svg: ICON.rect },
   text: { title: "Text", svg: ICON.text },
+  vertical_line: { title: "Vertical line", svg: ICON.vline },
+  ray: { title: "Ray", svg: ICON.ray },
+  extended_line: { title: "Extended line", svg: ICON.extended },
+  measure: { title: "Measure", svg: ICON.measure },
+  objects_tree: { title: "Objects tree", svg: ICON.objects },
   indicators: { title: "Indicators", svg: ICON.indicators },
   fit: { title: "Fit content (F)", svg: ICON.fit },
   screenshot: { title: "Screenshot", svg: ICON.camera },
@@ -65,9 +77,10 @@ const BUILTIN: Record<string, { title: string; svg: string }> = {
 
 /** The stock layout — what you get with no `raze.sidebar` option. */
 export const DEFAULT_SIDEBAR_ITEMS: SidebarItem[] = [
-  "cursor", "trend_line", "horizontal_line", "fib_retracement", "rectangle", "text",
+  "cursor", "trend_line", "horizontal_line", "vertical_line", "ray", "extended_line", "measure",
+  "fib_retracement", "rectangle", "text",
   "separator",
-  "indicators",
+  "indicators", "objects_tree",
   "separator",
   "fit", "screenshot", "fullscreen",
   "separator",
@@ -90,6 +103,26 @@ const ALL_CHART_STYLES: { id: ChartStyleId; title: string; svg: string }[] = [
     id: "heikin_ashi",
     title: "Heikin Ashi",
     svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="4" y="5" width="4" height="8" rx="0.5" fill="currentColor"/><rect x="10" y="3" width="4" height="10" rx="0.5" fill="currentColor" opacity="0.55"/></svg>`,
+  },
+  {
+    id: "bars",
+    title: "Bars",
+    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M5 3V15M3 6H5M5 12H7M13 3V15M11 5H13M13 11H15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+  },
+  {
+    id: "hollow_candles",
+    title: "Hollow candles",
+    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3.5" y="6" width="4" height="6" stroke="currentColor" stroke-width="1.3"/><rect x="10.5" y="5" width="4" height="7" fill="currentColor"/></svg>`,
+  },
+  {
+    id: "baseline",
+    title: "Baseline",
+    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 9H16M3 12L7 6L11 10L16 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  },
+  {
+    id: "columns",
+    title: "Columns",
+    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 14V8H7V14H4ZM11 14V4H14V14H11Z" fill="currentColor"/></svg>`,
   },
 ];
 
@@ -182,6 +215,13 @@ export class LeftSidebar {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
         this.cbs.onIndicatorsClick(b);
+      });
+    } else if (item === "objects_tree") {
+      b.setAttribute("aria-haspopup", "menu");
+      b.setAttribute("aria-expanded", "false");
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.cbs.onObjectsTreeClick?.(b);
       });
     } else if (item === "fit") {
       b.addEventListener("click", (e) => { e.stopPropagation(); this.cbs.onFit(); });

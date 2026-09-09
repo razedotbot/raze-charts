@@ -7,6 +7,7 @@ export {
   bar,
   point,
   ruleY,
+  ruleX,
   pie,
   radar,
   heatmap,
@@ -25,10 +26,13 @@ export type {
   BarMarkOptions,
   CartesianMarkOptions,
   ChartCompileErrorCode,
+  ChartCurve,
   ChartDefinition,
   ChartDiagnostics,
   ChartMarkBase,
   ChartMark,
+  ChartViewport,
+  ChartViewportX,
   BuiltinChartMark,
   PluginChartMark,
   ChartMarkPlugin,
@@ -60,6 +64,8 @@ export type {
   RadarChartMark,
   RuleYMarkOptions,
   RuleYChartMark,
+  RuleXMarkOptions,
+  RuleXChartMark,
   SceneNode,
   SceneNodeBase,
   ScenePoint,
@@ -95,4 +101,17 @@ export {
   hitTestCompiled,
   tooltipText,
 } from "./render";
-export type { MountChartOptions, MountHandle, SvgRenderOptions } from "./render";
+export type {
+  ChartPointerEvent,
+  MountChartOptions,
+  MountHandle,
+  MountInteraction,
+  SvgRenderOptions,
+} from "./render";
+export {
+  RANGE_PRESETS,
+  createViewportGroup,
+  presetZoomsIn,
+  viewportFromPreset,
+} from "./viewport";
+export type { RangePreset, ViewportGroup, ViewportHandle } from "./viewport";

@@ -28,8 +28,13 @@ export { ChartApi } from "./core/ChartApi";
 export type { ChartApiDeps } from "./core/ChartApi";
 export { ShapeStore } from "./core/ShapeStore";
 export type { ShapeKind, StoredShape } from "./core/ShapeStore";
+export { TradingStore } from "./core/TradingStore";
+export type { StoredTradingLine } from "./core/TradingStore";
 export { buildTheme, isLightColor, withAlpha } from "./core/theme";
-export { applySymbolInfo, buildFeatureSet } from "./core/context";
+export { CommandStack } from "./core/CommandStack";
+export type { Command } from "./core/CommandStack";
+export { resolveTimeframe, TIMEFRAME_PRESETS } from "./core/timeframe";
+export type { ResolvedTimeframe, TimeframePreset } from "./core/timeframe";
 export type {
   ChartContext,
   ChartStyle,
@@ -68,10 +73,11 @@ export type {
   FinanceView,
   MarkHit,
   ShapeHit,
+  TradingHit,
 } from "./engine/paint/view";
 
 // ── Studies (indicator math is pure and dependency-free) ────────────────────
-export { closesFromBars, ema, rsi, sma } from "./studies/calc";
+export { bollinger, closesFromBars, ema, macd, rsi, sma, stdev, vwap } from "./studies/calc";
 export { BUILTIN_STUDIES, StudyRegistry } from "./studies/registry";
 export { StudyStore } from "./studies/StudyStore";
 export type { StudyInstance, StudyKind, StudySpec } from "./studies/StudyStore";
@@ -83,6 +89,9 @@ export type { ChartStyleId, LeftSidebarCallbacks } from "./ui/LeftSidebar";
 export { DEFAULT_INDICATOR_PRESETS, IndicatorsMenu, resolveIndicatorPresets } from "./ui/IndicatorsMenu";
 export type { ResolvedIndicatorPreset } from "./ui/IndicatorsMenu";
 export { DEFAULT_INTERVAL_FAVORITES, IntervalSelector } from "./ui/IntervalSelector";
+export { TimeframeBar } from "./ui/TimeframeBar";
+export { SymbolSearch } from "./ui/SymbolSearch";
+export { ObjectsTree } from "./ui/ObjectsTree";
 export { ScaleBar } from "./ui/ScaleBar";
 export { LoadingScreen } from "./ui/LoadingScreen";
 export { closeContextMenu, showContextMenu } from "./ui/ContextMenu";

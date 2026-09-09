@@ -10,8 +10,10 @@ import type {
   Mark,
   PeriodParams,
   ResolutionString,
+  TimescaleMark,
 } from "../types/charting_library";
 import { applySymbolInfo, type ChartContext } from "../core/context";
+import { resolveTimeframe } from "../core/timeframe";
 import { resolutionToMs } from "../util/resolution";
 
 let guidCounter = 0;
@@ -21,6 +23,8 @@ const nextGuid = (): string => `raze_${++guidCounter}_${Math.floor(performance.n
 const INITIAL_BARS = 1500;
 /** How many bars to request on each left-scroll page. */
 const PAGE_BARS = 1000;
+/** Keep the opening candle density stable even when the feed returns few bars. */
+const INITIAL_VISIBLE_BARS = 120;
 
 interface DataTarget {
   symbol: string;
@@ -56,6 +60,7 @@ export class DataManager {
   /** Marks have their own revision so refresh/clear can supersede one another. */
   private marksRequestId = 0;
   private marksCancellation: (() => void) | null = null;
+  private timescaleCancellation: (() => void) | null = null;
 
   /** False once the datafeed reports `noData` for older history. */
   private hasMoreHistory = true;
@@ -106,6 +111,7 @@ export class DataManager {
     this.pendingCancellations.clear();
     for (const cancel of pending) cancel();
     this.marksCancellation = null;
+    this.timescaleCancellation = null;
   }
 
   private beginReload(target: DataTarget): number {
@@ -190,8 +196,11 @@ export class DataManager {
       applySymbolInfo(this.context, info);
       this.context.bars = this.normaliseBars(history.bars);
       this.context.marks = [];
+      this.context.timescaleMarks = [];
       this.hasMoreHistory = !(history.noData && history.bars.length === 0);
       this.initVisibleRange();
+      await this.applyConfiguredTimeframe(generation);
+      if (!this.isCurrent(generation)) return false;
       this.startLiveSubscription(generation, info, target.resolution);
       this.context.dataChanged.fire();
       this.context.requestPaint();
@@ -258,14 +267,17 @@ export class DataManager {
     });
   }
 
-  /** Position the initial visible window over the most recent ~120 bars. */
+  /** Position the initial visible window over the most recent ~120 bar slots. */
   private initVisibleRange(): void {
     const n = this.context.bars.length;
     if (n === 0) {
       this.context.visibleRange = { from: 0, to: 1 };
       return;
     }
-    const visibleCount = Math.min(n, 120);
+    // Preserve empty slots on the left for sparse/new feeds. Fitting only the
+    // bars returned by the feed spreads a handful of candles across the whole
+    // canvas instead of keeping consecutive candles visually grouped.
+    const visibleCount = INITIAL_VISIBLE_BARS;
     const rightPad = Math.min(8, Math.max(1, Math.round(visibleCount * 0.06)));
     this.context.visibleRange = {
       from: n - visibleCount,
@@ -461,6 +473,9 @@ export class DataManager {
     const cancel = this.marksCancellation;
     this.marksCancellation = null;
     cancel?.();
+    const timescale = this.timescaleCancellation;
+    this.timescaleCancellation = null;
+    timescale?.();
   }
 
   private requestMarks(
@@ -515,6 +530,48 @@ export class DataManager {
     });
   }
 
+  private requestTimescaleMarks(
+    generation: number,
+    requestId: number,
+    info: LibrarySymbolInfo,
+    resolution: ResolutionString,
+    from: number,
+    to: number,
+  ): Promise<TimescaleMark[] | null> {
+    return new Promise<TimescaleMark[] | null>((resolve) => {
+      if (!this.isCurrent(generation) || requestId !== this.marksRequestId) {
+        resolve(null);
+        return;
+      }
+
+      let settled = false;
+      const finish = (value: TimescaleMark[] | null): void => {
+        if (settled) return;
+        settled = true;
+        this.pendingCancellations.delete(cancel);
+        if (this.timescaleCancellation === cancel) this.timescaleCancellation = null;
+        resolve(
+          this.isCurrent(generation) && requestId === this.marksRequestId ? value : null,
+        );
+      };
+      const cancel = (): void => finish(null);
+      this.pendingCancellations.add(cancel);
+      this.timescaleCancellation = cancel;
+
+      try {
+        this.context.datafeed.getTimescaleMarks!(
+          info,
+          from,
+          to,
+          (items: TimescaleMark[]) => finish(Array.isArray(items) ? items : []),
+          resolution,
+        );
+      } catch {
+        finish([]);
+      }
+    });
+  }
+
   private async loadMarksFor(
     generation: number,
     info: LibrarySymbolInfo | null,
@@ -523,10 +580,10 @@ export class DataManager {
   ): Promise<boolean> {
     this.cancelMarksRequest();
     const requestId = this.marksRequestId;
-    const getMarks = this.context.datafeed.getMarks;
-    if (!info || typeof getMarks !== "function" || !bars.length) {
+    if (!info || !bars.length) {
       if (this.isCurrent(generation) && requestId === this.marksRequestId) {
         this.context.marks = [];
+        this.context.timescaleMarks = [];
         return true;
       }
       return false;
@@ -534,23 +591,60 @@ export class DataManager {
 
     const from = Math.floor(bars[0]!.time / 1000);
     const to = Math.floor(bars[bars.length - 1]!.time / 1000) + 86_400;
-    const marks = await this.requestMarks(
-      generation,
-      requestId,
-      info,
-      resolution,
-      from,
-      to,
-    );
-    if (
-      marks === null ||
-      !this.isCurrent(generation) ||
-      requestId !== this.marksRequestId
-    ) {
-      return false;
+    const jobs: Promise<boolean>[] = [];
+    const getMarks = this.context.datafeed.getMarks;
+    if (typeof getMarks === "function") {
+      jobs.push(this.requestMarks(
+        generation,
+        requestId,
+        info,
+        resolution,
+        from,
+        to,
+      ).then((marks) => {
+        if (
+          marks === null ||
+          !this.isCurrent(generation) ||
+          requestId !== this.marksRequestId
+        ) {
+          return false;
+        }
+        this.context.marks = marks;
+        return true;
+      }));
+    } else if (this.isCurrent(generation) && requestId === this.marksRequestId) {
+      this.context.marks = [];
     }
-    this.context.marks = marks;
-    return true;
+
+    const getTimescaleMarks = this.context.datafeed.getTimescaleMarks;
+    if (typeof getTimescaleMarks === "function") {
+      jobs.push(this.requestTimescaleMarks(
+        generation,
+        requestId,
+        info,
+        resolution,
+        from,
+        to,
+      ).then((items) => {
+        if (
+          items === null ||
+          !this.isCurrent(generation) ||
+          requestId !== this.marksRequestId
+        ) {
+          return false;
+        }
+        this.context.timescaleMarks = items;
+        return true;
+      }));
+    } else if (this.isCurrent(generation) && requestId === this.marksRequestId) {
+      this.context.timescaleMarks = [];
+    }
+
+    if (!jobs.length) {
+      return this.isCurrent(generation) && requestId === this.marksRequestId;
+    }
+    const results = await Promise.all(jobs);
+    return results.some(Boolean);
   }
 
   async loadMarks(): Promise<void> {
@@ -592,6 +686,7 @@ export class DataManager {
     if (this.destroyed) return;
     this.cancelMarksRequest();
     this.context.marks = [];
+    this.context.timescaleMarks = [];
     this.context.dataChanged.fire();
     this.context.requestPaint();
   }
@@ -611,8 +706,7 @@ export class DataManager {
     const previous = this.context.resolution;
     const changed = await this.startReload(target);
     if (changed && previous !== resolution && !this.destroyed) {
-      const timeframe: { timeframe?: { value: string; type: string } } = {};
-      this.context.intervalChanged.fire(resolution, timeframe);
+      this.context.intervalChanged.fire(resolution, this.timeframePayload());
     }
   }
 
@@ -632,8 +726,7 @@ export class DataManager {
     const previousResolution = this.context.resolution;
     const changed = await this.startReload(target);
     if (changed && previousResolution !== resolution && !this.destroyed) {
-      const timeframe: { timeframe?: { value: string; type: string } } = {};
-      this.context.intervalChanged.fire(resolution, timeframe);
+      this.context.intervalChanged.fire(resolution, this.timeframePayload());
     }
   }
 
@@ -642,6 +735,133 @@ export class DataManager {
     const target = { ...this.desiredTarget };
     void this.startReload(target).catch((error: unknown) => {
       if (!this.destroyed) this.reportError("data reset", error);
+    });
+  }
+
+  timeframePayload(): { timeframe: { value: string; type: "time-range" } } {
+    const range = this.visibleUnixRange();
+    return {
+      timeframe: {
+        value: `${range.from}-${range.to}`,
+        type: "time-range",
+      },
+    };
+  }
+
+  visibleUnixRange(): { from: number; to: number } {
+    const bars = this.context.bars;
+    const { from, to } = this.context.visibleRange;
+    const idx = (i: number): number => {
+      const clamped = Math.max(0, Math.min(bars.length - 1, Math.round(i)));
+      const bar = bars[clamped];
+      return bar ? Math.floor(bar.time / 1000) : 0;
+    };
+    return { from: idx(from), to: idx(to) };
+  }
+
+  applyIndexRangeFromUnix(fromSec: number, toSec: number): void {
+    const bars = this.context.bars;
+    if (!bars.length) return;
+    const fromMs = fromSec * 1000;
+    const toMs = toSec * 1000;
+    let fi = 0;
+    let ti = bars.length - 1;
+    for (let i = 0; i < bars.length; i++) {
+      if (bars[i]!.time <= fromMs) fi = i;
+      if (bars[i]!.time <= toMs) ti = i;
+    }
+    this.context.visibleRange = { from: fi, to: Math.max(fi + 1, ti) };
+    this.context.autoScalePrice = true;
+    this.context.viewportChanged.fire(this.visibleUnixRange());
+    this.context.requestPaint();
+  }
+
+  async applyConfiguredTimeframe(generation = this.generation): Promise<void> {
+    if (!this.isCurrent(generation)) return;
+    const resolved = resolveTimeframe(this.context.options.timeframe);
+    if (!resolved) return;
+    if (resolved.all) {
+      const n = this.context.bars.length;
+      if (n) {
+        this.context.visibleRange = { from: 0, to: n - 1 };
+        this.context.autoScalePrice = true;
+        this.context.viewportChanged.fire(this.visibleUnixRange());
+        this.context.requestPaint();
+      }
+      return;
+    }
+    await this.revealTimeRange(resolved.from, resolved.to);
+  }
+
+  async revealTimeRange(fromSec: number, toSec: number): Promise<void> {
+    if (this.destroyed) return;
+    const info = this.context.symbolInfo;
+    if (!info) {
+      this.applyIndexRangeFromUnix(fromSec, toSec);
+      return;
+    }
+    const generation = this.generation;
+    let safety = 0;
+    while (
+      this.isCurrent(generation)
+      && this.hasMoreHistory
+      && this.context.bars.length
+      && Math.floor(this.context.bars[0]!.time / 1000) > fromSec
+      && safety++ < 24
+    ) {
+      const oldest = this.context.bars[0]!;
+      const history = await this.requestBars(
+        info,
+        this.context.resolution,
+        {
+          from: fromSec,
+          to: Math.floor(oldest.time / 1000) - 1,
+          countBack: PAGE_BARS,
+          firstDataRequest: false,
+        },
+        generation,
+      );
+      if (!history || !this.isCurrent(generation)) return;
+      if (!history.bars.length) {
+        this.hasMoreHistory = false;
+        break;
+      }
+      const before = this.context.bars.length;
+      this.mergeBars(history.bars);
+      if (this.context.bars.length === before) {
+        this.hasMoreHistory = false;
+        break;
+      }
+    }
+    if (this.isCurrent(generation)) this.applyIndexRangeFromUnix(fromSec, toSec);
+  }
+
+  async loadCompare(symbol: string): Promise<Bar[]> {
+    const info = await this.resolveSymbolPublic(symbol);
+    if (!info) return [];
+    const bars = this.context.bars;
+    const from = bars[0] ? Math.floor(bars[0].time / 1000) : Math.floor(Date.now() / 1000) - 86_400 * 30;
+    const to = bars[bars.length - 1] ? Math.floor(bars[bars.length - 1]!.time / 1000) + 86_400 : Math.floor(Date.now() / 1000);
+    const history = await this.requestBars(
+      info,
+      this.context.resolution,
+      { from, to, countBack: bars.length || PAGE_BARS, firstDataRequest: true },
+      this.generation,
+    );
+    return history?.bars ?? [];
+  }
+
+  private resolveSymbolPublic(symbol: string): Promise<LibrarySymbolInfo | null> {
+    return new Promise((resolve) => {
+      try {
+        this.context.datafeed.resolveSymbol(
+          symbol,
+          (info) => resolve(info),
+          () => resolve(null),
+        );
+      } catch {
+        resolve(null);
+      }
     });
   }
 

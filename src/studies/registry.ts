@@ -4,7 +4,7 @@
 // sub-pane renderer) treats them identically.
 
 import type { StudyDefinition } from "../types/charting_library";
-import { closesFromBars, ema, rsi, sma } from "./calc";
+import { bollinger, closesFromBars, ema, macd, rsi, sma, vwap } from "./calc";
 
 export const BUILTIN_STUDIES: StudyDefinition[] = [
   {
@@ -37,6 +37,48 @@ export const BUILTIN_STUDIES: StudyDefinition[] = [
     ],
     formatValue: (v) => v.toFixed(1),
     compute: (bars, { length }) => rsi(closesFromBars(bars), length),
+  },
+  {
+    name: "VWAP",
+    aliases: ["volume weighted average price"],
+    keywords: ["vwap"],
+    pane: "overlay",
+    defaults: { color: "#e040fb" },
+    compute: (bars) => vwap(bars),
+  },
+  {
+    name: "Bollinger Bands",
+    aliases: ["bb", "bollinger"],
+    keywords: ["bollinger"],
+    pane: "overlay",
+    defaults: { length: 20, color: "#2962ff" },
+    compute: (bars, { length }) => {
+      const { mid, upper, lower } = bollinger(closesFromBars(bars), length, 2);
+      return {
+        series: [
+          { values: mid, style: "line", name: "BB mid" },
+          { values: upper, style: "band", name: "BB upper", color: "#2962ff66" },
+          { values: lower, style: "band", name: "BB lower", color: "#2962ff66" },
+        ],
+      };
+    },
+  },
+  {
+    name: "MACD",
+    aliases: ["moving average convergence divergence"],
+    keywords: ["macd"],
+    pane: "pane",
+    defaults: { length: 26, color: "#2962ff" },
+    compute: (bars) => {
+      const result = macd(closesFromBars(bars), 12, 26, 9);
+      return {
+        series: [
+          { values: result.macd, style: "line", name: "MACD", color: "#2962ff" },
+          { values: result.signal, style: "line", name: "Signal", color: "#f5a623" },
+          { values: result.hist, style: "histogram", name: "Hist", color: "#66d89e" },
+        ],
+      };
+    },
   },
 ];
 

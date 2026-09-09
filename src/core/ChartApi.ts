@@ -4,13 +4,17 @@
 //   clearMarks, refreshMarks, resetData, getVisibleRange/setVisibleRange.
 
 import type {
+  BracketOrderOptions,
   CreateShapeOptions,
   EntityId,
+  IBracketOrderAdapter,
   IChartWidgetApi,
   ILineDataSourceApi,
   ISubscription,
+  ITradingLineAdapter,
   ResolutionString,
   ShapePoint,
+  TradingLineOptions,
 } from "../types/charting_library";
 import type { ChartContext } from "./context";
 import { Delegate } from "../util/delegate";
@@ -33,12 +37,19 @@ export interface ChartApiDeps {
   getShapeById(id: EntityId): ILineDataSourceApi;
   removeEntity(id: EntityId): void;
   removeAllShapes(): void;
+  createTradingLine(options: TradingLineOptions, kind: "order" | "position"): ITradingLineAdapter;
+  createBracketOrder(options: BracketOrderOptions): IBracketOrderAdapter;
+  getTradingLineById(id: string): ITradingLineAdapter | null;
+  removeAllTradingLines(): void;
   createStudy(
     name: string,
     forceOverlay?: boolean,
     lock?: boolean,
     inputs?: Record<string, unknown>,
   ): Promise<EntityId>;
+  setVisibleRange(range: { from: number; to: number }): Promise<void>;
+  createCompare(symbol: string): Promise<EntityId>;
+  executeActionById(actionId: string): void;
 }
 
 export class ChartApi implements IChartWidgetApi {
@@ -89,22 +100,15 @@ export class ChartApi implements IChartWidgetApi {
   }
 
   setVisibleRange(range: { from: number; to: number }): Promise<void> {
-    // Translate a time range (unix seconds) into bar-index space.
-    const bars = this.context.bars;
-    if (bars.length) {
-      const fromMs = range.from * 1000;
-      const toMs = range.to * 1000;
-      let fi = 0;
-      let ti = bars.length - 1;
-      for (let i = 0; i < bars.length; i++) {
-        if (bars[i]!.time <= fromMs) fi = i;
-        if (bars[i]!.time <= toMs) ti = i;
-      }
-      this.context.visibleRange = { from: fi, to: Math.max(fi + 1, ti) };
-      this.context.autoScalePrice = true;
-      this.context.requestPaint();
-    }
-    return Promise.resolve();
+    return this.deps.setVisibleRange(range);
+  }
+
+  createCompare(symbol: string): Promise<EntityId> {
+    return this.deps.createCompare(symbol);
+  }
+
+  executeActionById(actionId: string): void {
+    this.deps.executeActionById(actionId);
   }
 
   createShape<TOverrides extends object>(
@@ -131,6 +135,26 @@ export class ChartApi implements IChartWidgetApi {
 
   removeAllShapes(): void {
     this.deps.removeAllShapes();
+  }
+
+  createOrderLine(options: TradingLineOptions = {}): Promise<ITradingLineAdapter> {
+    return Promise.resolve(this.deps.createTradingLine(options, "order"));
+  }
+
+  createPositionLine(options: TradingLineOptions = {}): Promise<ITradingLineAdapter> {
+    return Promise.resolve(this.deps.createTradingLine(options, "position"));
+  }
+
+  createBracketOrder(options: BracketOrderOptions): Promise<IBracketOrderAdapter> {
+    return Promise.resolve(this.deps.createBracketOrder(options));
+  }
+
+  getTradingLineById(id: string): ITradingLineAdapter | null {
+    return this.deps.getTradingLineById(id);
+  }
+
+  removeAllTradingLines(): void {
+    this.deps.removeAllTradingLines();
   }
 
   createStudy(

@@ -1,5 +1,5 @@
 // Shared floating-popup container. Every menu the chrome opens (context menu,
-// Indicators panel, chart-type picker, interval "more" dropdown) uses this so
+// Indicators panel, chart-type picker) uses this so
 // styling, stacking, viewport clamping, keyboard flow and dismissal stay
 // consistent — and are implemented once.
 
@@ -62,11 +62,20 @@ export function ensureBaseStyles(): void {
     ".raze-chart-left-sidebar::-webkit-scrollbar{display:none}" +
     ".raze-chart-toolbar-scroll{scrollbar-width:none}" +
     ".raze-chart-toolbar-scroll::-webkit-scrollbar{display:none}" +
+    ".raze-chart-root,.raze-chart-canvas{user-select:none;-webkit-user-select:none}" +
+    ".raze-chart-root input,.raze-chart-root textarea{user-select:text;-webkit-user-select:text}" +
+    ".raze-chart-canvas:focus,.raze-chart-canvas:focus-visible{outline:none}" +
     ".raze-chart-focusable:focus{outline:none}" +
     ".raze-chart-focusable:focus-visible{outline:2px solid var(--tv-color-toolbar-button-text-hover,#2962ff);outline-offset:1px}" +
     "@media (forced-colors:active){.raze-chart-focusable:focus-visible{outline-color:Highlight}}" +
     "@media (prefers-reduced-motion:reduce){.raze-chart-loading-screen{transition:none!important}.raze-chart-loading-spinner{animation:none!important}}";
   document.head.appendChild(style);
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
+  return target.isContentEditable;
 }
 
 function popupItems(el: HTMLElement): HTMLElement[] {
@@ -179,6 +188,7 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   };
   const onMenuKey = (e: KeyboardEvent): void => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    if (isEditableTarget(e.target)) return;
     const items = popupItems(el);
     if (!items.length) return;
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;

@@ -26,6 +26,9 @@ export interface StoredShape {
   text: string;
   lock: boolean;
   disableSelection: boolean;
+  disableUndo: boolean;
+  showInObjectsTree: boolean;
+  hidden: boolean;
   zOrder: "top" | "bottom";
   overrides: Record<string, unknown>;
 }
@@ -51,6 +54,9 @@ export class ShapeStore {
       text: options.text ?? "",
       lock: options.lock ?? false,
       disableSelection: options.disableSelection ?? false,
+      disableUndo: options.disableUndo ?? false,
+      showInObjectsTree: options.showInObjectsTree !== false,
+      hidden: false,
       zOrder: options.zOrder === "top" ? "top" : "bottom",
       overrides: { ...(options.overrides as Record<string, unknown> | undefined) },
     };
@@ -86,6 +92,30 @@ export class ShapeStore {
     return Array.from(this.shapes.values()).sort(
       (a, b) => (a.zOrder === "top" ? 1 : 0) - (b.zOrder === "top" ? 1 : 0),
     );
+  }
+
+  restore(shape: StoredShape): void {
+    this.shapes.set(shape.id, {
+      ...shape,
+      points: shape.points.map((p) => ({ ...p })),
+      overrides: { ...shape.overrides },
+    });
+    this.context.requestPaint();
+  }
+
+  setHidden(id: EntityId, hidden: boolean): void {
+    const shape = this.shapes.get(id);
+    if (!shape) return;
+    shape.hidden = hidden;
+    this.context.requestPaint();
+  }
+
+  snapshot(): StoredShape[] {
+    return this.list().map((shape) => ({
+      ...shape,
+      points: shape.points.map((p) => ({ ...p })),
+      overrides: { ...shape.overrides },
+    }));
   }
 
   adapter(id: EntityId): ILineDataSourceApi {

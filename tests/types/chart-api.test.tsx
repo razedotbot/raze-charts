@@ -9,11 +9,13 @@ import {
   pie,
   point,
   radar,
+  ruleX,
   ruleY,
   type ChartMark,
   type SceneNode,
 } from "../../src/chart";
 import { ResponsiveContainer, createChartComponents } from "../../src/react";
+import type { IChartWidgetApi, TradingLineEvent } from "../../src";
 
 interface Datum {
   date: Date;
@@ -24,6 +26,31 @@ interface Datum {
 const data: readonly Datum[] = [
   { date: new Date("2026-01-01T00:00:00Z"), close: 42, volume: 100 },
 ];
+
+if (false) {
+  const financialApi = null as unknown as IChartWidgetApi;
+  void financialApi.createOrderLine({ side: "buy", price: 42, quantity: 3 }).then((order) => {
+    order
+      .setText("Limit")
+      .setLineStyle(2)
+      .onMoving((line) => line.getPrice())
+      .onMove((line) => line.getQuantity())
+      .onCancel((line) => line.remove());
+  });
+  void financialApi.createBracketOrder({
+    side: "buy",
+    entryPrice: 42,
+    stopLossPrice: 40,
+    takeProfitPrice: 46,
+    onChange: (bracket, event: TradingLineEvent) => {
+      bracket.riskRewardRatio?.toFixed(2);
+      event.line.price.toFixed(2);
+    },
+  }).then((bracket) => bracket.stopLoss?.setPrice(39));
+
+  // @ts-expect-error Trading side is intentionally a closed semantic union.
+  financialApi.createPositionLine({ side: "long", price: 42 });
+}
 
 line(data, { x: "date", y: "close" });
 line(data, { x: (row) => row.date, y: (row) => row.close });
@@ -41,6 +68,9 @@ heatmap(data, { x: "date", y: "volume" });
 
 // @ts-expect-error Unsupported channels are not accepted silently.
 line(data, { x: "date", y: "close", y0: "volume" });
+
+area(data, { x: "date", y: "close", y0: "volume", curve: "step" });
+ruleX([data[0]!.date]);
 
 // @ts-expect-error Line does not silently accept area/bar/point presentation.
 line(data, { x: "date", y: "close", fill: "red", stackId: "s", r: 4, fade: true });

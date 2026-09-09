@@ -5,11 +5,15 @@
 
 import type {
   ChartingLibraryWidgetOptions,
+  ChartLayoutSnapshot,
   ContextMenuCallback,
   CreateButtonOptions,
+  CreateShapeOptions,
+  EntityId,
   IChartingLibraryWidget,
   IChartWidgetApi,
   ResolutionString,
+  ShapePoint,
 } from "../types/charting_library";
 import { buildFeatureSet, type ChartContext, type IndexRange } from "./context";
 import { buildTheme } from "./theme";
@@ -17,11 +21,15 @@ import { createPriceFormatter } from "../util/format";
 import { Delegate } from "../util/delegate";
 import { DataManager } from "../data/DataManager";
 import { ShapeStore } from "./ShapeStore";
+import { TradingStore } from "./TradingStore";
 import { ChartApi, type ChartApiDeps } from "./ChartApi";
 import { ChartEngine } from "../engine/ChartEngine";
 import { ChartRenderer } from "../engine/ChartRenderer";
 import { Toolbar } from "../ui/Toolbar";
 import { IntervalSelector } from "../ui/IntervalSelector";
+import { TimeframeBar } from "../ui/TimeframeBar";
+import { SymbolSearch } from "../ui/SymbolSearch";
+import { ObjectsTree } from "../ui/ObjectsTree";
 import { LoadingScreen } from "../ui/LoadingScreen";
 import { IndicatorsMenu, resolveIndicatorPresets } from "../ui/IndicatorsMenu";
 import { DEFAULT_SIDEBAR_ITEMS, LeftSidebar, type ChartStyleId } from "../ui/LeftSidebar";
@@ -30,6 +38,8 @@ import { StudyStore } from "../studies/StudyStore";
 import { StudyRegistry } from "../studies/registry";
 import { showContextMenu, closeContextMenu } from "../ui/ContextMenu";
 import { ensureBaseStyles } from "../ui/popup";
+import { CommandStack } from "./CommandStack";
+import { resolveTimeframe, type TimeframePreset } from "./timeframe";
 
 const DEFAULT_FONT = "'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
@@ -40,12 +50,16 @@ export class Widget implements IChartingLibraryWidget {
   private context: ChartContext;
   private data: DataManager;
   private shapes: ShapeStore;
+  private trading: TradingStore;
   private engine: ChartEngine;
   private renderer: ChartRenderer;
   private toolbar: Toolbar | null = null;
   private leftSidebar: LeftSidebar | null = null;
   private scaleBar: ScaleBar | null = null;
   private intervalSelector: IntervalSelector | null = null;
+  private timeframeBar: TimeframeBar | null = null;
+  private symbolSearch: SymbolSearch | null = null;
+  private objectsTree: ObjectsTree | null = null;
   private indicatorsMenu: IndicatorsMenu | null = null;
   private loading: LoadingScreen | null;
   private api: ChartApi;
@@ -62,6 +76,11 @@ export class Widget implements IChartingLibraryWidget {
   /** Only the newest imperative data change may run its completion callback. */
   private dataChangeId = 0;
   private headerReadySettled = false;
+  private commands = new CommandStack();
+  private childWidgets: Widget[] = [];
+  private layoutSyncing = false;
+  private compareSeq = 0;
+  private countdownTimer = 0;
 
   constructor(options: ChartingLibraryWidgetOptions) {
     const containerEl =
@@ -91,17 +110,27 @@ export class Widget implements IChartingLibraryWidget {
       features,
       bars: [],
       marks: [],
+      timescaleMarks: [],
       visibleRange: initialRange,
       autoScalePrice: true,
       priceRange: null,
       chartStyle: "candles",
       logScale: false,
       percentScale: false,
+      volumeMode: raze?.volume_mode ?? "overlay",
+      magnet: raze?.magnet ?? false,
+      stayInDrawingMode: false,
+      compare: [],
+      syncedCrosshair: null,
       drawingTool: "cursor",
       selectedShapeId: null,
+      selectedTradingLineId: null,
       intervalChanged: new Delegate(),
       dataChanged: new Delegate(),
       drawingEvent: new Delegate(),
+      tradingEvent: new Delegate(),
+      viewportChanged: new Delegate(),
+      crosshairMoved: new Delegate(),
       requestPaint: () => {},
     };
 
@@ -115,6 +144,8 @@ export class Widget implements IChartingLibraryWidget {
       "display:flex",
       "flex-direction:column",
       "overflow:hidden",
+      "user-select:none",
+      "-webkit-user-select:none",
       `background:${theme.paneBackground}`,
       `font-family:${fontFamily}`,
       "--tv-color-pane-background:" + theme.paneBackground,
@@ -144,6 +175,9 @@ export class Widget implements IChartingLibraryWidget {
           onIndicatorsClick: (anchor) => {
             this.indicatorsMenu?.toggle(anchor);
           },
+          onObjectsTreeClick: (anchor) => {
+            this.objectsTree?.toggle(anchor);
+          },
           onFit: () => this.renderer.fitContent(),
           onScreenshot: () => this.renderer.takeScreenshot(),
           onFullscreen: () => this.toggleFullscreen(),
@@ -162,17 +196,18 @@ export class Widget implements IChartingLibraryWidget {
     }
 
     this.chartArea = document.createElement("div");
-    this.chartArea.style.cssText = "position:relative;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden;";
+    this.chartArea.style.cssText = "position:relative;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden;user-select:none;-webkit-user-select:none;";
     this.bodyRow.appendChild(this.chartArea);
 
     this.data = new DataManager(this.context);
     this.shapes = new ShapeStore(this.context);
+    this.trading = new TradingStore(this.context);
     const registry = new StudyRegistry();
     for (const def of raze?.custom_studies ?? []) registry.register(def);
     this.studies = new StudyStore(this.context, registry);
     this.engine = new ChartEngine(this.chartArea, this.context);
     this.syncAccessibility();
-    this.renderer = new ChartRenderer(this.context, this.engine, this.shapes, this.data, this.studies);
+    this.renderer = new ChartRenderer(this.context, this.engine, this.shapes, this.trading, this.data, this.studies);
     this.renderer.setToolDoneHandler((tool) => {
       this.context.drawingTool = tool;
       this.leftSidebar?.setTool(tool);
@@ -195,6 +230,8 @@ export class Widget implements IChartingLibraryWidget {
       resolveIndicatorPresets(raze, registry),
     );
 
+    this.objectsTree = new ObjectsTree(this.context, this.shapes, this.studies);
+
     const deps: ChartApiDeps = {
       refreshMarks: () => this.data.refreshMarks(),
       clearMarks: () => this.data.clearMarks(),
@@ -211,30 +248,60 @@ export class Widget implements IChartingLibraryWidget {
           `change symbol to ${sym}`,
           () => this.data.changeSymbol(sym),
           cb,
-          () => this.intervalSelector?.refresh(),
+          () => {
+            this.intervalSelector?.refresh();
+            this.symbolSearch?.setSymbol(sym);
+          },
         );
       },
-      createShape: (point, opts) => this.shapes.create(point, opts),
-      createMultipointShape: (points, opts) => this.shapes.createPoints(points, opts),
+      createShape: (point, opts) => this.createShapeTracked(point, opts),
+      createMultipointShape: (points, opts) => this.createPointsTracked(points, opts),
       getShapeById: (id) => this.shapes.adapter(id),
-      removeEntity: (id) => {
-        if (this.studies.remove(id)) return;
-        this.shapes.remove(id);
-      },
+      removeEntity: (id) => this.removeEntityTracked(id),
       removeAllShapes: () => this.shapes.removeAll(),
-      createStudy: (name, _force, _lock, inputs) => {
+      createTradingLine: (options, kind) => this.trading.create(options, kind),
+      createBracketOrder: (options) => this.trading.createBracket(options),
+      getTradingLineById: (id) => this.trading.adapter(id),
+      removeAllTradingLines: () => this.trading.removeAll(),
+      createStudy: (name, forceOverlay, lock, inputs) => {
         const lengthRaw = inputs?.length ?? inputs?.Length ?? inputs?.periods;
         const length = typeof lengthRaw === "number" && Number.isFinite(lengthRaw) ? lengthRaw : 0;
         const color = typeof inputs?.color === "string" ? inputs.color : "";
-        const id = this.studies.add({ name, length, color });
+        const extra: Record<string, number | string> = {};
+        if (inputs) {
+          for (const [key, value] of Object.entries(inputs)) {
+            if (key === "length" || key === "Length" || key === "periods" || key === "color") continue;
+            if (typeof value === "number" || typeof value === "string") extra[key] = value;
+          }
+        }
+        const id = this.studies.add({
+          name,
+          length,
+          color,
+          lock: !!lock,
+          forceOverlay: !!forceOverlay,
+          inputs: extra,
+        });
         if (!id) return Promise.reject(new Error(`[raze-charts] unknown study: ${name}`));
+        this.commands.push({
+          undo: () => { this.studies.remove(id); },
+          redo: () => {
+            this.studies.add({ name, length, color, lock: !!lock, forceOverlay: !!forceOverlay, inputs: extra });
+          },
+        });
         return Promise.resolve(id);
       },
+      setVisibleRange: (range) => this.data.revealTimeRange(range.from, range.to),
+      createCompare: (symbol) => this.createCompare(symbol),
+      executeActionById: (actionId) => this.executeActionById(actionId),
     };
     this.api = new ChartApi(this.context, deps);
 
     this.context.drawingEvent.subscribe(null, ((id: string, type: string) => {
       this.emit("drawing_event", id, type);
+    }) as never);
+    this.context.tradingEvent.subscribe(null, ((line: unknown, type: string) => {
+      this.emit("trading_event", line, type);
     }) as never);
 
     this.headerReadyPromise = new Promise<void>((resolve) => {
@@ -295,6 +362,32 @@ export class Widget implements IChartingLibraryWidget {
         this.intervalSelector?.setActive(String(res));
       }) as never);
     }
+
+    if (this.toolbar && this.context.features.has("header_symbol_search")) {
+      this.symbolSearch = new SymbolSearch(this.context, (symbol) => {
+        this.runDataChange(
+          `change symbol to ${symbol}`,
+          () => this.data.changeSymbol(symbol),
+          undefined,
+          () => this.intervalSelector?.refresh(),
+        );
+      });
+      this.toolbar.searchSlot.appendChild(this.symbolSearch.el);
+    }
+
+    if (this.toolbar && this.context.features.has("time_frames_toolbar")) {
+      this.timeframeBar = new TimeframeBar(
+        this.context,
+        this.toolbar.rangeSlot,
+        (preset) => { void this.applyPreset(preset); },
+        () => this.goToDate(),
+      );
+    }
+
+    this.spawnLayout();
+    this.wireLayoutSync();
+    this.wireUndoKeys();
+    this.startCountdownClock();
 
     this.loading?.hide();
     this.loading = null;
@@ -360,7 +453,8 @@ export class Widget implements IChartingLibraryWidget {
     return this.api;
   }
 
-  chart(_index?: number): IChartWidgetApi {
+  chart(index?: number): IChartWidgetApi {
+    if (index && this.childWidgets[index - 1]) return this.childWidgets[index - 1]!.activeChart();
     return this.api;
   }
 
@@ -411,8 +505,70 @@ export class Widget implements IChartingLibraryWidget {
       `change symbol to ${symbol}`,
       () => this.data.changeSymbol(symbol, interval),
       callback,
-      () => this.intervalSelector?.refresh(),
+      () => {
+        this.intervalSelector?.refresh();
+        this.symbolSearch?.setSymbol(symbol);
+      },
     );
+  }
+
+  save(callback?: (state: ChartLayoutSnapshot) => void): ChartLayoutSnapshot {
+    const state: ChartLayoutSnapshot = {
+      version: 1,
+      symbol: this.context.symbol,
+      interval: String(this.context.resolution),
+      visibleRange: this.api.getVisibleRange(),
+      chartStyle: this.context.chartStyle,
+      logScale: this.context.logScale,
+      percentScale: this.context.percentScale,
+      volumeMode: this.context.volumeMode,
+      magnet: this.context.magnet,
+      drawings: this.shapes.snapshot().map((shape) => ({
+        id: String(shape.id),
+        shape: String(shape.shape),
+        points: shape.points,
+        text: shape.text,
+        lock: shape.lock,
+        zOrder: shape.zOrder,
+        overrides: shape.overrides,
+      })),
+      studies: this.studies.list().map((study) => ({
+        name: study.name,
+        length: study.length,
+        color: study.color,
+      })),
+      compare: this.context.compare.map((item) => item.symbol),
+    };
+    callback?.(state);
+    return state;
+  }
+
+  async load(state: ChartLayoutSnapshot): Promise<void> {
+    this.context.chartStyle = state.chartStyle;
+    this.context.logScale = state.logScale;
+    this.context.percentScale = state.percentScale;
+    if (state.volumeMode) this.context.volumeMode = state.volumeMode;
+    if (typeof state.magnet === "boolean") this.context.magnet = state.magnet;
+    this.leftSidebar?.setChartStyle(state.chartStyle);
+    await this.data.changeSymbol(state.symbol, state.interval as ResolutionString);
+    this.shapes.removeAll();
+    for (const drawing of state.drawings) {
+      await this.shapes.createPoints(drawing.points, {
+        shape: drawing.shape,
+        text: drawing.text,
+        lock: drawing.lock,
+        zOrder: drawing.zOrder,
+        overrides: drawing.overrides,
+      });
+    }
+    this.studies.clear();
+    for (const study of state.studies) this.studies.add(study);
+    this.context.compare = [];
+    for (const symbol of state.compare ?? []) await this.createCompare(symbol);
+    await this.data.revealTimeRange(state.visibleRange.from, state.visibleRange.to);
+    this.symbolSearch?.setSymbol(state.symbol);
+    this.intervalSelector?.setActive(state.interval);
+    this.context.requestPaint();
   }
 
   remove(): void {
@@ -427,9 +583,18 @@ export class Widget implements IChartingLibraryWidget {
     closeContextMenu();
     this.compactRO?.disconnect();
     this.compactRO = null;
+    if (this.countdownTimer) {
+      window.clearInterval(this.countdownTimer);
+      this.countdownTimer = 0;
+    }
     this.renderer.destroy();
     this.engine.destroy();
     this.studies.destroy();
+    for (const child of this.childWidgets) child.remove();
+    this.childWidgets = [];
+    this.objectsTree?.destroy();
+    this.symbolSearch?.destroy();
+    this.timeframeBar?.destroy();
     this.intervalSelector?.destroy();
     this.indicatorsMenu?.destroy();
     this.leftSidebar?.destroy();
@@ -439,6 +604,225 @@ export class Widget implements IChartingLibraryWidget {
     this.chartReady.destroy();
     this.subscriptions.clear();
     this.root.remove();
+  }
+
+  private async createShapeTracked(
+    point: ShapePoint,
+    opts: CreateShapeOptions,
+  ): Promise<EntityId> {
+    return this.createPointsTracked([point], opts);
+  }
+
+  private async createPointsTracked(
+    points: ShapePoint[],
+    opts: CreateShapeOptions,
+  ): Promise<EntityId> {
+    const id = await this.shapes.createPoints(points, opts);
+    if (!opts.disableUndo) {
+      const stored = this.shapes.get(id);
+      if (stored) {
+        const snap = {
+          ...stored,
+          points: stored.points.map((p) => ({ ...p })),
+          overrides: { ...stored.overrides },
+        };
+        this.commands.push({
+          undo: () => this.shapes.remove(id),
+          redo: () => this.shapes.restore(snap),
+        });
+      }
+    }
+    return id;
+  }
+
+  private removeEntityTracked(id: EntityId): void {
+    const study = this.studies.has(id) ? this.studies.list().find((s) => s.id === id) : null;
+    if (study) {
+      this.studies.remove(id);
+      this.commands.push({
+        undo: () => {
+          this.studies.add({
+            name: study.name,
+            length: study.length,
+            color: study.color,
+            lock: study.lock,
+            forceOverlay: study.forceOverlay,
+            inputs: study.inputs,
+          });
+        },
+        redo: () => { this.studies.remove(id); },
+      });
+      return;
+    }
+    const compare = this.context.compare.find((item) => item.id === String(id));
+    if (compare) {
+      this.context.compare = this.context.compare.filter((item) => item.id !== compare.id);
+      this.context.requestPaint();
+      return;
+    }
+    const shape = this.shapes.get(id);
+    const tradingLine = this.trading.get(String(id));
+    if (tradingLine) {
+      this.trading.remove(String(id));
+      return;
+    }
+    this.shapes.remove(id);
+    if (shape) {
+      this.commands.push({
+        undo: () => this.shapes.restore(shape),
+        redo: () => this.shapes.remove(id),
+      });
+    }
+  }
+
+  private async createCompare(symbol: string): Promise<EntityId> {
+    const bars = await this.data.loadCompare(symbol);
+    this.compareSeq += 1;
+    const id = `compare_${symbol}_${this.compareSeq}` as EntityId;
+    const colors = ["#26a69a", "#f5a623", "#e040fb", "#42a5f5"];
+    this.context.compare.push({
+      id: String(id),
+      symbol,
+      bars,
+      color: colors[(this.context.compare.length) % colors.length]!,
+    });
+    this.context.requestPaint();
+    return id;
+  }
+
+  private executeActionById(actionId: string): void {
+    if (actionId === "undo") this.commands.undo();
+    else if (actionId === "redo") this.commands.redo();
+    else if (actionId === "magnet") this.context.magnet = !this.context.magnet;
+    else if (actionId === "stay_in_drawing_mode") {
+      this.context.stayInDrawingMode = !this.context.stayInDrawingMode;
+    } else if (actionId === "objects_tree" && this.leftSidebar) {
+      const btn = this.leftSidebar.el.querySelector('[aria-label="Objects tree"]');
+      if (btn instanceof HTMLElement) this.objectsTree?.toggle(btn);
+    } else if (actionId === "volume_pane") {
+      const order = ["overlay", "pane", "hidden"] as const;
+      const i = order.indexOf(this.context.volumeMode);
+      this.context.volumeMode = order[(i + 1) % order.length]!;
+    }
+    this.context.requestPaint();
+  }
+
+  private async applyPreset(preset: TimeframePreset): Promise<void> {
+    const lastBar = this.context.bars[this.context.bars.length - 1];
+    const now = Math.floor((lastBar?.time ?? Date.now()) / 1000);
+    const resolved = resolveTimeframe({ value: preset, type: "period-back" }, now);
+    if (!resolved) return;
+    if (resolved.all) {
+      const n = this.context.bars.length;
+      if (n) {
+        this.context.visibleRange = { from: 0, to: n - 1 };
+        this.context.autoScalePrice = true;
+        this.context.viewportChanged.fire(this.data.visibleUnixRange());
+        this.context.requestPaint();
+      }
+      return;
+    }
+    await this.data.revealTimeRange(resolved.from, resolved.to);
+  }
+
+  private goToDate(): void {
+    const raw = window.prompt("Go to date (YYYY-MM-DD or unix seconds)", "");
+    if (!raw?.trim()) return;
+    let sec = Number(raw);
+    if (!Number.isFinite(sec)) {
+      const ms = Date.parse(raw.trim());
+      if (!Number.isFinite(ms)) return;
+      sec = Math.floor(ms / 1000);
+    }
+    const span = Math.max(1, this.context.visibleRange.to - this.context.visibleRange.from);
+    const resMs = Math.max(1, (this.context.bars[1]?.time ?? 0) - (this.context.bars[0]?.time ?? 0));
+    const halfSec = Math.floor((span * resMs) / 2000);
+    void this.data.revealTimeRange(sec - halfSec, sec + halfSec);
+  }
+
+  private spawnLayout(): void {
+    const layout = this.context.options.raze?.layout;
+    if (this.context.options.raze?.layout_child) return;
+    const cells = layout === "2x2" ? 4 : layout === "2x1" ? 2 : 1;
+    if (cells <= 1) return;
+    this.chartArea.style.display = "grid";
+    this.chartArea.style.gridTemplateRows = layout === "2x2" ? "1fr 1fr" : "1fr 1fr";
+    this.chartArea.style.gridTemplateColumns = layout === "2x2" ? "1fr 1fr" : "1fr";
+    const pane0 = document.createElement("div");
+    pane0.style.cssText = "position:relative;min-width:0;min-height:0;overflow:hidden;";
+    while (this.chartArea.firstChild) pane0.appendChild(this.chartArea.firstChild);
+    this.chartArea.appendChild(pane0);
+    const symbols = this.context.options.raze?.layout_symbols ?? [];
+    for (let i = 1; i < cells; i++) {
+      const cell = document.createElement("div");
+      cell.style.cssText = "position:relative;min-width:0;min-height:0;overflow:hidden;";
+      this.chartArea.appendChild(cell);
+      const child = new Widget({
+        ...this.context.options,
+        container: cell,
+        symbol: symbols[i] ?? this.context.symbol,
+        disabled_features: [
+          ...(this.context.options.disabled_features ?? []),
+          "header_widget",
+          "left_toolbar",
+        ],
+        raze: {
+          ...this.context.options.raze,
+          layout: "1",
+          layout_child: true,
+        },
+      });
+      this.childWidgets.push(child);
+    }
+  }
+
+  private wireLayoutSync(): void {
+    if (!this.childWidgets.length) return;
+    const panes = [this, ...this.childWidgets];
+    for (const pane of panes) {
+      pane.context.viewportChanged.subscribe(null, ((range: { from: number; to: number }) => {
+        if (this.layoutSyncing) return;
+        this.layoutSyncing = true;
+        for (const other of panes) {
+          if (other === pane) continue;
+          void other.data.revealTimeRange(range.from, range.to);
+        }
+        this.layoutSyncing = false;
+      }) as never);
+      pane.context.crosshairMoved.subscribe(null, ((ev: { unixTime: number; price: number; active: boolean }) => {
+        if (this.layoutSyncing) return;
+        this.layoutSyncing = true;
+        for (const other of panes) {
+          if (other === pane) continue;
+          other.context.syncedCrosshair = ev;
+          other.context.requestPaint();
+        }
+        this.layoutSyncing = false;
+      }) as never);
+    }
+  }
+
+  private startCountdownClock(): void {
+    if (!this.context.features.has("countdown")) return;
+    this.countdownTimer = window.setInterval(() => {
+      if (!this.destroyed) this.context.requestPaint();
+    }, 1000);
+  }
+
+  private wireUndoKeys(): void {
+    this.engine.canvas.addEventListener("keydown", (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) this.commands.redo();
+        else this.commands.undo();
+        this.context.requestPaint();
+      } else if (e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        this.commands.redo();
+        this.context.requestPaint();
+      }
+    });
   }
 
   private wireContextMenu(): void {

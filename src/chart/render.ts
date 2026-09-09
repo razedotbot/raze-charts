@@ -1,4 +1,5 @@
-import { compileChart, type ChartDefinition, type CompiledChart, type HoverSample, type SceneNode } from "./defineChart";
+import { asNumber, compileChart, defineChart, type ChartCurve, type ChartDefinition, type ChartViewport, type CompiledChart, type HoverSample, type SceneNode } from "./defineChart";
+import { RANGE_PRESETS, presetZoomsIn, viewportFromPreset, type RangePreset } from "./viewport";
 import {
   chartColorWithOpacity,
   formatChartColor,
@@ -71,6 +72,39 @@ function monotonePath(pts: readonly { x: number; y: number }[]): string {
     d += ` C${round(c1x)} ${round(c1y)} ${round(c2x)} ${round(c2y)} ${round(p1.x)} ${round(p1.y)}`;
   }
   return d;
+}
+
+function seriesPath(pts: readonly { x: number; y: number }[], curve: ChartCurve | undefined): string {
+  if (!pts.length) return "";
+  if (curve === "linear" || pts.length < 3) {
+    return pts.map((p, i) => `${i ? "L" : "M"}${round(p.x)} ${round(p.y)}`).join(" ");
+  }
+  if (curve === "step") {
+    let d = `M${round(pts[0]!.x)} ${round(pts[0]!.y)}`;
+    for (let i = 1; i < pts.length; i++) {
+      d += ` L${round(pts[i]!.x)} ${round(pts[i - 1]!.y)} L${round(pts[i]!.x)} ${round(pts[i]!.y)}`;
+    }
+    return d;
+  }
+  return monotonePath(pts);
+}
+
+function traceSeries(ctx: CanvasRenderingContext2D, pts: readonly { x: number; y: number }[], curve: ChartCurve | undefined): void {
+  if (!pts.length) return;
+  if (curve === "linear" || pts.length < 3) {
+    ctx.moveTo(pts[0]!.x, pts[0]!.y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+    return;
+  }
+  if (curve === "step") {
+    ctx.moveTo(pts[0]!.x, pts[0]!.y);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i]!.x, pts[i - 1]!.y);
+      ctx.lineTo(pts[i]!.x, pts[i]!.y);
+    }
+    return;
+  }
+  traceMonotone(ctx, pts);
 }
 
 function traceMonotone(ctx: CanvasRenderingContext2D, pts: readonly { x: number; y: number }[]): void {
@@ -207,17 +241,22 @@ function nodeSvg(n: SceneNode, i: number, theme: DashboardTheme, uid: string): s
     const dash = n.dashed ? ` stroke-dasharray="4.5 3.5"` : "";
     const path = n.dashed && n.points.length <= 2
       ? `M${round(n.points[0]!.x)} ${round(n.points[0]!.y)} L${round(n.points[1]?.x ?? n.points[0]!.x)} ${round(n.points[1]?.y ?? n.points[0]!.y)}`
-      : monotonePath(n.points);
+      : seriesPath(n.points, n.curve);
     return `<path fill="none" stroke="${esc(stroke)}"${sw}${lc}${dash}${meta} d="${path}" />`;
   }
   if (n.type === "area" && n.points && n.points.length >= 3) {
-    const mid = n.points.slice(1, -1);
-    const yBase = n.points[0]!.y;
     const gid = `raze-fill-${uid}-${i}`;
-    const top = mid[0]!;
-    const last = mid[mid.length - 1]!;
-    const d = `${monotonePath(mid)} L${round(last.x)} ${round(yBase)} L${round(top.x)} ${round(yBase)} Z`;
     const opacity = normalizedOpacity(n.fillOpacity, 0.42);
+    let d: string;
+    if (n.role === "ranged-area") {
+      d = `${seriesPath(n.points, "linear")} Z`;
+    } else {
+      const mid = n.points.slice(1, -1);
+      const yBase = n.points[0]!.y;
+      const top = mid[0]!;
+      const last = mid[mid.length - 1]!;
+      d = `${seriesPath(mid, n.curve)} L${round(last.x)} ${round(yBase)} L${round(top.x)} ${round(yBase)} Z`;
+    }
     return [
       `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">`,
       ...AREA_GRADIENT_STOPS.map(([offset, factor]) => (
@@ -345,9 +384,11 @@ export function svgFromCompiled(c: CompiledChart, options?: SvgRenderOptions): s
   const xAxis = c.polar ? "" : [
     `<rect x="0" y="${plot.y + plot.h}" width="${width}" height="${Math.max(0, height - plot.y - plot.h)}" fill="${esc(theme.background)}" />`,
     `<line x1="${c.heatmap ? plot.x : 0}" y1="${hair(plot.y + plot.h)}" x2="${c.heatmap ? plot.x + plot.w : width}" y2="${hair(plot.y + plot.h)}" stroke="${esc(theme.axis)}" />`,
+    `<g data-role="x-labels">`,
     ...c.xTicks.map((t) =>
       `<text x="${t.px}" y="${plot.y + plot.h + 14}" text-anchor="middle" font-size="9" fill="${esc(theme.muted)}">${esc(t.label)}</text>`,
     ),
+    `</g>`,
   ].join("");
 
   let legend = "";
@@ -358,13 +399,13 @@ export function svgFromCompiled(c: CompiledChart, options?: SvgRenderOptions): s
     const y0 = plot.y + Math.max(0, (plot.h - block) / 2);
     legend = `<g font-size="11">${c.legend.map((l, i) => {
       const y = y0 + i * rowH;
-      return `<g transform="translate(${lx},${y})"><rect width="8" height="8" y="2" rx="1.5" fill="${esc(l.color)}" /><text x="14" y="6" dominant-baseline="middle" fill="${esc(theme.text)}">${esc(l.name)}</text>${l.detail ? `<text x="14" y="22" dominant-baseline="middle" font-size="9" fill="${esc(theme.muted)}">${esc(l.detail)}</text>` : ""}</g>`;
+      return `<g data-series="${esc(l.name)}" style="cursor:pointer" transform="translate(${lx},${y})"><rect width="8" height="8" y="2" rx="1.5" fill="${esc(l.color)}" /><text x="14" y="6" dominant-baseline="middle" fill="${esc(theme.text)}">${esc(l.name)}</text>${l.detail ? `<text x="14" y="22" dominant-baseline="middle" font-size="9" fill="${esc(theme.muted)}">${esc(l.detail)}</text>` : ""}</g>`;
     }).join("")}</g>`;
   } else if (c.legendPlacement === "top" && c.legend.length) {
     let lx = plot.x;
     legend = `<g font-size="10">${c.legend.map((l) => {
       const w = 16 + l.name.length * 6.2 + (l.detail ? l.detail.length * 5.6 : 0);
-      const g = `<g transform="translate(${lx},14)"><rect width="7" height="7" y="-5" rx="1.5" fill="${esc(l.color)}" /><text x="11" fill="${esc(theme.text)}">${esc(l.name)}${l.detail ? `  ${esc(l.detail)}` : ""}</text></g>`;
+      const g = `<g data-series="${esc(l.name)}" style="cursor:pointer" transform="translate(${lx},14)"><rect width="7" height="7" y="-5" rx="1.5" fill="${esc(l.color)}" /><text x="11" fill="${esc(theme.text)}">${esc(l.name)}${l.detail ? `  ${esc(l.detail)}` : ""}</text></g>`;
       lx += w + 10;
       return g;
     }).join("")}</g>`;
@@ -421,13 +462,13 @@ export function svgFromCompiled(c: CompiledChart, options?: SvgRenderOptions): s
   const clipped = c.nodes.filter((n) => n.clip !== false);
   const body = clipped.map((n, i) => nodeSvg(n, i, theme, uid)).join("");
   const overlay = c.nodes.map((n, i) => n.clip === false ? nodeSvg(n, 800 + i, theme, uid) : "").join("");
-  const clip = `<defs><clipPath id="${clipId}"><rect x="${plot.x}" y="${plot.y}" width="${plot.w}" height="${plot.h}" /></clipPath></defs><g clip-path="url(#${clipId})">${body}</g>`;
+  const clip = `<defs><clipPath id="${clipId}"><rect x="${plot.x}" y="${plot.y}" width="${plot.w}" height="${plot.h}" /></clipPath></defs><g clip-path="url(#${clipId})"><g data-role="plot">${body}</g></g>`;
 
   const description = c.ariaDescription
     ? `<desc id="${descId}">${esc(c.ariaDescription)}</desc>`
     : "";
   const describedBy = description ? ` aria-describedby="${descId}"` : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(c.ariaLabel)}"${describedBy} style="display:block;width:100%;height:100%;${font};background:${esc(theme.background)}">${description}<rect width="${width}" height="${height}" fill="${esc(theme.background)}" />${legend}${grid}${clip}${overlay}${yAxis}${xAxis}${last}${bar}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(c.ariaLabel)}"${describedBy} style="display:block;width:100%;height:100%;user-select:none;-webkit-user-select:none;${font};background:${esc(theme.background)}">${description}<rect width="${width}" height="${height}" fill="${esc(theme.background)}" />${legend}${grid}${clip}${overlay}${yAxis}${xAxis}${last}${bar}</svg>`;
 }
 
 function distToSeg(x: number, y: number, x1: number, y1: number, x2: number, y2: number): number {
@@ -856,7 +897,7 @@ function paintNodeCanvas(ctx: CanvasRenderingContext2D, n: SceneNode, theme: Das
   if (n.type === "line" && n.points?.length) {
     if (stroke === "none") return;
     ctx.beginPath();
-    traceMonotone(ctx, n.points);
+    traceSeries(ctx, n.points, n.curve);
     ctx.strokeStyle = stroke;
     ctx.lineWidth = n.strokeWidth ?? 1;
     ctx.lineJoin = "round";
@@ -867,20 +908,25 @@ function paintNodeCanvas(ctx: CanvasRenderingContext2D, n: SceneNode, theme: Das
     return;
   }
   if (n.type === "area" && n.points && n.points.length >= 3) {
-    const middle = n.points.slice(1, -1);
-    if (!middle.length) return;
-    const baseline = n.points[0]!.y;
     ctx.beginPath();
-    traceMonotone(ctx, middle);
-    const last = middle[middle.length - 1]!;
-    const first = middle[0]!;
-    ctx.lineTo(last.x, baseline);
-    ctx.lineTo(first.x, baseline);
-    ctx.closePath();
+    if (n.role === "ranged-area") {
+      traceSeries(ctx, n.points, "linear");
+      ctx.closePath();
+    } else {
+      const middle = n.points.slice(1, -1);
+      if (!middle.length) return;
+      const baseline = n.points[0]!.y;
+      traceSeries(ctx, middle, n.curve);
+      const last = middle[middle.length - 1]!;
+      const first = middle[0]!;
+      ctx.lineTo(last.x, baseline);
+      ctx.lineTo(first.x, baseline);
+      ctx.closePath();
+    }
     if (fill !== "none") {
-      let top = baseline;
-      let bottom = baseline;
-      for (const point of middle) {
+      let top = n.points[0]!.y;
+      let bottom = n.points[0]!.y;
+      for (const point of n.points) {
         top = Math.min(top, point.y);
         bottom = Math.max(bottom, point.y);
       }
@@ -1203,12 +1249,35 @@ export function paintChartCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart
   ctx.restore();
 }
 
+export interface ChartPointerEvent {
+  x: unknown;
+  y?: number;
+  series?: string;
+  datum?: unknown;
+  node: SceneNode | null;
+  sample: HoverSample | null;
+}
+
+export interface MountInteraction {
+  brush?: boolean;
+  zoom?: boolean;
+  pan?: boolean;
+  navigator?: boolean;
+  rangePresets?: boolean;
+}
+
 export interface MountChartOptions {
   width?: number;
   height?: number;
   renderer?: "svg" | "canvas";
   /** Stable DOM/SVG id prefix; useful for hydration and deterministic tests. */
   idPrefix?: string;
+  viewport?: ChartViewport;
+  interaction?: boolean | MountInteraction;
+  hiddenSeries?: readonly string[];
+  onViewportChange?: (viewport: ChartViewport) => void;
+  onSelect?: (event: ChartPointerEvent) => void;
+  onTooltip?: (event: ChartPointerEvent | null) => void;
 }
 
 export interface MountHandle {
@@ -1216,6 +1285,8 @@ export interface MountHandle {
   update(definition: ChartDefinition, options?: MountChartOptions): void;
   /** Latest renderer-neutral scene, useful for diagnostics and deterministic tests. */
   getScene(): CompiledChart | null;
+  setViewport(viewport: ChartViewport | null): void;
+  getViewport(): ChartViewport | null;
   destroy(): void;
 }
 
@@ -1240,10 +1311,14 @@ export function mountChart(
   let lastInputWidth = Number.NaN;
   let lastInputHeight = Number.NaN;
   let destroyed = false;
+  let liveViewport: ChartViewport | null = opts?.viewport ?? null;
+  let hiddenSeries = new Set(opts?.hiddenSeries ?? []);
+  let fullXExtent: [number, number] | null = null;
   const wrap = document.createElement("div");
-  wrap.style.cssText = "position:relative;width:100%;height:100%;overflow:hidden;";
+  wrap.style.cssText =
+    "position:relative;width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;touch-action:none;";
   const stage = document.createElement("div");
-  stage.style.cssText = "width:100%;height:100%;";
+  stage.style.cssText = "width:100%;flex:1 1 auto;min-height:0;position:relative;overflow:hidden;";
   const hairV = document.createElement("div");
   const hairH = document.createElement("div");
   const chipY = document.createElement("div");
@@ -1263,8 +1338,16 @@ export function mountChart(
     "clip:rect(0,0,0,0)",
     "white-space:nowrap",
     "border:0",
+    "user-select:none",
   ].join(";");
   wrap.append(stage, hairV, hairH, chipY, chipX, cell, dot, tip, a11y);
+  const presetsBar = document.createElement("div");
+  presetsBar.style.cssText = "display:none;gap:4px;padding:4px 8px 0;flex-wrap:wrap;align-items:center;flex:0 0 auto;position:relative;z-index:6;touch-action:manipulation;";
+  const nav = document.createElement("div");
+  nav.style.cssText = "display:none;position:relative;height:40px;margin:0 8px 6px;cursor:crosshair;flex:0 0 auto;z-index:6;";
+  const brushRect = document.createElement("div");
+  brushRect.style.cssText = "display:none;position:absolute;pointer-events:none;z-index:5;background:rgba(102,216,158,0.12);border:1px solid rgba(102,216,158,0.7);";
+  wrap.append(presetsBar, nav, brushRect);
   el.appendChild(wrap);
 
   const applyTheme = (theme: DashboardTheme): void => {
@@ -1295,6 +1378,7 @@ export function mountChart(
       "box-sizing:border-box",
       `box-shadow:inset 0 0 0 1.5px ${theme.text}, 0 0 0 1px ${theme.background}`,
     ].join(";");
+    wrap.style.touchAction = "none";
   };
   const hideOverlay = (): void => {
     hairV.style.display = "none";
@@ -1314,18 +1398,197 @@ export function mountChart(
     height: currentOptions.height ?? Math.max(1, wrap.clientHeight || el.clientHeight || 320),
   });
 
+  const flags = (): MountInteraction => {
+    const raw = currentOptions.interaction;
+    if (raw === false) return {};
+    const base: MountInteraction = raw === true || raw == null
+      ? { brush: true, zoom: true, pan: true }
+      : { brush: true, zoom: true, pan: true, ...raw };
+    return base;
+  };
+
+  const isChromeEvent = (ev: Event): boolean => {
+    const node = ev.target as Node | null;
+    if (!node || node.nodeType !== 1) return false;
+    return presetsBar.contains(node) || nav.contains(node);
+  };
+
+  const linearExtent = (scene: CompiledChart | null): [number, number] | null => {
+    if (scene?.xScale.kind !== "linear") return null;
+    return [asNumber(scene.xScale.domain[0]), asNumber(scene.xScale.domain[1])];
+  };
+
+  const resolvedExtent = (): [number, number] | null => (
+    fullXExtent ?? linearExtent(compiledRef)
+  );
+
+  const syncPresetButtons = (): void => {
+    const extent = resolvedExtent();
+    const vp = liveViewport?.x;
+    for (const btn of presetsBar.querySelectorAll("button")) {
+      const preset = btn.textContent as RangePreset;
+      if (!RANGE_PRESETS.includes(preset)) continue;
+      btn.hidden = extent != null && preset !== "ALL" && !presetZoomsIn(preset, extent);
+      let on = preset === "ALL" && !vp;
+      if (vp && vp.length === 2 && extent && Number.isFinite(asNumber(vp[0]))) {
+        const want = viewportFromPreset(preset, extent);
+        if (want.x && want.x.length === 2) {
+          const span = Math.max(Math.abs(extent[1] - extent[0]), 1);
+          on = Math.abs(asNumber(vp[0]) - asNumber(want.x[0])) / span < 0.02
+            && Math.abs(asNumber(vp[1]) - asNumber(want.x[1])) / span < 0.02;
+        }
+      }
+      btn.setAttribute("aria-pressed", String(on));
+      btn.style.fontWeight = on ? "600" : "400";
+      btn.style.background = on
+        ? "var(--tv-color-toolbar-button-background-active, rgba(255,255,255,0.1))"
+        : "transparent";
+    }
+  };
+
+  const ensurePresetButtons = (): void => {
+    if (presetsBar.childElementCount) return;
+    presetsBar.setAttribute("role", "group");
+    presetsBar.setAttribute("aria-label", "Visible time range");
+    for (const preset of RANGE_PRESETS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = preset;
+      btn.setAttribute("aria-label", `Range ${preset}`);
+      btn.style.cssText = "border:0;background:transparent;color:inherit;font:inherit;font-size:11px;padding:2px 6px;border-radius:3px;cursor:pointer;touch-action:manipulation;";
+      btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+      btn.addEventListener("pointerup", (ev) => ev.stopPropagation());
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const extent = resolvedExtent();
+        if (!extent) return;
+        emitViewport(viewportFromPreset(preset, extent));
+      });
+      presetsBar.appendChild(btn);
+    }
+  };
+
+  const prepareChrome = (polar: boolean, heatmap: boolean): void => {
+    const interact = flags();
+    const cartesian = !polar && !heatmap;
+    if (interact.rangePresets && cartesian) ensurePresetButtons();
+    presetsBar.style.display = interact.rangePresets && cartesian ? "flex" : "none";
+    nav.style.display = interact.navigator && cartesian ? "block" : "none";
+  };
+
+  const emitViewport = (next: ChartViewport): void => {
+    liveViewport = next;
+    currentOptions.onViewportChange?.(next);
+    paint();
+  };
+
+  const stopChromePointer = (ev: Event): void => {
+    ev.stopPropagation();
+  };
+
+  const onNavPointerDown = (ev: PointerEvent): void => {
+    ev.stopPropagation();
+    const extent = resolvedExtent();
+    if (!extent) return;
+    const box = nav.getBoundingClientRect();
+    const t = (ev.clientX - box.left) / Math.max(1, box.width);
+    const mid = extent[0] + t * (extent[1] - extent[0]);
+    const span = (liveViewport?.x && liveViewport.x.length === 2)
+      ? Math.abs(asNumber(liveViewport.x[1]) - asNumber(liveViewport.x[0]))
+      : (extent[1] - extent[0]) * 0.25;
+    emitViewport({ x: [mid - span / 2, mid + span / 2] });
+  };
+
   const paint = (): void => {
     if (destroyed) throw new Error("[@razedotbot/charts] Cannot paint a destroyed chart mount.");
     const renderer = currentOptions.renderer ?? "svg";
     const idPrefix = safeId(currentOptions.idPrefix ?? autoId);
-    const { width: w, height: h } = inputSize();
-    const compiled = compileChart(current, { width: w, height: h });
-    if (renderer === "canvas") {
-      const canvas = document.createElement("canvas");
+    const interact = flags();
+    prepareChrome(compiledRef?.polar ?? false, compiledRef?.heatmap ?? false);
+    const wrapSize = inputSize();
+    let w = wrapSize.width;
+    let h = wrapSize.height;
+    if (currentOptions.width == null) w = Math.max(1, stage.clientWidth || w);
+    if (currentOptions.height == null) h = Math.max(1, stage.clientHeight || h);
+    const hidden = hiddenSeries.size ? Array.from(hiddenSeries) : currentOptions.hiddenSeries;
+    const viewport = liveViewport ?? currentOptions.viewport;
+    const overlayed = Boolean(viewport) || Boolean(hidden?.length);
+    let compiled = overlayed
+      ? compileChart(defineChart((size) => ({
+          ...current.spec(size),
+          ...(viewport ? { viewport } : {}),
+          ...(hidden?.length ? { hiddenSeries: hidden } : {}),
+        })), { width: w, height: h })
+      : compileChart(current, { width: w, height: h });
+    if (compiled.polar || compiled.heatmap) {
+      prepareChrome(true, true);
+    }
+    const showNav = Boolean(interact.navigator && !compiled.polar && !compiled.heatmap);
+    let fullScene: CompiledChart | null = overlayed ? null : compiled;
+    if (overlayed && (!fullXExtent || showNav)) {
+      fullScene = compileChart(current, {
+        width: Math.max(32, showNav ? nav.clientWidth || w : 64),
+        height: Math.max(24, showNav ? nav.clientHeight || 40 : 32),
+      });
+    }
+    const source = fullScene ?? compiled;
+    if (source.xScale.kind === "linear" && (!fullXExtent || !overlayed)) {
+      fullXExtent = linearExtent(source);
+    }
+    syncPresetButtons();
+    if (showNav && compiled.xScale.kind === "linear") {
+      let spark = nav.querySelector("canvas");
+      if (!spark) {
+        spark = document.createElement("canvas");
+        spark.style.cssText = "width:100%;height:100%;display:block;";
+        spark.setAttribute("aria-hidden", "true");
+        nav.appendChild(spark);
+      }
       const dpr = Math.max(1, window.devicePixelRatio || 1);
-      canvas.width = Math.floor(compiled.width * dpr);
-      canvas.height = Math.floor(compiled.height * dpr);
-      canvas.style.cssText = "width:100%;height:100%;display:block";
+      const nw = Math.max(1, nav.clientWidth);
+      const nh = Math.max(1, nav.clientHeight);
+      const sparkW = Math.floor(nw * dpr);
+      const sparkH = Math.floor(nh * dpr);
+      if (spark.width !== sparkW || spark.height !== sparkH) {
+        spark.width = sparkW;
+        spark.height = sparkH;
+      }
+      const sctx = spark.getContext("2d");
+      if (sctx) {
+        sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        sctx.clearRect(0, 0, nw, nh);
+        const sparkSource = fullScene ?? compiled;
+        const line = sparkSource.nodes.find((n) =>
+          (n.type === "line" || n.type === "area") && n.points && n.points.length > 1,
+        );
+        if (line?.points) {
+          sctx.beginPath();
+          line.points.forEach((p, i) => {
+            const x = ((p.x - sparkSource.plot.x) / Math.max(1, sparkSource.plot.w)) * nw;
+            const y = 4 + ((p.y - sparkSource.plot.y) / Math.max(1, sparkSource.plot.h)) * (nh - 8);
+            if (i === 0) sctx.moveTo(x, y);
+            else sctx.lineTo(x, y);
+          });
+          sctx.strokeStyle = compiled.theme.accent;
+          sctx.lineWidth = 1;
+          sctx.stroke();
+        }
+      }
+    }
+    if (renderer === "canvas") {
+      let canvas = stage.querySelector("canvas");
+      if (!canvas) {
+        canvas = document.createElement("canvas");
+        canvas.style.cssText = "width:100%;height:100%;display:block;user-select:none;-webkit-user-select:none";
+        stage.replaceChildren(canvas);
+      }
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const backingW = Math.floor(compiled.width * dpr);
+      const backingH = Math.floor(compiled.height * dpr);
+      if (canvas.width !== backingW || canvas.height !== backingH) {
+        canvas.width = backingW;
+        canvas.height = backingH;
+      }
       const summaryParts = [
         compiled.ariaDescription,
         compiled.legend.length
@@ -1336,6 +1599,7 @@ export function mountChart(
       canvas.setAttribute("role", "img");
       canvas.setAttribute("aria-label", compiled.ariaLabel);
       if (summaryParts.length) canvas.setAttribute("aria-describedby", `raze-summary-${idPrefix}`);
+      else canvas.removeAttribute("aria-describedby");
       const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1345,7 +1609,6 @@ export function mountChart(
       a11y.id = `raze-summary-${idPrefix}`;
       a11y.textContent = summaryParts.join(" ");
       a11y.hidden = false;
-      stage.replaceChildren(canvas);
     } else {
       const markup = svgFromCompiled(compiled, { idPrefix });
       applyTheme(compiled.theme);
@@ -1354,12 +1617,16 @@ export function mountChart(
       stage.innerHTML = markup;
     }
     compiledRef = compiled;
-    lastInputWidth = w;
-    lastInputHeight = h;
+    lastInputWidth = wrapSize.width;
+    lastInputHeight = wrapSize.height;
     hideOverlay();
   };
 
   const onMove = (ev: PointerEvent): void => {
+    if (isChromeEvent(ev)) {
+      hideOverlay();
+      return;
+    }
     const compiled = compiledRef;
     if (!compiled?.tooltip) {
       hideOverlay();
@@ -1528,10 +1795,19 @@ export function mountChart(
     }
     if (!text) {
       tip.style.display = "none";
+      currentOptions.onTooltip?.(null);
       return;
     }
     tip.textContent = text;
     tip.style.display = "block";
+    currentOptions.onTooltip?.({
+      x: compiled.xScale.kind === "linear" ? compiled.xScale.invert(sample?.x ?? x) : (sample?.tip ?? accentNode?.tip),
+      y: compiled.yScale.kind === "linear" ? compiled.yScale.invert(sample?.y ?? y) : undefined,
+      series: sample?.series ?? accentNode?.series,
+      datum: accentNode?.datum,
+      node: accentNode ?? null,
+      sample: sample ?? null,
+    });
     const tw = Math.min(220, Math.max(72, text.split("\n").reduce((a, l) => Math.max(a, l.length), 0) * 6.6 + 22));
     let left = cssX + 12;
     let top = cssY + 12;
@@ -1543,6 +1819,212 @@ export function mountChart(
     tip.style.boxShadow = `inset 2px 0 0 ${accent}, 0 0 0 1px ${theme.axis}`;
   };
 
+  type PanDrag = {
+    kind: "pan";
+    startX: number;
+    from: number;
+    to: number;
+    y?: [number, number];
+  };
+  let drag: null | PanDrag | { kind: "brush"; startX: number } = null;
+  let panRaf = 0;
+  let lastPanCssX = 0;
+
+  const plotXToDomain = (compiled: CompiledChart, cssX: number, box: DOMRect): number | null => {
+    if (compiled.xScale.kind !== "linear") return null;
+    const scaleX = (box.width || compiled.width) / compiled.width;
+    const x = cssX / scaleX;
+    return compiled.xScale.invert(x);
+  };
+
+  const capturePointer = (ev: PointerEvent): void => {
+    try { wrap.setPointerCapture(ev.pointerId); } catch { /* jsdom / detached */ }
+  };
+
+  const applyPanPreview = (userDx: number): void => {
+    const svg = stage.querySelector("svg");
+    if (!svg) return;
+    const t = userDx ? `translate(${userDx})` : "";
+    const plot = svg.querySelector("[data-role='plot']");
+    const labels = svg.querySelector("[data-role='x-labels']");
+    if (plot) {
+      if (t) plot.setAttribute("transform", t);
+      else plot.removeAttribute("transform");
+    }
+    if (labels) {
+      if (t) labels.setAttribute("transform", t);
+      else labels.removeAttribute("transform");
+    }
+  };
+
+  const panShift = (
+    compiled: CompiledChart,
+    state: PanDrag,
+    cssX: number,
+    box: DOMRect,
+  ): { viewport: ChartViewport; userDx: number } => {
+    const scaleX = (box.width || compiled.width) / compiled.width;
+    const userDx = (cssX - state.startX) / scaleX;
+    const delta = -(userDx / (compiled.plot.w || 1)) * (state.to - state.from);
+    const viewport: ChartViewport = { x: [state.from + delta, state.to + delta] };
+    if (state.y) viewport.y = state.y;
+    return { viewport, userDx };
+  };
+
+  const cancelPanRaf = (): void => {
+    if (!panRaf) return;
+    cancelAnimationFrame(panRaf);
+    panRaf = 0;
+  };
+
+  const schedulePanCommit = (): void => {
+    if (panRaf) return;
+    const tick = (): void => {
+      panRaf = 0;
+      if (destroyed || drag?.kind !== "pan") return;
+      if (liveViewport) currentOptions.onViewportChange?.(liveViewport);
+      if ((currentOptions.renderer ?? "svg") !== "canvas") return;
+      paint();
+      if (drag?.kind !== "pan" || compiledRef?.xScale.kind !== "linear") return;
+      drag.startX = lastPanCssX;
+      drag.from = compiledRef.xScale.domain[0];
+      drag.to = compiledRef.xScale.domain[1];
+      applyPanPreview(0);
+    };
+    if (typeof requestAnimationFrame === "function") panRaf = requestAnimationFrame(tick);
+    else tick();
+  };
+
+  const onWheel = (ev: WheelEvent): void => {
+    if (isChromeEvent(ev)) return;
+    const compiled = compiledRef;
+    const interact = flags();
+    if (!interact.zoom || !compiled || compiled.polar || compiled.heatmap || compiled.xScale.kind !== "linear") return;
+    ev.preventDefault();
+    const box = wrap.getBoundingClientRect();
+    const domain = compiled.xScale.domain;
+    const [lo, hi] = domain[0] <= domain[1] ? domain : [domain[1], domain[0]];
+    const factor = ev.deltaY > 0 ? 1.12 : 0.88;
+    const anchor = plotXToDomain(compiled, ev.clientX - box.left, box) ?? (lo + hi) / 2;
+    const nextLo = anchor - (anchor - lo) * factor;
+    const nextHi = anchor + (hi - anchor) * factor;
+    emitViewport({ x: [nextLo, nextHi] });
+  };
+
+  const onPointerDown = (ev: PointerEvent): void => {
+    if (isChromeEvent(ev)) return;
+    const compiled = compiledRef;
+    const interact = flags();
+    if (!compiled || compiled.polar || compiled.heatmap) return;
+    const target = ev.target as Element | null;
+    const series = target?.closest?.("[data-series]")?.getAttribute("data-series");
+    if (series) {
+      if (hiddenSeries.has(series)) hiddenSeries.delete(series);
+      else hiddenSeries.add(series);
+      paint();
+      return;
+    }
+    const box = wrap.getBoundingClientRect();
+    const cssX = ev.clientX - box.left;
+    if (ev.shiftKey && interact.brush) {
+      drag = { kind: "brush", startX: cssX };
+      brushRect.style.display = "block";
+      ev.preventDefault();
+      window.getSelection?.()?.removeAllRanges();
+      capturePointer(ev);
+      return;
+    }
+    if (interact.pan && compiled.xScale.kind === "linear") {
+      const [from, to] = compiled.xScale.domain;
+      drag = {
+        kind: "pan",
+        startX: cssX,
+        from,
+        to,
+        y: compiled.yScale.kind === "linear"
+          ? [compiled.yScale.domain[0], compiled.yScale.domain[1]]
+          : undefined,
+      };
+      lastPanCssX = cssX;
+      hideOverlay();
+      wrap.style.cursor = "grabbing";
+      ev.preventDefault();
+      window.getSelection?.()?.removeAllRanges();
+      capturePointer(ev);
+    }
+  };
+
+  const onPointerDrag = (ev: PointerEvent): void => {
+    if (!drag) return;
+    ev.preventDefault();
+    const compiled = compiledRef;
+    if (!compiled) return;
+    const box = wrap.getBoundingClientRect();
+    const cssX = ev.clientX - box.left;
+    if (drag.kind === "brush") {
+      const left = Math.min(drag.startX, cssX);
+      brushRect.style.left = `${left}px`;
+      brushRect.style.top = `${compiled.plot.y}px`;
+      brushRect.style.width = `${Math.abs(cssX - drag.startX)}px`;
+      brushRect.style.height = `${compiled.plot.h}px`;
+      brushRect.style.display = "block";
+      return;
+    }
+    lastPanCssX = cssX;
+    const { viewport, userDx } = panShift(compiled, drag, cssX, box);
+    liveViewport = viewport;
+    applyPanPreview(userDx);
+    schedulePanCommit();
+  };
+
+  const onPointerUp = (ev: PointerEvent): void => {
+    if (!drag && isChromeEvent(ev)) return;
+    const compiled = compiledRef;
+    const box = wrap.getBoundingClientRect();
+    const cssX = ev.clientX - box.left;
+    cancelPanRaf();
+    wrap.style.cursor = "";
+    if (drag?.kind === "brush" && compiled && compiled.xScale.kind === "linear") {
+      const a = plotXToDomain(compiled, drag.startX, box);
+      const b = plotXToDomain(compiled, cssX, box);
+      brushRect.style.display = "none";
+      if (a != null && b != null && Math.abs(a - b) > 0) {
+        emitViewport({ x: a < b ? [a, b] : [b, a] });
+      }
+    } else if (drag?.kind === "pan" && compiled && compiled.xScale.kind === "linear") {
+      const { viewport } = panShift(compiled, drag, cssX, box);
+      applyPanPreview(0);
+      emitViewport({ x: viewport.x });
+    } else if (!drag && compiled) {
+      const scaleX = (box.width || compiled.width) / compiled.width;
+      const scaleY = (box.height || compiled.height) / compiled.height;
+      const x = (ev.clientX - box.left) / scaleX;
+      const y = (ev.clientY - box.top) / scaleY;
+      const sample = nearestSample(compiled, x, y);
+      const node = hitTestCompiled(compiled, x, y);
+      currentOptions.onSelect?.({
+        x: compiled.xScale.kind === "linear" ? compiled.xScale.invert(x) : x,
+        y: compiled.yScale.kind === "linear" ? compiled.yScale.invert(y) : undefined,
+        series: sample?.series ?? node?.series,
+        datum: node?.datum,
+        node,
+        sample,
+      });
+    }
+    drag = null;
+    brushRect.style.display = "none";
+  };
+
+  const onSelectStart = (ev: Event): void => {
+    if (isChromeEvent(ev)) return;
+    ev.preventDefault();
+  };
+
+  const onPointerMoveAll = (ev: PointerEvent): void => {
+    onPointerDrag(ev);
+    if (!drag) onMove(ev);
+  };
+
   const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
     const next = inputSize();
     if (next.width === lastInputWidth && next.height === lastInputHeight) return;
@@ -1550,13 +2032,35 @@ export function mountChart(
   }) : null;
   try {
     paint();
-    wrap.addEventListener("pointermove", onMove);
+    wrap.addEventListener("pointermove", onPointerMoveAll);
     wrap.addEventListener("pointerleave", hideOverlay);
+    wrap.addEventListener("pointerdown", onPointerDown);
+    wrap.addEventListener("pointerup", onPointerUp);
+    wrap.addEventListener("pointercancel", onPointerUp);
+    wrap.addEventListener("selectstart", onSelectStart);
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    presetsBar.addEventListener("pointerdown", stopChromePointer);
+    presetsBar.addEventListener("pointerup", stopChromePointer);
+    presetsBar.addEventListener("wheel", stopChromePointer);
+    nav.addEventListener("pointerdown", onNavPointerDown);
+    nav.addEventListener("pointerup", stopChromePointer);
+    nav.addEventListener("wheel", stopChromePointer);
     ro?.observe(wrap);
   } catch (error) {
     ro?.disconnect();
-    wrap.removeEventListener("pointermove", onMove);
+    wrap.removeEventListener("pointermove", onPointerMoveAll);
     wrap.removeEventListener("pointerleave", hideOverlay);
+    wrap.removeEventListener("pointerdown", onPointerDown);
+    wrap.removeEventListener("pointerup", onPointerUp);
+    wrap.removeEventListener("pointercancel", onPointerUp);
+    wrap.removeEventListener("selectstart", onSelectStart);
+    wrap.removeEventListener("wheel", onWheel);
+    presetsBar.removeEventListener("pointerdown", stopChromePointer);
+    presetsBar.removeEventListener("pointerup", stopChromePointer);
+    presetsBar.removeEventListener("wheel", stopChromePointer);
+    nav.removeEventListener("pointerdown", onNavPointerDown);
+    nav.removeEventListener("pointerup", stopChromePointer);
+    nav.removeEventListener("wheel", stopChromePointer);
     wrap.remove();
     throw error;
   }
@@ -1567,7 +2071,11 @@ export function mountChart(
       const previousOptions = currentOptions;
       const previousScene = compiledRef;
       current = next;
-      if (nextOptions) currentOptions = { ...currentOptions, ...nextOptions };
+      if (nextOptions) {
+        currentOptions = { ...currentOptions, ...nextOptions };
+        if (nextOptions.viewport) liveViewport = nextOptions.viewport;
+        if (nextOptions.hiddenSeries) hiddenSeries = new Set(nextOptions.hiddenSeries);
+      }
       try {
         paint();
       } catch (error) {
@@ -1578,12 +2086,31 @@ export function mountChart(
       }
     },
     getScene() { return destroyed ? null : compiledRef; },
+    setViewport(viewport) {
+      liveViewport = viewport;
+      paint();
+    },
+    getViewport() {
+      return liveViewport;
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      cancelPanRaf();
       ro?.disconnect();
-      wrap.removeEventListener("pointermove", onMove);
+      wrap.removeEventListener("pointermove", onPointerMoveAll);
       wrap.removeEventListener("pointerleave", hideOverlay);
+      wrap.removeEventListener("pointerdown", onPointerDown);
+      wrap.removeEventListener("pointerup", onPointerUp);
+      wrap.removeEventListener("pointercancel", onPointerUp);
+      wrap.removeEventListener("selectstart", onSelectStart);
+      wrap.removeEventListener("wheel", onWheel);
+      presetsBar.removeEventListener("pointerdown", stopChromePointer);
+      presetsBar.removeEventListener("pointerup", stopChromePointer);
+      presetsBar.removeEventListener("wheel", stopChromePointer);
+      nav.removeEventListener("pointerdown", onNavPointerDown);
+      nav.removeEventListener("pointerup", stopChromePointer);
+      nav.removeEventListener("wheel", stopChromePointer);
       wrap.remove();
       compiledRef = null;
     },

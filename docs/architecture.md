@@ -78,13 +78,33 @@ case where unsubscribe happens before async setup completes. Existing
 ### Study updates
 
 Built-in EMA, SMA, and RSI recognize append and replace-last mutations and
-update the newest sample incrementally. A new array reference, a backfill, a
-historical correction, or a custom study uses the public full-array `compute`
-contract. Custom code must not assume incremental calls.
+update the newest sample incrementally. VWAP, Bollinger Bands, and MACD use
+the multi-series `compute` contract (`{ series }`) and recompute in full after
+a structural data change. VWAP also resets on UTC day boundaries. A new array
+reference, a backfill, a historical correction, or a custom study uses the
+public full-array `compute` contract. Custom code must not assume incremental
+calls.
 
-The financial context is not yet a serializable immutable state model. Undo,
-redo, deterministic layout persistence, and selector-based subscriptions are
-therefore outside the current contract.
+`widget.save()` / `widget.load()` serialize a versioned JSON snapshot: symbol,
+interval, visible range, style/scale flags, drawings, study specs (not derived
+values), and compare symbols. The host owns storage. `executeActionById("undo"|"redo")`
+walks a command stack for drawings and studies. `disableUndo` on a shape skips
+that create. There is no cloud layout.
+
+Trading overlays use a separate `TradingStore` because broker state has a
+different lifecycle from drawings. `ChartApi` creates fluent line adapters;
+the renderer consumes line fields each frame; gesture hit-testing updates
+prices through the store so callbacks and `trading_event` stay consistent for
+pointer, keyboard, and programmatic changes. Bracket orders share a group id
+used to derive risk, reward, and linked cancellation. Trading state is absent
+from layout snapshots and should be rehydrated from the host's execution
+backend.
+
+Native `viewport` windows source rows in `compileChart` before geometry and
+decimation. `mountChart` can brush (Shift-drag), wheel-zoom, and pan that
+window; `createViewportGroup()` keeps several mounts on the same X range.
+React `<Brush>` maps `startIndex`/`endIndex` onto that viewport. Coordinated
+panes stay host-owned: the compiler does not layout multiple plots.
 
 ## Native chart runtime
 
@@ -110,6 +130,8 @@ a browser and returns a small lifecycle handle:
 interface MountHandle {
   update(definition: ChartDefinition, options?: MountChartOptions): void;
   getScene(): CompiledChart | null;
+  setViewport(viewport: ChartViewport | null): void;
+  getViewport(): ChartViewport | null;
   destroy(): void;
 }
 ```

@@ -1,9 +1,8 @@
 // Finance scene: named marks in the frozen paint order. Each mark reuses the
 // existing Canvas paint functions so pixels stay identical.
 
-import { drawCandles } from "./paint/candles";
+import { drawPriceSeries } from "./paint/candles";
 import { drawVolume } from "./paint/volume";
-import { drawLineArea } from "./paint/lineArea";
 import { drawGrid, drawSeparators } from "./paint/grid";
 import { drawOverlayStudies, drawSubPanes } from "./paint/studies";
 import { drawShapes, drawDraft } from "./paint/shapes";
@@ -12,6 +11,9 @@ import { drawPriceAxis, drawTimeAxis } from "./paint/axes";
 import { drawLastPrice } from "./paint/lastPrice";
 import { drawCrosshair } from "./paint/crosshair";
 import { drawLegend } from "./paint/legend";
+import { drawSessionBreaks } from "./paint/session";
+import { drawAxisChrome, drawCompare, drawTimeNavigator, drawTimescaleMarks } from "./paint/chrome";
+import { drawTrading } from "./paint/trading";
 import type { FinanceView } from "./paint/view";
 
 export type FinanceMarkKind =
@@ -26,6 +28,7 @@ export type FinanceMarkKind =
   | "subPanes"
   | "timeAxis"
   | "lastPrice"
+  | "trading"
   | "crosshair"
   | "legend"
   | "markTooltip"
@@ -43,6 +46,7 @@ export const FINANCE_PAINT_ORDER: readonly FinanceMarkKind[] = [
   "subPanes",
   "timeAxis",
   "lastPrice",
+  "trading",
   "crosshair",
   "legend",
   "markTooltip",
@@ -59,16 +63,15 @@ export function paintFinanceMark(
   switch (kind) {
     case "grid":
       drawGrid(ctx, v, priceTicks, timeTicks);
+      drawSessionBreaks(ctx, v);
       break;
     case "volume":
       drawVolume(ctx, v);
       break;
-    case "series": {
-      const style = v.context.chartStyle;
-      if (style === "line" || style === "area") drawLineArea(ctx, v, style === "area");
-      else drawCandles(ctx, v, v.seriesBars);
+    case "series":
+      drawPriceSeries(ctx, v);
+      drawCompare(ctx, v);
       break;
-    }
     case "overlayStudies":
       drawOverlayStudies(ctx, v);
       break;
@@ -89,9 +92,15 @@ export function paintFinanceMark(
       break;
     case "timeAxis":
       drawTimeAxis(ctx, v, timeTicks);
+      drawTimescaleMarks(ctx, v);
+      drawAxisChrome(ctx, v);
+      drawTimeNavigator(ctx, v);
       break;
     case "lastPrice":
       drawLastPrice(ctx, v);
+      break;
+    case "trading":
+      drawTrading(ctx, v);
       break;
     case "crosshair":
       drawCrosshair(ctx, v);

@@ -54,13 +54,17 @@ When the Canvas has focus:
 | Key | Action |
 | --- | --- |
 | Left / Right Arrow | Pan the visible range |
+| Up / Down Arrow | Move a selected editable trading line by one minimum tick (Shift = 10 ticks) |
 | `+` / `-` | Zoom in / out |
 | `F` | Fit all loaded data |
 | Escape | Cancel the active drawing and clear selection |
-| Delete / Backspace | Remove the selected drawing |
+| Delete / Backspace | Remove the selected drawing or cancel the selected trading order |
+| Ctrl/Cmd+Z | Undo the last drawing or study command |
+| Ctrl/Cmd+Shift+Z or Ctrl+Y | Redo |
 
 Keyboard actions announce concise state changes without moving focus. Pointer
-down moves focus to the Canvas, and keyboard focus receives a visible ring.
+down moves focus to the Canvas without a visible ring. Keyboard focus (Tab or
+a subsequent key press) receives a visible ring.
 
 ## Built-in chrome
 
@@ -68,7 +72,9 @@ The header, left tools, and scale controls expose named toolbar/group semantics
 and orientation. Controls use native buttons with accessible labels and state:
 
 - interval selection exposes the current item;
-- drawing and scale toggles expose pressed/checked state;
+- timeframe presets and go-to-date are a labelled range group;
+- symbol search is a labelled search field when the header search feature is on;
+- drawing, magnet, stay-in-mode, objects-tree, and scale toggles expose pressed/checked state;
 - decorative icons are hidden from assistive technology;
 - separators are semantic;
 - loading uses `role="status"`, polite live updates, and busy state.

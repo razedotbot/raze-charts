@@ -103,6 +103,17 @@ export class TimeIndex {
     return Math.max(0, Math.min(this.points.length - 1, Math.round(logical)));
   }
 
+  sessionBreaks(): number[] {
+    const n = this.points.length;
+    if (n < 2 || this.expectedStepMs <= 0) return [];
+    const out: number[] = [];
+    const limit = this.expectedStepMs * 1.6;
+    for (let i = 1; i < n; i++) {
+      if (this.points[i]!.time - this.points[i - 1]!.time > limit) out.push(i);
+    }
+    return out;
+  }
+
   private lowerBound(timeMs: number): number {
     let low = 0;
     let high = this.points.length;

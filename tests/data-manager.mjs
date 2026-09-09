@@ -47,6 +47,7 @@ function makeControlledFeed() {
   const resolves = [];
   const history = [];
   const marks = [];
+  const timescale = [];
   const subscriptions = [];
   const unsubscribed = [];
 
@@ -66,6 +67,9 @@ function makeControlledFeed() {
     getMarks(info, from, to, onData, resolution) {
       marks.push({ info, from, to, onData, resolution });
     },
+    getTimescaleMarks(info, from, to, onData, resolution) {
+      timescale.push({ info, from, to, onData, resolution });
+    },
   };
 
   return {
@@ -73,6 +77,7 @@ function makeControlledFeed() {
     resolves,
     history,
     marks,
+    timescale,
     subscriptions,
     unsubscribed,
     ready() {
@@ -94,18 +99,25 @@ function makeContext(datafeed, symbol = "A", resolution = "1") {
     theme: /** @type {any} */ ({}),
     features: new Set(),
     bars: [],
-    marks: [],
+    timescaleMarks: [],
     visibleRange: { from: 0, to: 1 },
     autoScalePrice: true,
     priceRange: null,
     chartStyle: "candles",
     logScale: false,
     percentScale: false,
+    volumeMode: "overlay",
+    magnet: false,
+    stayInDrawingMode: false,
+    compare: [],
+    syncedCrosshair: null,
     drawingTool: "cursor",
     selectedShapeId: null,
     intervalChanged: new Delegate(),
     dataChanged: new Delegate(),
     drawingEvent: new Delegate(),
+    viewportChanged: new Delegate(),
+    crosshairMoved: new Delegate(),
     requestPaint() {},
   };
 }
@@ -134,6 +146,10 @@ function makeContext(datafeed, symbol = "A", resolution = "1") {
 
   assert(context.symbol === "B" && context.resolution === "5", "latest symbol and interval commit atomically");
   assert(context.bars.length === 1 && context.bars[0].close === 20, "latest history wins the race");
+  assert(
+    context.visibleRange.to - context.visibleRange.from >= 120,
+    "sparse initial history preserves the default candle density",
+  );
   assert(intervals.join(",") === "5", "combined symbol/interval change emits intervalChanged once");
 
   staleHistory.onResult([bar(9_000, 999)], { noData: false });
@@ -298,6 +314,44 @@ function makeContext(datafeed, symbol = "A", resolution = "1") {
   delayed.remove();
   assert(!delayedHost.querySelector(".raze-chart-root"), "remove during boot tears down the DOM and is idempotent");
   assert(resolveCalls === 0 && !chartReady, "late boot callbacks cannot resurrect a removed widget");
+}
+
+{
+  const controlled = makeControlledFeed();
+  const context = makeContext(controlled.feed);
+  const payloads = [];
+  context.intervalChanged.subscribe(null, (_res, payload) => payloads.push(payload));
+  const manager = new DataManager(context);
+  const boot = manager.resolveAndLoad();
+  controlled.ready();
+  await spinUntil(() => controlled.resolves.length === 1, "timeframe payload resolution");
+  controlled.resolves[0].onResolve(symbolInfo("A"));
+  await spinUntil(() => controlled.history.length === 1, "timeframe payload history");
+  const now = Date.now();
+  controlled.history[0].onResult([
+    bar(now - 3_600_000, 10),
+    bar(now - 1_800_000, 11),
+    bar(now, 12),
+  ], { noData: false });
+  await boot;
+  await spinUntil(() => controlled.marks.length === 1 && controlled.timescale.length === 1, "marks and timescale requests");
+  controlled.marks[0].onData([]);
+  controlled.timescale[0].onData([{ id: "evt", time: Math.floor(now / 1000), color: "red", label: "E", tooltip: ["event"] }]);
+  await spinUntil(() => context.timescaleMarks.length === 1, "timescale marks applied");
+
+  const older = now - 10 * 86_400_000;
+  const reveal = manager.revealTimeRange(Math.floor(older / 1000), Math.floor(now / 1000));
+  await spinUntil(() => controlled.history.length === 2, "revealTimeRange pages older history");
+  controlled.history[1].onResult([bar(older, 8), bar(now - 3_600_000, 10)], { noData: false });
+  await reveal;
+  assert(context.bars[0].time === older, "setVisibleRange-style reveal merges older bars");
+
+  const changed = manager.changeResolution("5");
+  await spinUntil(() => controlled.history.length === 3, "resolution change after reveal");
+  controlled.history[2].onResult([bar(now, 12)], { noData: false });
+  await changed;
+  assert(payloads.at(-1)?.timeframe?.type === "time-range", "intervalChanged carries a timeframe payload");
+  manager.destroy();
 }
 
 console.log("\nDATA MANAGER: PASS");

@@ -21,9 +21,11 @@ import {
   pie,
   point,
   radar,
+  ruleX,
   ruleY,
   type ChartDefinition,
   type ChartMark,
+  type ChartViewport,
   type CompiledChart,
   type MountChartOptions,
   type MountHandle,
@@ -70,6 +72,10 @@ export interface ChartProps {
   className?: string;
   style?: ChartHostStyle;
   onReady?: (chart: ReactChartHandle) => void;
+  interaction?: MountChartOptions["interaction"];
+  viewport?: ChartViewport;
+  onViewportChange?: NonNullable<MountChartOptions["onViewportChange"]>;
+  onSelect?: NonNullable<MountChartOptions["onSelect"]>;
 }
 
 /** React owns mount lifecycle; consumers receive only immutable diagnostic snapshots. */
@@ -137,6 +143,10 @@ export function Chart({
   className,
   style,
   onReady,
+  interaction,
+  viewport,
+  onViewportChange,
+  onSelect,
 }: ChartProps): ReactElement {
   assertChartDimension("width", width);
   assertChartDimension("height", height);
@@ -159,8 +169,12 @@ export function Chart({
       ...(ariaDescription ? { ariaDescription } : {}),
     }));
   }, [definition, ariaLabel, ariaDescription]);
-  const latest = useRef({ definition: def, width, height, renderer, idPrefix, onReady });
-  latest.current = { definition: def, width, height, renderer, idPrefix, onReady };
+  const latest = useRef({
+    definition: def, width, height, renderer, idPrefix, onReady, interaction, viewport, onViewportChange, onSelect,
+  });
+  latest.current = {
+    definition: def, width, height, renderer, idPrefix, onReady, interaction, viewport, onViewportChange, onSelect,
+  };
 
   useEffect(() => {
     const el = host.current;
@@ -171,6 +185,10 @@ export function Chart({
       height: current.height,
       renderer: current.renderer,
       idPrefix: current.idPrefix,
+      interaction: current.interaction,
+      viewport: current.viewport,
+      onViewportChange: current.onViewportChange,
+      onSelect: current.onSelect,
     });
     handle.current = mounted;
     applied.current = {
@@ -214,9 +232,11 @@ export function Chart({
       && previous.renderer === renderer
       && previous.idPrefix === idPrefix
     ) return;
-    mounted.update(def, { width, height, renderer, idPrefix });
+    mounted.update(def, {
+      width, height, renderer, idPrefix, interaction, viewport, onViewportChange, onSelect,
+    });
     applied.current = { definition: def, width, height, renderer, idPrefix };
-  }, [def, width, height, renderer, idPrefix]);
+  }, [def, width, height, renderer, idPrefix, interaction, viewport, onViewportChange, onSelect]);
 
   return (
     <div
@@ -246,6 +266,7 @@ export interface LineProps<T extends object = Record<string, unknown>> extends N
   strokeWidth?: number;
   lastValue?: boolean;
   dashed?: boolean;
+  curve?: "monotone" | "linear" | "step";
 }
 
 export interface AreaProps<T extends object = Record<string, unknown>> extends NamedSeriesProps<T> {
@@ -255,6 +276,8 @@ export interface AreaProps<T extends object = Record<string, unknown>> extends N
   strokeWidth?: number;
   lastValue?: boolean;
   dashed?: boolean;
+  curve?: "monotone" | "linear" | "step";
+  y0?: DataKey<T>;
 }
 
 export interface BarProps<T extends object = Record<string, unknown>> extends NamedSeriesProps<T> {
@@ -298,11 +321,15 @@ export interface AxisProps<T extends object = Record<string, unknown>> {
   dataKey?: DataKey<T>;
 }
 
-export interface ReferenceLineProps {
-  y: number;
-  stroke?: string;
-  strokeWidth?: number;
-  name?: string;
+export type ReferenceLineProps =
+  | { y: number; x?: never; stroke?: string; strokeWidth?: number; name?: string }
+  | { x: number | string | Date; y?: never; stroke?: string; strokeWidth?: number; name?: string };
+
+export interface BrushProps {
+  dataKey?: string;
+  height?: number;
+  startIndex?: number;
+  endIndex?: number;
 }
 
 type ComponentRole =
@@ -352,8 +379,7 @@ export const CartesianGrid = descriptor<Record<never, never>>("grid", "Cartesian
 export const Tooltip = descriptor<Record<never, never>>("tooltip", "Tooltip");
 export const Legend = descriptor<Record<never, never>>("legend", "Legend");
 export const ReferenceLine = descriptor<ReferenceLineProps>("reference-line", "ReferenceLine");
-/** @deprecated Brush is reserved for a future viewport controller and currently throws when used. */
-export const Brush = descriptor<Record<never, never>>("brush", "Brush");
+export const Brush = descriptor<BrushProps>("brush", "Brush");
 
 export type ResponsiveContainerStyle = Omit<CSSProperties, "width" | "height" | "position" | "minWidth"> & {
   readonly width?: never;
@@ -470,8 +496,8 @@ const COMPONENT_NAMES: Record<ComponentRole, string> = {
 };
 
 const SUPPORTED_PROPS: Record<ComponentRole, readonly string[]> = {
-  line: ["dataKey", "data", "name", "stroke", "strokeWidth", "lastValue", "dashed"],
-  area: ["dataKey", "data", "name", "stroke", "fill", "fillOpacity", "strokeWidth", "lastValue", "dashed"],
+  line: ["dataKey", "data", "name", "stroke", "strokeWidth", "lastValue", "dashed", "curve"],
+  area: ["dataKey", "data", "name", "stroke", "fill", "fillOpacity", "strokeWidth", "lastValue", "dashed", "curve", "y0"],
   bar: ["dataKey", "data", "name", "fill", "stackId", "lastValue", "fade"],
   scatter: ["dataKey", "data", "name", "fill", "fillOpacity", "r"],
   pie: ["dataKey", "data", "name", "innerRadius", "outerRadius"],
@@ -482,8 +508,8 @@ const SUPPORTED_PROPS: Record<ComponentRole, readonly string[]> = {
   grid: [],
   tooltip: [],
   legend: [],
-  "reference-line": ["y", "stroke", "strokeWidth", "name"],
-  brush: [],
+  "reference-line": ["y", "x", "stroke", "strokeWidth", "name"],
+  brush: ["dataKey", "height", "startIndex", "endIndex"],
 };
 
 const SERIES_ROLES = new Set<ComponentRole>(["line", "area", "bar", "scatter", "pie", "radar", "heatmap"]);
@@ -526,6 +552,14 @@ function assertDescriptorProps(role: ComponentRole, props: Record<string, unknow
       && props.innerRadius > props.outerRadius) {
     throw new Error("[@razedotbot/charts/react] <Pie> innerRadius cannot exceed outerRadius.");
   }
+  if (role === "brush") {
+    for (const key of ["startIndex", "endIndex", "height"] as const) {
+      const value = props[key];
+      if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+        throw new Error(`[@razedotbot/charts/react] <Brush> ${key} must be a finite non-negative number.`);
+      }
+    }
+  }
 }
 
 function specFromJsx<T extends object>(
@@ -535,12 +569,14 @@ function specFromJsx<T extends object>(
   xDefault: DataKey<T>,
   valueDefault: DataKey<T>,
   heatmapYDefault?: DataKey<T>,
-): ChartDefinition {
+): { definition: ChartDefinition; interaction?: MountChartOptions["interaction"] } {
   let xKey: DataKey<T> = xDefault;
   let yKey: DataKey<T> | undefined = heatmapYDefault;
   let grid = false;
   let tooltip = false;
   let legend = false;
+  let viewport: ChartViewport | undefined;
+  let interaction: MountChartOptions["interaction"];
   const marks: ChartMark[] = [];
   const descriptors: {
     role: ComponentRole;
@@ -572,10 +608,23 @@ function specFromJsx<T extends object>(
       if (role === "tooltip") tooltip = true;
       if (role === "legend") legend = true;
       if (role === "brush") {
-        throw new Error(
-          "[@razedotbot/charts/react] <Brush> is not implemented yet. " +
-          "Use a controlled visible range instead; unsupported components are never ignored silently.",
-        );
+        const start = typeof p.startIndex === "number" ? p.startIndex : undefined;
+        const end = typeof p.endIndex === "number" ? p.endIndex : undefined;
+        if (start != null || end != null) {
+          const lo = Math.max(0, start ?? 0);
+          const hi = Math.min(data.length - 1, end ?? data.length - 1);
+          const key = (p.dataKey as DataKey<T> | undefined) ?? xKey;
+          const a = data[lo]?.[key];
+          const b = data[hi]?.[key];
+          if (a != null && b != null) viewport = { x: [a as number | Date, b as number | Date] };
+        }
+        interaction = {
+          brush: true,
+          zoom: true,
+          pan: true,
+          navigator: typeof p.height === "number" ? p.height > 0 : true,
+          rangePresets: true,
+        };
       }
   }
 
@@ -588,7 +637,7 @@ function specFromJsx<T extends object>(
         marks.push({
           kind: "line", data: seriesData, x: xKey, y: dataKey, name,
           stroke: props.stroke, strokeWidth: props.strokeWidth,
-          lastValue: props.lastValue, dashed: props.dashed,
+          lastValue: props.lastValue, dashed: props.dashed, curve: props.curve,
         });
       }
       if (role === "area") {
@@ -597,6 +646,7 @@ function specFromJsx<T extends object>(
           kind: "area", data: seriesData, x: xKey, y: dataKey, name,
           stroke: props.stroke, fill: props.fill, fillOpacity: props.fillOpacity,
           strokeWidth: props.strokeWidth, lastValue: props.lastValue, dashed: props.dashed,
+          curve: props.curve, y0: props.y0,
         });
       }
       if (role === "bar") {
@@ -638,14 +688,24 @@ function specFromJsx<T extends object>(
         marks.push({ kind: "heatmap", data: seriesData, x: xKey, y: yKey, valueKey: dataKey, name });
       }
       if (role === "reference-line") {
-        if (typeof p.y !== "number" || !Number.isFinite(p.y)) {
-          throw new Error("[@razedotbot/charts/react] <ReferenceLine> requires a finite numeric y prop.");
+        const hasY = typeof p.y === "number" && Number.isFinite(p.y);
+        const hasX = p.x != null && p.x !== "";
+        if (hasY === hasX) {
+          throw new Error("[@razedotbot/charts/react] <ReferenceLine> requires exactly one of y or x.");
         }
-        marks.push(ruleY([p.y], {
-          stroke: p.stroke as string | undefined,
-          strokeWidth: p.strokeWidth as number | undefined,
-          name: (p.name as string | undefined) ?? "Reference",
-        }));
+        if (hasY) {
+          marks.push(ruleY([p.y as number], {
+            stroke: p.stroke as string | undefined,
+            strokeWidth: p.strokeWidth as number | undefined,
+            name: (p.name as string | undefined) ?? "Reference",
+          }));
+        } else {
+          marks.push(ruleX([p.x as number | string | Date], {
+            stroke: p.stroke as string | undefined,
+            strokeWidth: p.strokeWidth as number | undefined,
+            name: (p.name as string | undefined) ?? "Reference",
+          }));
+        }
       }
   }
 
@@ -666,7 +726,7 @@ function specFromJsx<T extends object>(
     }
     else marks.push(line(data, { x: xKey, y: valueDefault }));
   }
-  return defineChart({ marks, grid, tooltip, legend });
+  return { definition: defineChart({ marks, grid, tooltip, legend, viewport }), interaction };
 }
 
 export interface BoxProps<T extends object = Record<string, unknown>> {
@@ -705,13 +765,14 @@ function JsxChart<T extends object>({
   value: DataKey<T>;
   heatmapY?: DataKey<T>;
 }): ReactElement {
-  const definition = useMemo(
+  const parsed = useMemo(
     () => specFromJsx(kind, data, children, x, value, heatmapY),
     [kind, data, children, x, value, heatmapY],
   );
   return (
     <Chart
-      definition={definition}
+      definition={parsed.definition}
+      interaction={parsed.interaction}
       width={width}
       height={height}
       renderer={renderer}
@@ -805,7 +866,8 @@ export function createChartComponents<T extends object>(defaults: ChartComponent
     Tooltip,
     Legend,
     ReferenceLine,
+    Brush,
   } as const;
 }
 
-export { defineChart, line, area, bar, point, ruleY, pie, radar, heatmap, compileChart } from "../chart";
+export { defineChart, line, area, bar, point, ruleY, ruleX, pie, radar, heatmap, compileChart, createViewportGroup } from "../chart";

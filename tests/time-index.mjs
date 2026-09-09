@@ -29,6 +29,7 @@ const point = (time) => ({ time });
   assert.equal(index.timeAt(0.5), midpoint, "gap interpolation is reversible");
   assert.equal(index.nearestIndex(midpoint - 1), 0);
   assert.equal(index.nearestIndex(midpoint), 1);
+  assert.deepEqual(index.sessionBreaks(), [1, 2], "gaps larger than 1.6x the expected step are session breaks");
   assert.equal(index.timeAt(3), tuesday + hour, "future whitespace uses the expected resolution");
 }
 

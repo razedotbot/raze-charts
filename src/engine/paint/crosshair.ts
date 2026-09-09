@@ -1,14 +1,26 @@
 import { TIME_AXIS_H } from "../layout";
-import { formatAxisPrice, formatCrosshairTime, indexForX, priceForY } from "../plotScale";
-import { parseResolution } from "../../util/resolution";
+import { formatAxisPrice, formatCrosshairTime, indexForX, priceForY, xForIndex, yForPrice } from "../plotScale";
+import { parseResolution, resolutionToMs } from "../../util/resolution";
+import { TimeIndex } from "../../data/TimeIndex";
 import { formatCompact } from "../../util/format";
 import { drawAxisTag, neutralPill, roundRect, timeAxisTopOf } from "./primitives";
 import type { FinanceView } from "./view";
 
 export function drawCrosshair(ctx: CanvasRenderingContext2D, v: FinanceView): void {
-  if (!v.crosshair.active) return;
+  const synced = v.context.syncedCrosshair;
+  if (!v.crosshair.active && !synced?.active) return;
   const t = v.context.theme;
-  const { x, y } = v.crosshair;
+  let x = v.crosshair.x;
+  let y = v.crosshair.y;
+  if (!v.crosshair.active && synced?.active) {
+    const bars = v.context.bars;
+    if (bars.length) {
+      const timeIndex = new TimeIndex(bars, resolutionToMs(v.context.resolution));
+      const idx = timeIndex.indexAt(synced.unixTime * 1000);
+      if (idx != null) x = xForIndex(v, idx);
+    }
+    y = yForPrice(v, synced.price);
+  }
   const contentBottom = timeAxisTopOf(v);
   if (x < v.plotL || x > v.plotL + v.plotW || y < v.plotT || y > contentBottom) return;
 

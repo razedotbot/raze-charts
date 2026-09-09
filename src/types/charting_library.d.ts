@@ -242,6 +242,130 @@ export interface ILineDataSourceApi {
   setProperties(props: Record<string, unknown>): void;
 }
 
+// ── Trading primitives ────────────────────────────────────────────────────
+export type TradingSide = "buy" | "sell";
+export type TradingLineKind = "order" | "position" | "stop-loss" | "take-profit";
+export type TradingLineStatus = "working" | "filled" | "cancelled";
+export type TradingLineStyle = 0 | 1 | 2;
+
+export interface TradingLineSnapshot {
+  id: string;
+  kind: TradingLineKind;
+  side: TradingSide;
+  price: number;
+  quantity: string;
+  text: string;
+  status: TradingLineStatus;
+  editable: boolean;
+  groupId?: string;
+}
+
+export interface TradingLineEvent {
+  type: "moving" | "moved" | "modified" | "cancelled" | "removed";
+  reason: "drag" | "keyboard" | "api" | "cancel";
+  line: TradingLineSnapshot;
+}
+
+export interface TradingLineOptions {
+  id?: string;
+  kind?: TradingLineKind;
+  side?: TradingSide;
+  /** Defaults to the latest close, allowing TradingView-style create-then-configure usage. */
+  price?: number;
+  quantity?: string | number;
+  text?: string;
+  status?: TradingLineStatus;
+  editable?: boolean;
+  includeInAutoScale?: boolean;
+  lineColor?: string;
+  lineStyle?: TradingLineStyle;
+  lineWidth?: number;
+  bodyBackgroundColor?: string;
+  bodyTextColor?: string;
+  quantityBackgroundColor?: string;
+  quantityTextColor?: string;
+  cancelButtonBackgroundColor?: string;
+  cancelButtonIconColor?: string;
+  tooltip?: string;
+  modifyTooltip?: string;
+  cancelTooltip?: string;
+  onChange?: (event: TradingLineEvent) => void;
+}
+
+/** Fluent order/position line adapter, shaped after TradingView's trading primitives. */
+export interface ITradingLineAdapter {
+  readonly id: string;
+  remove(): void;
+  /** Trigger the same cancellation lifecycle as the on-chart × control. */
+  cancel(): void;
+  getPrice(): number;
+  setPrice(price: number): this;
+  getText(): string;
+  setText(text: string): this;
+  getQuantity(): string;
+  setQuantity(quantity: string | number): this;
+  setEditable(editable: boolean): this;
+  setLineColor(color: string): this;
+  setLineStyle(style: TradingLineStyle): this;
+  setLineWidth(width: number): this;
+  setBodyBackgroundColor(color: string): this;
+  setBodyTextColor(color: string): this;
+  setQuantityBackgroundColor(color: string): this;
+  setQuantityTextColor(color: string): this;
+  setCancelButtonBackgroundColor(color: string): this;
+  setCancelButtonIconColor(color: string): this;
+  setTooltip(text: string): this;
+  setModifyTooltip(text: string): this;
+  setCancelTooltip(text: string): this;
+  onMoving(callback: (line: ITradingLineAdapter) => void): this;
+  onMove(callback: (line: ITradingLineAdapter) => void): this;
+  onModify(callback: (line: ITradingLineAdapter) => void): this;
+  onCancel(callback: (line: ITradingLineAdapter) => void): this;
+}
+
+export interface BracketOrderOptions {
+  id?: string;
+  side: TradingSide;
+  entryPrice: number;
+  stopLossPrice?: number;
+  takeProfitPrice?: number;
+  quantity?: string | number;
+  currency?: string;
+  editable?: boolean;
+  includeInAutoScale?: boolean;
+  entryText?: string;
+  stopLossText?: string;
+  takeProfitText?: string;
+  onChange?: (bracket: BracketOrderSnapshot, event: TradingLineEvent) => void;
+  onCancel?: (bracket: BracketOrderSnapshot) => void;
+}
+
+export interface BracketOrderSnapshot {
+  id: string;
+  side: TradingSide;
+  quantity: string;
+  currency: string;
+  entryPrice: number;
+  stopLossPrice?: number;
+  takeProfitPrice?: number;
+  risk?: number;
+  reward?: number;
+  riskRewardRatio?: number;
+}
+
+export interface IBracketOrderAdapter {
+  readonly id: string;
+  readonly entry: ITradingLineAdapter;
+  readonly stopLoss?: ITradingLineAdapter;
+  readonly takeProfit?: ITradingLineAdapter;
+  setEntryPrice(price: number): this;
+  setStopLossPrice(price: number): this;
+  setTakeProfitPrice(price: number): this;
+  setQuantity(quantity: string | number): this;
+  snapshot(): BracketOrderSnapshot;
+  remove(): void;
+}
+
 // ── Context menu ────────────────────────────────────────────────────────────
 export interface ContextMenuItem {
   position: "top" | "bottom";
@@ -268,6 +392,14 @@ export interface IChartWidgetApi {
   getShapeById(entityId: EntityId): ILineDataSourceApi;
   removeEntity(entityId: EntityId): void;
   removeAllShapes(): void;
+  /** TradingView-style editable order line. */
+  createOrderLine(options?: TradingLineOptions): Promise<ITradingLineAdapter>;
+  /** TradingView-style editable open-position line. */
+  createPositionLine(options?: TradingLineOptions): Promise<ITradingLineAdapter>;
+  /** Linked entry + optional stop-loss/take-profit lines with risk/reward visualization. */
+  createBracketOrder(options: BracketOrderOptions): Promise<IBracketOrderAdapter>;
+  getTradingLineById(id: string): ITradingLineAdapter | null;
+  removeAllTradingLines(): void;
   /** Add a study — built-in (EMA / SMA / RSI) or registered via `raze.custom_studies`. Returns an entity id removable via removeEntity. */
   createStudy(
     name: string,
@@ -280,6 +412,8 @@ export interface IChartWidgetApi {
   resetData(): void;
   setSymbol(symbol: string, callback?: () => void): void;
   symbol(): string;
+  executeActionById?(actionId: "undo" | "redo" | "magnet" | string): void;
+  createCompare?(symbol: string): Promise<EntityId>;
 }
 
 // ── Header button ───────────────────────────────────────────────────────────
@@ -290,6 +424,29 @@ export interface CreateButtonOptions {
 }
 
 // ── Widget ──────────────────────────────────────────────────────────────────
+export interface ChartLayoutSnapshot {
+  version: 1;
+  symbol: string;
+  interval: string;
+  visibleRange: { from: number; to: number };
+  chartStyle: ChartStyleName;
+  logScale: boolean;
+  percentScale: boolean;
+  volumeMode?: VolumeMode;
+  magnet?: boolean;
+  drawings: {
+    id: string;
+    shape: string;
+    points: ShapePoint[];
+    text: string;
+    lock: boolean;
+    zOrder: "top" | "bottom";
+    overrides: Record<string, unknown>;
+  }[];
+  studies: { name: string; length: number; color: string }[];
+  compare?: string[];
+}
+
 export interface IChartingLibraryWidget {
   onChartReady(callback: () => void): void;
   headerReady(): Promise<void>;
@@ -302,6 +459,8 @@ export interface IChartingLibraryWidget {
   onContextMenu(callback: ContextMenuCallback): void;
   setSymbol(symbol: string, interval: ResolutionString, callback?: () => void): void;
   remove(): void;
+  save(callback?: (state: ChartLayoutSnapshot) => void): ChartLayoutSnapshot;
+  load(state: ChartLayoutSnapshot): Promise<void>;
 }
 
 export interface LoadingScreenOptions {
@@ -317,10 +476,14 @@ export type SidebarToolId =
   | "cursor"
   | "trend_line"
   | "horizontal_line"
+  | "vertical_line"
+  | "ray"
+  | "extended_line"
+  | "measure"
   | "fib_retracement"
   | "rectangle"
   | "text";
-export type SidebarActionId = "indicators" | "fit" | "screenshot" | "fullscreen" | "chart_type";
+export type SidebarActionId = "indicators" | "fit" | "screenshot" | "fullscreen" | "chart_type" | "objects_tree";
 export interface SidebarCustomItem {
   id: string;
   title: string;
@@ -330,7 +493,16 @@ export interface SidebarCustomItem {
 }
 export type SidebarItem = SidebarToolId | SidebarActionId | "separator" | SidebarCustomItem;
 
-export type ChartStyleName = "candles" | "line" | "area" | "heikin_ashi";
+export type ChartStyleName =
+  | "candles"
+  | "line"
+  | "area"
+  | "heikin_ashi"
+  | "bars"
+  | "hollow_candles"
+  | "baseline"
+  | "columns";
+export type VolumeMode = "overlay" | "pane" | "hidden";
 
 export interface StudyPaneLevel {
   value: number;
@@ -339,6 +511,19 @@ export interface StudyPaneLevel {
   /** Show the value on the sub-pane's right axis. */
   axisLabel?: boolean;
 }
+
+export type StudySeriesStyle = "line" | "histogram" | "band";
+export interface StudySeries {
+  values: (number | null)[];
+  style?: StudySeriesStyle;
+  color?: string;
+  name?: string;
+}
+export interface StudyInputs {
+  length: number;
+  [key: string]: number | string;
+}
+export type StudyComputeResult = (number | null)[] | { series: StudySeries[] };
 
 /** A pluggable indicator: built-ins (EMA/SMA/RSI) and `raze.custom_studies` share this shape. */
 export interface StudyDefinition {
@@ -350,7 +535,7 @@ export interface StudyDefinition {
   keywords?: string[];
   /** "overlay" plots on the price pane; "pane" renders in its own sub-pane. */
   pane: "overlay" | "pane";
-  defaults?: { length?: number; color?: string };
+  defaults?: { length?: number; color?: string; [key: string]: number | string | undefined };
   /** Fixed sub-pane value range (e.g. RSI 0–100). Auto-fits to visible values when omitted. */
   range?: { min: number; max: number };
   /** Horizontal guide levels drawn in the sub-pane. */
@@ -359,8 +544,8 @@ export interface StudyDefinition {
   label?: string;
   /** Legend value formatter; defaults to price formatting (overlay) or 1 decimal (pane). */
   formatValue?: (value: number) => string;
-  /** Values aligned 1:1 with `bars`; null = warm-up gap. Must be pure. */
-  compute: (bars: Bar[], inputs: { length: number }) => (number | null)[];
+  /** Values aligned 1:1 with `bars`; null = warm-up gap. Arrays stay one line; objects carry MACD/bands. */
+  compute: (bars: Bar[], inputs: StudyInputs) => StudyComputeResult;
 }
 
 export interface IndicatorPreset {
@@ -410,7 +595,7 @@ export interface RazeChartsOptions {
   compact_breakpoint?: number;
   /** Left-sidebar layout (builtin ids, "separator", custom buttons). Defaults to the full built-in set. */
   sidebar?: SidebarItem[];
-  /** Styles offered by the chart-type picker. Defaults to all four. */
+  /** Styles offered by the chart-type picker. Defaults to the closed catalog. */
   chart_types?: ChartStyleName[];
   /** Rows of the Indicators panel. Defaults to EMA 9/21, SMA 20/50, RSI 14 + one row per custom study. */
   indicator_presets?: IndicatorPreset[];
@@ -423,6 +608,11 @@ export interface RazeChartsOptions {
    * axis ticks stay `+x.xx%`.
    */
   format_price?: (value: number, pricescale: number) => string;
+  layout?: "1" | "2x1" | "2x2";
+  layout_symbols?: string[];
+  layout_child?: boolean;
+  volume_mode?: VolumeMode;
+  magnet?: boolean;
 }
 
 export interface ChartingLibraryWidgetOptions {
@@ -447,7 +637,7 @@ export interface ChartingLibraryWidgetOptions {
   width?: number;
   height?: number;
   toolbar_bg?: string;
-  /** TV-compatible favorites; `intervals` drives the header interval row. */
+  /** TV-compatible favorites; `intervals` lead the inline header interval row. */
   favorites?: { intervals?: ResolutionString[]; [key: string]: unknown };
   /**
    * TradingView drop-in custom formatters. Raze honours
@@ -475,6 +665,8 @@ export declare class widget implements IChartingLibraryWidget {
   onContextMenu(callback: ContextMenuCallback): void;
   setSymbol(symbol: string, interval: ResolutionString, callback?: () => void): void;
   remove(): void;
+  save(callback?: (state: ChartLayoutSnapshot) => void): ChartLayoutSnapshot;
+  load(state: ChartLayoutSnapshot): Promise<void>;
 }
 
 export declare const version: string;
