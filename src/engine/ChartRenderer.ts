@@ -52,6 +52,9 @@ export class ChartRenderer implements GestureHost {
 
   private pctBase = 1;
   private seriesBars: Bar[] = [];
+  private heikinAshiSource: Bar[] | null = null;
+  private heikinAshiBars: Bar[] | null = null;
+  private cachedChartStyle: ChartContext["chartStyle"] | null = null;
   private gestures: GestureController;
   private onData: () => void;
 
@@ -65,7 +68,10 @@ export class ChartRenderer implements GestureHost {
   ) {
     this.canvas = engine.canvas;
     this.gestures = new GestureController(this);
-    this.onData = () => this.engine.markDirty();
+    this.onData = () => {
+      this.invalidateSeriesBars();
+      this.engine.markDirty();
+    };
   }
 
   get selectedShapeId(): string | null {
@@ -81,6 +87,7 @@ export class ChartRenderer implements GestureHost {
   }
 
   attach(): void {
+    this.invalidateSeriesBars();
     this.engine.paintHook = (ctx) => this.render(ctx);
     this.context.dataChanged.subscribe(null, this.onData as never);
     this.gestures.attach();
@@ -90,6 +97,7 @@ export class ChartRenderer implements GestureHost {
     this.context.dataChanged.unsubscribe(null, this.onData as never);
     this.gestures.destroy();
     this.engine.paintHook = null;
+    this.invalidateSeriesBars();
   }
 
   fitContent(): void {
@@ -178,11 +186,32 @@ export class ChartRenderer implements GestureHost {
   }
 
   private refreshSeriesBars(): void {
-    if (this.context.chartStyle === "heikin_ashi") {
-      this.seriesBars = heikinAshi(this.context.bars);
-    } else {
-      this.seriesBars = this.context.bars;
+    const style = this.context.chartStyle;
+    if (style !== this.cachedChartStyle) {
+      this.invalidateSeriesBars();
+      this.cachedChartStyle = style;
     }
+
+    if (style !== "heikin_ashi") {
+      this.seriesBars = this.context.bars;
+      return;
+    }
+
+    // DataManager fires dataChanged for both array replacement and in-place
+    // forming-bar updates. Retaining the transformed array between those
+    // events keeps pointer-driven repaints O(visible bars), while the source
+    // identity check also protects callers that replace context.bars directly.
+    if (this.heikinAshiSource !== this.context.bars || !this.heikinAshiBars) {
+      this.heikinAshiSource = this.context.bars;
+      this.heikinAshiBars = heikinAshi(this.context.bars);
+    }
+    this.seriesBars = this.heikinAshiBars;
+  }
+
+  private invalidateSeriesBars(): void {
+    this.heikinAshiSource = null;
+    this.heikinAshiBars = null;
+    this.seriesBars = [];
   }
 
   private render(ctx: CanvasRenderingContext2D): void {

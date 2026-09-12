@@ -6,17 +6,16 @@
 import type {
   ChartingLibraryWidgetOptions,
   ChartLayoutSnapshot,
+  Bar,
   ContextMenuCallback,
   CreateButtonOptions,
-  CreateShapeOptions,
   EntityId,
   IChartingLibraryWidget,
   IChartWidgetApi,
   ResolutionString,
-  ShapePoint,
 } from "../types/charting_library";
 import { buildFeatureSet, type ChartContext, type IndexRange } from "./context";
-import { buildTheme } from "./theme";
+import { buildTheme, isLightColor } from "./theme";
 import { createPriceFormatter } from "../util/format";
 import { Delegate } from "../util/delegate";
 import { DataManager } from "../data/DataManager";
@@ -47,6 +46,8 @@ export class Widget implements IChartingLibraryWidget {
   private root: HTMLDivElement;
   private bodyRow: HTMLDivElement;
   private chartArea: HTMLDivElement;
+  private primaryChartArea: HTMLDivElement;
+  private layoutPanes: HTMLDivElement[] = [];
   private context: ChartContext;
   private data: DataManager;
   private shapes: ShapeStore;
@@ -81,6 +82,13 @@ export class Widget implements IChartingLibraryWidget {
   private layoutSyncing = false;
   private compareSeq = 0;
   private countdownTimer = 0;
+  private contextMenuRequestId = 0;
+  private contextMenuPendingCleanup: (() => void) | null = null;
+  private loadId = 0;
+  private readonly loadingSubscriptionOwner = {};
+  private readonly onDataAvailable = (): void => {
+    if (this.context.bars.length) this.finishLoading();
+  };
 
   constructor(options: ChartingLibraryWidgetOptions) {
     const containerEl =
@@ -146,11 +154,38 @@ export class Widget implements IChartingLibraryWidget {
       "overflow:hidden",
       "user-select:none",
       "-webkit-user-select:none",
-      `background:${theme.paneBackground}`,
-      `font-family:${fontFamily}`,
-      "--tv-color-pane-background:" + theme.paneBackground,
-      "--tv-color-platform-background:" + theme.paneBackground,
     ].join(";");
+    this.root.style.background = theme.paneBackground;
+    this.root.style.fontFamily = fontFamily;
+    const toolbarBackground = options.toolbar_bg ?? theme.paneBackground;
+    const lightChrome = isLightColor(toolbarBackground);
+    const lightPopup = isLightColor(theme.paneBackground);
+    const chromeText = lightChrome ? "#2a2e39" : "#d1d4dc";
+    const popupText = lightPopup ? "#2a2e39" : "#d1d4dc";
+    const chromeAccent = lightChrome ? "#174ea6" : "#66d89e";
+    const hoverBackground = lightChrome ? "rgba(19,23,34,0.08)" : "rgba(255,255,255,0.08)";
+    const activeBackground = lightChrome ? "rgba(23,78,166,0.12)" : "rgba(102,216,158,0.18)";
+    const popupBackground = lightPopup ? "#ffffff" : "#1e222d";
+    const popupHover = lightPopup ? "rgba(19,23,34,0.08)" : "rgba(255,255,255,0.08)";
+    const chromeVariables: Record<string, string> = {
+      "--tv-color-pane-background": theme.paneBackground,
+      "--tv-color-platform-background": toolbarBackground,
+      "--tv-color-toolbar-button-background": options.toolbar_bg ?? "transparent",
+      "--tv-color-toolbar-button-background-hover": hoverBackground,
+      "--tv-color-toolbar-button-background-active": activeBackground,
+      "--tv-color-toolbar-button-text": chromeText,
+      "--tv-color-toolbar-button-text-hover": chromeAccent,
+      "--tv-color-toolbar-divider-background": theme.scaleLine,
+      "--tv-color-popup-background": popupBackground,
+      "--tv-color-popup-element-text": popupText,
+      "--tv-color-popup-element-background-hover": popupHover,
+      "--tv-color-popup-shadow": lightPopup
+        ? "0 12px 24px -10px rgba(19,23,34,0.28)"
+        : "0 12px 24px -10px rgba(0,0,0,0.6)",
+    };
+    for (const [name, value] of Object.entries(chromeVariables)) {
+      this.root.style.setProperty(name, value);
+    }
     containerEl.appendChild(this.root);
 
     if (showHeader) {
@@ -198,14 +233,16 @@ export class Widget implements IChartingLibraryWidget {
     this.chartArea = document.createElement("div");
     this.chartArea.style.cssText = "position:relative;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden;user-select:none;-webkit-user-select:none;";
     this.bodyRow.appendChild(this.chartArea);
+    this.layoutPanes = this.prepareLayoutPanes();
+    this.primaryChartArea = this.layoutPanes[0]!;
 
     this.data = new DataManager(this.context);
-    this.shapes = new ShapeStore(this.context);
+    this.shapes = new ShapeStore(this.context, this.commands);
     this.trading = new TradingStore(this.context);
     const registry = new StudyRegistry();
     for (const def of raze?.custom_studies ?? []) registry.register(def);
-    this.studies = new StudyStore(this.context, registry);
-    this.engine = new ChartEngine(this.chartArea, this.context);
+    this.studies = new StudyStore(this.context, registry, this.commands);
+    this.engine = new ChartEngine(this.primaryChartArea, this.context);
     this.syncAccessibility();
     this.renderer = new ChartRenderer(this.context, this.engine, this.shapes, this.trading, this.data, this.studies);
     this.renderer.setToolDoneHandler((tool) => {
@@ -218,11 +255,15 @@ export class Widget implements IChartingLibraryWidget {
         this.scaleBar?.sync();
         this.context.requestPaint();
       });
-      this.chartArea.appendChild(this.scaleBar.el);
+      this.primaryChartArea.appendChild(this.scaleBar.el);
     }
 
     this.loading = new LoadingScreen(options.loading_screen, theme.paneBackground);
-    this.chartArea.appendChild(this.loading.el);
+    this.primaryChartArea.appendChild(this.loading.el);
+    this.context.dataChanged.subscribe(
+      this.loadingSubscriptionOwner,
+      this.onDataAvailable as (...args: never[]) => void,
+    );
 
     this.indicatorsMenu = new IndicatorsMenu(
       this.context,
@@ -254,8 +295,8 @@ export class Widget implements IChartingLibraryWidget {
           },
         );
       },
-      createShape: (point, opts) => this.createShapeTracked(point, opts),
-      createMultipointShape: (points, opts) => this.createPointsTracked(points, opts),
+      createShape: (point, opts) => this.shapes.create(point, opts),
+      createMultipointShape: (points, opts) => this.shapes.createPoints(points, opts),
       getShapeById: (id) => this.shapes.adapter(id),
       removeEntity: (id) => this.removeEntityTracked(id),
       removeAllShapes: () => this.shapes.removeAll(),
@@ -283,12 +324,6 @@ export class Widget implements IChartingLibraryWidget {
           inputs: extra,
         });
         if (!id) return Promise.reject(new Error(`[raze-charts] unknown study: ${name}`));
-        this.commands.push({
-          undo: () => { this.studies.remove(id); },
-          redo: () => {
-            this.studies.add({ name, length, color, lock: !!lock, forceOverlay: !!forceOverlay, inputs: extra });
-          },
-        });
         return Promise.resolve(id);
       },
       setVisibleRange: (range) => this.data.revealTimeRange(range.from, range.to),
@@ -331,18 +366,23 @@ export class Widget implements IChartingLibraryWidget {
 
   private toggleFullscreen(): void {
     const el = this.root;
-    if (!document.fullscreenElement) {
-      void el.requestFullscreen?.();
-    } else {
-      void document.exitFullscreen?.();
+    try {
+      const request = !document.fullscreenElement
+        ? el.requestFullscreen?.()
+        : document.exitFullscreen?.();
+      void request?.catch((error: unknown) => this.reportError("toggle fullscreen", error));
+    } catch (error) {
+      this.reportError("toggle fullscreen", error);
     }
   }
 
   private async boot(): Promise<void> {
+    let loadFailed = false;
     try {
       await this.data.resolveAndLoad();
     } catch (e) {
-      if (!this.destroyed) console.error("[raze-charts] failed to load symbol", e);
+      loadFailed = true;
+      if (!this.destroyed) this.reportError("load symbol", e);
     }
     if (this.destroyed) return;
 
@@ -354,6 +394,9 @@ export class Widget implements IChartingLibraryWidget {
           this.runDataChange(
             `change resolution to ${res}`,
             () => this.data.changeResolution(res),
+            undefined,
+            undefined,
+            () => this.intervalSelector?.setActive(String(this.context.resolution)),
           );
         },
         this.context.options.favorites?.intervals?.map(String),
@@ -369,7 +412,11 @@ export class Widget implements IChartingLibraryWidget {
           `change symbol to ${symbol}`,
           () => this.data.changeSymbol(symbol),
           undefined,
-          () => this.intervalSelector?.refresh(),
+          () => {
+            this.intervalSelector?.refresh();
+            this.symbolSearch?.setSymbol(this.context.symbol);
+          },
+          () => this.symbolSearch?.setSymbol(this.context.symbol),
         );
       });
       this.toolbar.searchSlot.appendChild(this.symbolSearch.el);
@@ -379,7 +426,14 @@ export class Widget implements IChartingLibraryWidget {
       this.timeframeBar = new TimeframeBar(
         this.context,
         this.toolbar.rangeSlot,
-        (preset) => { void this.applyPreset(preset); },
+        (preset) => {
+          void this.applyPreset(preset).catch((error: unknown) => {
+            if (!this.destroyed) {
+              this.timeframeBar?.setActive(null);
+              this.reportError(`apply timeframe ${preset}`, error);
+            }
+          });
+        },
         () => this.goToDate(),
       );
     }
@@ -389,8 +443,9 @@ export class Widget implements IChartingLibraryWidget {
     this.wireUndoKeys();
     this.startCountdownClock();
 
-    this.loading?.hide();
-    this.loading = null;
+    if (loadFailed) this.showLoadingError();
+    else if (!this.context.bars.length) this.showEmptyState();
+    else this.finishLoading();
     this.resolveHeaderReady();
     this.isChartReady = true;
     this.chartReady.fire();
@@ -414,6 +469,7 @@ export class Widget implements IChartingLibraryWidget {
     start: () => Promise<void>,
     callback?: () => void,
     after?: () => void,
+    onError?: () => void,
   ): void {
     if (this.destroyed) return;
     const requestId = ++this.dataChangeId;
@@ -421,27 +477,45 @@ export class Widget implements IChartingLibraryWidget {
     try {
       request = start();
     } catch (error) {
-      console.error(`[raze-charts] failed to ${description}`, error);
+      this.reportError(description, error);
+      if (!this.context.bars.length) this.showLoadingError();
+      try {
+        onError?.();
+      } catch (rollbackError) {
+        this.reportError(`rollback ${description}`, rollbackError);
+      }
       return;
     }
     void request
       .then(() => {
         if (this.destroyed || requestId !== this.dataChangeId) return;
         this.syncAccessibility();
-        after?.();
-        callback?.();
+        if (!this.context.bars.length) this.showEmptyState();
+        try {
+          after?.();
+        } catch (error) {
+          this.reportError(`finish ${description}`, error);
+        }
+        if (callback) this.callConsumerCallback(`${description} callback`, callback);
       })
       .catch((error: unknown) => {
         if (this.destroyed || requestId !== this.dataChangeId) return;
-        console.error(`[raze-charts] failed to ${description}`, error);
+        this.reportError(description, error);
+        if (!this.context.bars.length) this.showLoadingError();
+        try {
+          onError?.();
+        } catch (rollbackError) {
+          this.reportError(`rollback ${description}`, rollbackError);
+        }
       });
   }
 
   onChartReady(callback: () => void): void {
+    const safeCallback = (): void => this.callConsumerCallback("onChartReady", callback);
     if (this.isChartReady) {
-      queueMicrotask(callback);
+      queueMicrotask(safeCallback);
     } else {
-      this.chartReady.subscribe(null, callback as never, true);
+      this.chartReady.subscribe(null, safeCallback as never, true);
     }
   }
 
@@ -497,6 +571,9 @@ export class Widget implements IChartingLibraryWidget {
   }
 
   onContextMenu(callback: ContextMenuCallback): void {
+    this.contextMenuRequestId += 1;
+    this.cancelPendingContextMenu();
+    closeContextMenu();
     this.contextMenuCb = callback;
   }
 
@@ -523,58 +600,147 @@ export class Widget implements IChartingLibraryWidget {
       percentScale: this.context.percentScale,
       volumeMode: this.context.volumeMode,
       magnet: this.context.magnet,
-      drawings: this.shapes.snapshot().map((shape) => ({
+      drawings: this.shapes.snapshot().filter((shape) => !shape.disableSave).map((shape) => ({
         id: String(shape.id),
         shape: String(shape.shape),
         points: shape.points,
         text: shape.text,
         lock: shape.lock,
+        disableSelection: shape.disableSelection,
+        disableSave: shape.disableSave,
+        disableUndo: shape.disableUndo,
+        showInObjectsTree: shape.showInObjectsTree,
+        hidden: shape.hidden,
         zOrder: shape.zOrder,
         overrides: shape.overrides,
       })),
       studies: this.studies.list().map((study) => ({
+        id: String(study.id),
         name: study.name,
         length: study.length,
         color: study.color,
+        lock: study.lock,
+        forceOverlay: study.forceOverlay,
+        inputs: { ...study.inputs },
       })),
       compare: this.context.compare.map((item) => item.symbol),
     };
-    callback?.(state);
+    if (callback) this.callConsumerCallback("save callback", () => callback(state));
     return state;
   }
 
   async load(state: ChartLayoutSnapshot): Promise<void> {
-    this.context.chartStyle = state.chartStyle;
-    this.context.logScale = state.logScale;
-    this.context.percentScale = state.percentScale;
-    if (state.volumeMode) this.context.volumeMode = state.volumeMode;
-    if (typeof state.magnet === "boolean") this.context.magnet = state.magnet;
-    this.leftSidebar?.setChartStyle(state.chartStyle);
-    await this.data.changeSymbol(state.symbol, state.interval as ResolutionString);
-    this.shapes.removeAll();
-    for (const drawing of state.drawings) {
-      await this.shapes.createPoints(drawing.points, {
-        shape: drawing.shape,
-        text: drawing.text,
-        lock: drawing.lock,
-        zOrder: drawing.zOrder,
-        overrides: drawing.overrides,
-      });
+    if (!state || state.version !== 1
+        || !Array.isArray(state.drawings)
+        || !Array.isArray(state.studies)
+        || (state.compare !== undefined && !Array.isArray(state.compare))
+        || typeof state.symbol !== "string"
+        || typeof state.interval !== "string"
+        || !state.visibleRange
+        || !Number.isFinite(state.visibleRange.from)
+        || !Number.isFinite(state.visibleRange.to)
+        || state.visibleRange.from > state.visibleRange.to
+        || state.drawings.some((drawing) => !drawing
+          || typeof drawing.id !== "string"
+          || !Array.isArray(drawing.points)
+          || drawing.points.some((point) => !point
+            || !Number.isFinite(point.time)
+            || (point.price !== undefined && !Number.isFinite(point.price))))
+        || state.studies.some((study) => !study
+          || typeof study.name !== "string"
+          || !study.name.trim()
+          || !Number.isFinite(study.length))
+        || state.compare?.some((symbol) => typeof symbol !== "string")) {
+      throw new TypeError("[raze-charts] invalid chart layout snapshot");
     }
-    this.studies.clear();
-    for (const study of state.studies) this.studies.add(study);
-    this.context.compare = [];
-    for (const symbol of state.compare ?? []) await this.createCompare(symbol);
+    const drawingIds = state.drawings.map((drawing) => drawing.id);
+    const studyIds = state.studies.flatMap((study) => study.id ? [study.id] : []);
+    if (new Set(drawingIds).size !== drawingIds.length
+        || new Set(studyIds).size !== studyIds.length) {
+      throw new TypeError("[raze-charts] chart layout snapshot contains duplicate entity ids");
+    }
+    const unknownStudy = state.studies.find((study) => !this.studies.registry.resolve(study.name));
+    if (unknownStudy) {
+      throw new Error(`[raze-charts] chart layout references unknown study: ${unknownStudy.name}`);
+    }
+
+    const loadId = ++this.loadId;
+    const dataChangeId = ++this.dataChangeId;
+    const isCurrent = (): boolean => !this.destroyed
+      && loadId === this.loadId
+      && dataChangeId === this.dataChangeId;
+    await this.data.changeSymbol(state.symbol, state.interval as ResolutionString);
+    if (!isCurrent()) return;
+
+    // Fetch everything before replacing drawings/studies. This keeps the
+    // visible object model coherent if a compare/range request fails and lets
+    // a newer load supersede this one without leaving half a snapshot behind.
+    const comparisons: { symbol: string; bars: Bar[] }[] = [];
+    for (const symbol of state.compare ?? []) {
+      const bars = await this.data.loadCompare(symbol);
+      if (!isCurrent()) return;
+      comparisons.push({ symbol, bars });
+    }
     await this.data.revealTimeRange(state.visibleRange.from, state.visibleRange.to);
-    this.symbolSearch?.setSymbol(state.symbol);
-    this.intervalSelector?.setActive(state.interval);
-    this.context.requestPaint();
+    if (!isCurrent()) return;
+
+    const resumeHistory = this.commands.suspend();
+    try {
+      this.context.chartStyle = state.chartStyle;
+      this.context.logScale = state.logScale;
+      this.context.percentScale = state.percentScale;
+      if (state.volumeMode) this.context.volumeMode = state.volumeMode;
+      if (typeof state.magnet === "boolean") this.context.magnet = state.magnet;
+      this.leftSidebar?.setChartStyle(state.chartStyle);
+
+      this.shapes.removeAll();
+      for (const drawing of state.drawings) {
+        this.shapes.restore({
+          id: drawing.id as EntityId,
+          shape: drawing.shape || "horizontal_line",
+          points: drawing.points,
+          text: drawing.text ?? "",
+          lock: drawing.lock ?? false,
+          disableSelection: drawing.disableSelection ?? false,
+          disableSave: drawing.disableSave ?? false,
+          disableUndo: drawing.disableUndo ?? false,
+          showInObjectsTree: drawing.showInObjectsTree !== false,
+          hidden: drawing.hidden ?? false,
+          zOrder: drawing.zOrder === "top" ? "top" : "bottom",
+          overrides: drawing.overrides ?? {},
+        });
+      }
+      this.studies.clear();
+      for (const study of state.studies) {
+        this.studies.add({
+          ...study,
+          id: study.id as EntityId | undefined,
+          lock: study.lock ?? false,
+          forceOverlay: study.forceOverlay ?? false,
+          inputs: study.inputs ?? {},
+        });
+      }
+      this.context.compare = [];
+      for (const comparison of comparisons) this.addCompare(comparison.symbol, comparison.bars);
+      this.symbolSearch?.setSymbol(this.context.symbol);
+      this.intervalSelector?.refresh();
+      this.syncAccessibility();
+      if (this.context.bars.length) this.finishLoading();
+      else this.showEmptyState();
+      this.context.requestPaint();
+      this.commands.clear();
+    } finally {
+      resumeHistory();
+    }
   }
 
   remove(): void {
     if (this.destroyed) return;
     this.destroyed = true;
     this.dataChangeId += 1;
+    this.loadId += 1;
+    this.contextMenuRequestId += 1;
+    this.cancelPendingContextMenu();
     // Cancel datafeed callbacks before tearing down the render/event surfaces.
     this.data.destroy();
     // Consumers awaiting headerReady must not hang when a widget is removed
@@ -590,6 +756,7 @@ export class Widget implements IChartingLibraryWidget {
     this.renderer.destroy();
     this.engine.destroy();
     this.studies.destroy();
+    this.context.dataChanged.unsubscribeAll(this.loadingSubscriptionOwner);
     for (const child of this.childWidgets) child.remove();
     this.childWidgets = [];
     this.objectsTree?.destroy();
@@ -606,77 +773,29 @@ export class Widget implements IChartingLibraryWidget {
     this.root.remove();
   }
 
-  private async createShapeTracked(
-    point: ShapePoint,
-    opts: CreateShapeOptions,
-  ): Promise<EntityId> {
-    return this.createPointsTracked([point], opts);
-  }
-
-  private async createPointsTracked(
-    points: ShapePoint[],
-    opts: CreateShapeOptions,
-  ): Promise<EntityId> {
-    const id = await this.shapes.createPoints(points, opts);
-    if (!opts.disableUndo) {
-      const stored = this.shapes.get(id);
-      if (stored) {
-        const snap = {
-          ...stored,
-          points: stored.points.map((p) => ({ ...p })),
-          overrides: { ...stored.overrides },
-        };
-        this.commands.push({
-          undo: () => this.shapes.remove(id),
-          redo: () => this.shapes.restore(snap),
-        });
-      }
-    }
-    return id;
-  }
-
   private removeEntityTracked(id: EntityId): void {
-    const study = this.studies.has(id) ? this.studies.list().find((s) => s.id === id) : null;
-    if (study) {
-      this.studies.remove(id);
-      this.commands.push({
-        undo: () => {
-          this.studies.add({
-            name: study.name,
-            length: study.length,
-            color: study.color,
-            lock: study.lock,
-            forceOverlay: study.forceOverlay,
-            inputs: study.inputs,
-          });
-        },
-        redo: () => { this.studies.remove(id); },
-      });
-      return;
-    }
+    if (this.studies.remove(id)) return;
     const compare = this.context.compare.find((item) => item.id === String(id));
     if (compare) {
       this.context.compare = this.context.compare.filter((item) => item.id !== compare.id);
       this.context.requestPaint();
       return;
     }
-    const shape = this.shapes.get(id);
     const tradingLine = this.trading.get(String(id));
     if (tradingLine) {
       this.trading.remove(String(id));
       return;
     }
     this.shapes.remove(id);
-    if (shape) {
-      this.commands.push({
-        undo: () => this.shapes.restore(shape),
-        redo: () => this.shapes.remove(id),
-      });
-    }
   }
 
   private async createCompare(symbol: string): Promise<EntityId> {
     const bars = await this.data.loadCompare(symbol);
+    if (this.destroyed) throw new Error("[raze-charts] widget was removed before compare data loaded");
+    return this.addCompare(symbol, bars);
+  }
+
+  private addCompare(symbol: string, bars: Bar[]): EntityId {
     this.compareSeq += 1;
     const id = `compare_${symbol}_${this.compareSeq}` as EntityId;
     const colors = ["#26a69a", "#f5a623", "#e040fb", "#42a5f5"];
@@ -731,32 +850,45 @@ export class Widget implements IChartingLibraryWidget {
     let sec = Number(raw);
     if (!Number.isFinite(sec)) {
       const ms = Date.parse(raw.trim());
-      if (!Number.isFinite(ms)) return;
+      if (!Number.isFinite(ms)) {
+        this.engine.announce("Enter a valid date or Unix timestamp.");
+        return;
+      }
       sec = Math.floor(ms / 1000);
     }
     const span = Math.max(1, this.context.visibleRange.to - this.context.visibleRange.from);
     const resMs = Math.max(1, (this.context.bars[1]?.time ?? 0) - (this.context.bars[0]?.time ?? 0));
     const halfSec = Math.floor((span * resMs) / 2000);
-    void this.data.revealTimeRange(sec - halfSec, sec + halfSec);
+    void this.data.revealTimeRange(sec - halfSec, sec + halfSec).catch((error: unknown) => {
+      if (!this.destroyed) this.reportError("go to date", error);
+    });
   }
 
-  private spawnLayout(): void {
+  private prepareLayoutPanes(): HTMLDivElement[] {
     const layout = this.context.options.raze?.layout;
-    if (this.context.options.raze?.layout_child) return;
+    if (this.context.options.raze?.layout_child) return [this.chartArea];
     const cells = layout === "2x2" ? 4 : layout === "2x1" ? 2 : 1;
-    if (cells <= 1) return;
+    if (cells <= 1) return [this.chartArea];
     this.chartArea.style.display = "grid";
     this.chartArea.style.gridTemplateRows = layout === "2x2" ? "1fr 1fr" : "1fr 1fr";
     this.chartArea.style.gridTemplateColumns = layout === "2x2" ? "1fr 1fr" : "1fr";
-    const pane0 = document.createElement("div");
-    pane0.style.cssText = "position:relative;min-width:0;min-height:0;overflow:hidden;";
-    while (this.chartArea.firstChild) pane0.appendChild(this.chartArea.firstChild);
-    this.chartArea.appendChild(pane0);
+    const panes: HTMLDivElement[] = [];
+    for (let index = 0; index < cells; index++) {
+      const pane = document.createElement("div");
+      pane.className = "raze-chart-layout-pane";
+      pane.dataset.paneIndex = String(index);
+      pane.style.cssText = "position:relative;min-width:0;min-height:0;overflow:hidden;";
+      this.chartArea.appendChild(pane);
+      panes.push(pane);
+    }
+    return panes;
+  }
+
+  private spawnLayout(): void {
+    if (this.layoutPanes.length <= 1) return;
     const symbols = this.context.options.raze?.layout_symbols ?? [];
-    for (let i = 1; i < cells; i++) {
-      const cell = document.createElement("div");
-      cell.style.cssText = "position:relative;min-width:0;min-height:0;overflow:hidden;";
-      this.chartArea.appendChild(cell);
+    for (let i = 1; i < this.layoutPanes.length; i++) {
+      const cell = this.layoutPanes[i]!;
       const child = new Widget({
         ...this.context.options,
         container: cell,
@@ -783,11 +915,18 @@ export class Widget implements IChartingLibraryWidget {
       pane.context.viewportChanged.subscribe(null, ((range: { from: number; to: number }) => {
         if (this.layoutSyncing) return;
         this.layoutSyncing = true;
-        for (const other of panes) {
-          if (other === pane) continue;
-          void other.data.revealTimeRange(range.from, range.to);
-        }
-        this.layoutSyncing = false;
+        const updates = panes
+          .filter((other) => other !== pane)
+          .map((other) => other.data.revealTimeRange(range.from, range.to));
+        void Promise.allSettled(updates).then((results) => {
+          for (const result of results) {
+            if (result.status === "rejected" && !this.destroyed) {
+              this.reportError("synchronise chart layout", result.reason);
+            }
+          }
+        }).finally(() => {
+          this.layoutSyncing = false;
+        });
       }) as never);
       pane.context.crosshairMoved.subscribe(null, ((ev: { unixTime: number; price: number; active: boolean }) => {
         if (this.layoutSyncing) return;
@@ -834,16 +973,89 @@ export class Widget implements IChartingLibraryWidget {
       }
       if (!this.contextMenuCb) return;
       e.preventDefault();
+      closeContextMenu();
+      this.cancelPendingContextMenu();
+      const requestId = ++this.contextMenuRequestId;
       const { unixTime, price } = this.renderer.timePriceAtEvent(e);
-      const result = this.contextMenuCb(unixTime, price);
-      const show = (items: typeof result extends Promise<infer R> ? R : typeof result): void => {
-        showContextMenu(e.clientX, e.clientY, items as never, this.context.fontFamily);
+      let result: ReturnType<ContextMenuCallback>;
+      try {
+        result = this.contextMenuCb(unixTime, price);
+      } catch (error) {
+        this.reportError("open context menu", error);
+        return;
+      }
+      const show = (items: Awaited<ReturnType<ContextMenuCallback>>): void => {
+        if (this.destroyed || requestId !== this.contextMenuRequestId || !this.root.isConnected) return;
+        showContextMenu(
+          e.clientX,
+          e.clientY,
+          Array.isArray(items) ? items : [],
+          this.context.fontFamily,
+          this.root,
+        );
       };
-      if (result instanceof Promise) {
-        void result.then(show);
+      if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+        const cancelRequest = (): void => {
+          if (requestId === this.contextMenuRequestId) this.contextMenuRequestId += 1;
+          cleanup();
+        };
+        const onKey = (event: KeyboardEvent): void => {
+          if (event.key === "Escape") cancelRequest();
+        };
+        const cleanup = (): void => {
+          document.removeEventListener("pointerdown", cancelRequest, true);
+          document.removeEventListener("keydown", onKey, true);
+          if (this.contextMenuPendingCleanup === cleanup) this.contextMenuPendingCleanup = null;
+        };
+        document.addEventListener("pointerdown", cancelRequest, true);
+        document.addEventListener("keydown", onKey, true);
+        this.contextMenuPendingCleanup = cleanup;
+        void Promise.resolve(result).then((items) => {
+          cleanup();
+          show(items);
+        }).catch((error: unknown) => {
+          cleanup();
+          if (!this.destroyed && requestId === this.contextMenuRequestId) {
+            this.reportError("open context menu", error);
+          }
+        });
       } else {
-        show(result as never);
+        show(result as Awaited<ReturnType<ContextMenuCallback>>);
       }
     });
+  }
+
+  private callConsumerCallback(description: string, callback: () => void): void {
+    try {
+      callback();
+    } catch (error) {
+      this.reportError(description, error);
+    }
+  }
+
+  private cancelPendingContextMenu(): void {
+    this.contextMenuPendingCleanup?.();
+    this.contextMenuPendingCleanup = null;
+  }
+
+  private finishLoading(): void {
+    if (!this.loading) return;
+    this.loading.hide();
+  }
+
+  private showEmptyState(): void {
+    if (!this.loading) return;
+    if (!this.loading.el.isConnected) this.primaryChartArea.appendChild(this.loading.el);
+    this.loading.showEmpty();
+  }
+
+  private showLoadingError(): void {
+    if (!this.loading) return;
+    if (!this.loading.el.isConnected) this.primaryChartArea.appendChild(this.loading.el);
+    this.loading.showError();
+  }
+
+  private reportError(operation: string, error: unknown): void {
+    console.error(`[raze-charts] failed to ${operation}`, error);
   }
 }

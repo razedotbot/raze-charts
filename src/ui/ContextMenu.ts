@@ -12,12 +12,14 @@ export function showContextMenu(
   y: number,
   items: ContextMenuItem[],
   fontFamily: string,
+  themeRoot?: HTMLElement,
 ): void {
   closeContextMenu();
   if (!items.length) return;
 
   const popup = openPopup({
     fontFamily,
+    themeRoot,
     className: "raze-chart-context-menu",
     minWidth: 160,
     padding: "4px",
@@ -46,7 +48,6 @@ export function showContextMenu(
     row.setAttribute("aria-posinset", String(index + 1));
     row.setAttribute("aria-setsize", String(ordered.length));
     if (!isCoarsePointer()) row.style.padding = "6px 10px";
-    row.textContent = item.text; // plain text, never HTML
     popup.el.appendChild(row);
   }
   popup.reposition();

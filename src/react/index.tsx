@@ -132,7 +132,7 @@ function assertChartHostStyle(style: ChartHostStyle | undefined): void {
  * Thin lifecycle adapter around the framework-neutral chart runtime. The host
  * is mounted once; new definitions and sizes are forwarded through update().
  */
-export function Chart({
+const ChartComponent = function Chart({
   definition,
   width,
   height = 320,
@@ -159,6 +159,10 @@ export function Chart({
     height: number;
     renderer: NonNullable<MountChartOptions["renderer"]>;
     idPrefix: string | undefined;
+    interaction: MountChartOptions["interaction"];
+    viewport: ChartViewport | undefined;
+    onViewportChange: MountChartOptions["onViewportChange"];
+    onSelect: MountChartOptions["onSelect"];
   } | null>(null);
 
   const def = useMemo(() => {
@@ -197,6 +201,10 @@ export function Chart({
       height: current.height,
       renderer: current.renderer,
       idPrefix: current.idPrefix,
+      interaction: current.interaction,
+      viewport: current.viewport,
+      onViewportChange: current.onViewportChange,
+      onSelect: current.onSelect,
     };
     const getSnapshot = (): ReactChartSnapshot | null => {
       const scene = mounted.getScene();
@@ -231,11 +239,29 @@ export function Chart({
       && previous.height === height
       && previous.renderer === renderer
       && previous.idPrefix === idPrefix
+      && previous.interaction === interaction
+      && previous.viewport === viewport
+      && previous.onViewportChange === onViewportChange
+      && previous.onSelect === onSelect
     ) return;
-    mounted.update(def, {
-      width, height, renderer, idPrefix, interaction, viewport, onViewportChange, onSelect,
-    });
-    applied.current = { definition: def, width, height, renderer, idPrefix };
+    const updateOptions: MountChartOptions = {
+      width, height, renderer, idPrefix, interaction, onViewportChange, onSelect,
+    };
+    // An absent viewport means “preserve the user's live pan/zoom”. Include an
+    // explicit undefined only for the controlled -> uncontrolled transition.
+    if (previous.viewport !== undefined || viewport !== undefined) updateOptions.viewport = viewport;
+    mounted.update(def, updateOptions);
+    applied.current = {
+      definition: def,
+      width,
+      height,
+      renderer,
+      idPrefix,
+      interaction,
+      viewport,
+      onViewportChange,
+      onSelect,
+    };
   }, [def, width, height, renderer, idPrefix, interaction, viewport, onViewportChange, onSelect]);
 
   return (
@@ -246,9 +272,9 @@ export function Chart({
       style={{ ...style, width: width === undefined ? "100%" : `${width}px`, height: `${height}px` }}
     />
   );
-}
+};
 
-markChartComponent(Chart);
+export const Chart = /* @__PURE__ */ markChartComponent(ChartComponent);
 
 export type DataKey<T extends object> = Extract<keyof T, string>;
 
@@ -325,8 +351,8 @@ export type ReferenceLineProps =
   | { y: number; x?: never; stroke?: string; strokeWidth?: number; name?: string }
   | { x: number | string | Date; y?: never; stroke?: string; strokeWidth?: number; name?: string };
 
-export interface BrushProps {
-  dataKey?: string;
+export interface BrushProps<T extends object = Record<string, unknown>> {
+  dataKey?: DataKey<T>;
   height?: number;
   startIndex?: number;
   endIndex?: number;
@@ -366,20 +392,20 @@ function componentRole(value: unknown): ComponentRole | null {
   return (value as Partial<Descriptor<unknown>>)[COMPONENT_ROLE] ?? null;
 }
 
-export const Line = descriptor<LineProps>("line", "Line");
-export const Bar = descriptor<BarProps>("bar", "Bar");
-export const Area = descriptor<AreaProps>("area", "Area");
-export const Scatter = descriptor<ScatterProps>("scatter", "Scatter");
-export const Pie = descriptor<PieProps>("pie", "Pie");
-export const Radar = descriptor<RadarProps>("radar", "Radar");
-export const Heatmap = descriptor<HeatmapProps>("heatmap", "Heatmap");
-export const XAxis = descriptor<AxisProps>("x-axis", "XAxis");
-export const YAxis = descriptor<AxisProps>("y-axis", "YAxis");
-export const CartesianGrid = descriptor<Record<never, never>>("grid", "CartesianGrid");
-export const Tooltip = descriptor<Record<never, never>>("tooltip", "Tooltip");
-export const Legend = descriptor<Record<never, never>>("legend", "Legend");
-export const ReferenceLine = descriptor<ReferenceLineProps>("reference-line", "ReferenceLine");
-export const Brush = descriptor<BrushProps>("brush", "Brush");
+export const Line = /* @__PURE__ */ descriptor<LineProps>("line", "Line");
+export const Bar = /* @__PURE__ */ descriptor<BarProps>("bar", "Bar");
+export const Area = /* @__PURE__ */ descriptor<AreaProps>("area", "Area");
+export const Scatter = /* @__PURE__ */ descriptor<ScatterProps>("scatter", "Scatter");
+export const Pie = /* @__PURE__ */ descriptor<PieProps>("pie", "Pie");
+export const Radar = /* @__PURE__ */ descriptor<RadarProps>("radar", "Radar");
+export const Heatmap = /* @__PURE__ */ descriptor<HeatmapProps>("heatmap", "Heatmap");
+export const XAxis = /* @__PURE__ */ descriptor<AxisProps>("x-axis", "XAxis");
+export const YAxis = /* @__PURE__ */ descriptor<AxisProps>("y-axis", "YAxis");
+export const CartesianGrid = /* @__PURE__ */ descriptor<Record<never, never>>("grid", "CartesianGrid");
+export const Tooltip = /* @__PURE__ */ descriptor<Record<never, never>>("tooltip", "Tooltip");
+export const Legend = /* @__PURE__ */ descriptor<Record<never, never>>("legend", "Legend");
+export const ReferenceLine = /* @__PURE__ */ descriptor<ReferenceLineProps>("reference-line", "ReferenceLine");
+export const Brush = /* @__PURE__ */ descriptor<BrushProps>("brush", "Brush");
 
 export type ResponsiveContainerStyle = Omit<CSSProperties, "width" | "height" | "position" | "minWidth"> & {
   readonly width?: never;
@@ -553,11 +579,22 @@ function assertDescriptorProps(role: ComponentRole, props: Record<string, unknow
     throw new Error("[@razedotbot/charts/react] <Pie> innerRadius cannot exceed outerRadius.");
   }
   if (role === "brush") {
-    for (const key of ["startIndex", "endIndex", "height"] as const) {
+    if (props.dataKey !== undefined && (typeof props.dataKey !== "string" || !props.dataKey.trim())) {
+      throw new Error("[@razedotbot/charts/react] <Brush> dataKey must be a non-empty string.");
+    }
+    for (const key of ["startIndex", "endIndex"] as const) {
       const value = props[key];
-      if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
-        throw new Error(`[@razedotbot/charts/react] <Brush> ${key} must be a finite non-negative number.`);
+      if (value !== undefined && (typeof value !== "number" || !Number.isInteger(value) || value < 0)) {
+        throw new Error(`[@razedotbot/charts/react] <Brush> ${key} must be a non-negative integer.`);
       }
+    }
+    const height = props.height;
+    if (height !== undefined && (typeof height !== "number" || !Number.isFinite(height) || height < 0)) {
+      throw new Error("[@razedotbot/charts/react] <Brush> height must be a finite non-negative number.");
+    }
+    if (typeof props.startIndex === "number" && typeof props.endIndex === "number"
+        && props.startIndex > props.endIndex) {
+      throw new Error("[@razedotbot/charts/react] <Brush> startIndex cannot exceed endIndex.");
     }
   }
 }
@@ -610,13 +647,43 @@ function specFromJsx<T extends object>(
       if (role === "brush") {
         const start = typeof p.startIndex === "number" ? p.startIndex : undefined;
         const end = typeof p.endIndex === "number" ? p.endIndex : undefined;
+        const key = (p.dataKey as DataKey<T> | undefined) ?? xKey;
+        if (p.dataKey !== undefined && data.length > 0 && data.some((row) => !(key in row))) {
+          throw new Error(
+            `[@razedotbot/charts/react] <Brush> dataKey "${String(key)}" is missing from chart data.`,
+          );
+        }
         if (start != null || end != null) {
-          const lo = Math.max(0, start ?? 0);
-          const hi = Math.min(data.length - 1, end ?? data.length - 1);
-          const key = (p.dataKey as DataKey<T> | undefined) ?? xKey;
-          const a = data[lo]?.[key];
-          const b = data[hi]?.[key];
-          if (a != null && b != null) viewport = { x: [a as number | Date, b as number | Date] };
+          if (start !== undefined && start >= data.length) {
+            throw new Error(
+              `[@razedotbot/charts/react] <Brush> startIndex ${start} is outside data length ${data.length}.`,
+            );
+          }
+          if (end !== undefined && end >= data.length) {
+            throw new Error(
+              `[@razedotbot/charts/react] <Brush> endIndex ${end} is outside data length ${data.length}.`,
+            );
+          }
+          const lo = start ?? 0;
+          const hi = end ?? data.length - 1;
+          const values = data.slice(lo, hi + 1).map((row) => row[key]);
+          const first = values[0];
+          const last = values[values.length - 1];
+          const isQuantitative = (value: unknown): value is number | Date =>
+            (typeof value === "number" && Number.isFinite(value))
+            || (value instanceof Date && Number.isFinite(value.getTime()));
+          if (isQuantitative(first) && isQuantitative(last)) {
+            viewport = { x: [first, last] };
+          } else if (values.every((value) =>
+            typeof value === "string" || (typeof value === "number" && Number.isFinite(value)))) {
+            // Categorical viewports are exact allow-lists, so retain every
+            // category between the selected indices rather than only endpoints.
+            viewport = { x: values as (string | number)[] };
+          } else {
+            throw new Error(
+              `[@razedotbot/charts/react] <Brush> dataKey "${String(key)}" must resolve to strings, finite numbers, or valid Dates.`,
+            );
+          }
         }
         interaction = {
           brush: true,
@@ -786,34 +853,38 @@ function JsxChart<T extends object>({
   );
 }
 
-export function LineChart<T extends object>(props: BoxProps<T>): ReactElement {
+const LineChartComponent = function LineChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="line" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
-}
-export function BarChart<T extends object>(props: BoxProps<T>): ReactElement {
+};
+export const LineChart = /* @__PURE__ */ markChartComponent(LineChartComponent);
+const BarChartComponent = function BarChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="bar" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
-}
-export function AreaChart<T extends object>(props: BoxProps<T>): ReactElement {
+};
+export const BarChart = /* @__PURE__ */ markChartComponent(BarChartComponent);
+const AreaChartComponent = function AreaChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="area" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
-}
-export function ScatterChart<T extends object>(props: BoxProps<T>): ReactElement {
+};
+export const AreaChart = /* @__PURE__ */ markChartComponent(AreaChartComponent);
+const ScatterChartComponent = function ScatterChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="scatter" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
-}
-export function PieChart<T extends object>(props: BoxProps<T>): ReactElement {
+};
+export const ScatterChart = /* @__PURE__ */ markChartComponent(ScatterChartComponent);
+const PieChartComponent = function PieChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="pie" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
-}
-export function RadarChart<T extends object>(props: BoxProps<T>): ReactElement {
+};
+export const PieChart = /* @__PURE__ */ markChartComponent(PieChartComponent);
+const RadarChartComponent = function RadarChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="radar" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
-}
-export function HeatmapChart<T extends object>(props: BoxProps<T>): ReactElement {
+};
+export const RadarChart = /* @__PURE__ */ markChartComponent(RadarChartComponent);
+const HeatmapChartComponent = function HeatmapChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="heatmap" x={"x" as DataKey<T>} value={"value" as DataKey<T>} heatmapY={"y" as DataKey<T>} {...props} />;
-}
-export function ComposedChart<T extends object>(props: BoxProps<T>): ReactElement {
+};
+export const HeatmapChart = /* @__PURE__ */ markChartComponent(HeatmapChartComponent);
+const ComposedChartComponent = function ComposedChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="composed" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
-}
-
-for (const component of [LineChart, BarChart, AreaChart, ScatterChart, PieChart, RadarChart, HeatmapChart, ComposedChart]) {
-  markChartComponent(component);
-}
+};
+export const ComposedChart = /* @__PURE__ */ markChartComponent(ComposedChartComponent);
 
 /**
  * Creates a Recharts-shaped component set whose dataKey props are constrained
@@ -838,6 +909,7 @@ export function createChartComponents<T extends object>(defaults: ChartComponent
   const TypedHeatmap = descriptor<HeatmapProps<T>>("heatmap", "Heatmap");
   const TypedXAxis = descriptor<AxisProps<T>>("x-axis", "XAxis");
   const TypedYAxis = descriptor<AxisProps<T>>("y-axis", "YAxis");
+  const TypedBrush = descriptor<BrushProps<T>>("brush", "Brush");
   const make = (
     kind: "line" | "bar" | "area" | "scatter" | "pie" | "radar" | "heatmap" | "composed",
     x: DataKey<T>,
@@ -866,7 +938,7 @@ export function createChartComponents<T extends object>(defaults: ChartComponent
     Tooltip,
     Legend,
     ReferenceLine,
-    Brush,
+    Brush: TypedBrush,
   } as const;
 }
 

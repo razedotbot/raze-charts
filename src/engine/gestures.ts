@@ -4,7 +4,7 @@
 
 import type { ShapePoint } from "../types/charting_library";
 import type { ChartContext, DrawingTool } from "../core/context";
-import type { ShapeStore } from "../core/ShapeStore";
+import type { ShapeStore, StoredShape } from "../core/ShapeStore";
 import type { DataManager } from "../data/DataManager";
 import type { ChartEngine } from "./ChartEngine";
 import {
@@ -61,9 +61,16 @@ export interface GestureHost {
 type DragState =
   | null
   | { kind: "pan"; startX: number; startFrom: number; startTo: number }
-  | { kind: "shape"; id: string; startY: number; pointIndex: number }
-  | { kind: "trading"; id: string }
-  | { kind: "priceScale"; startY: number; startMin: number; startMax: number }
+  | { kind: "shape"; id: string; startY: number; pointIndex: number; before: StoredShape | undefined }
+  | { kind: "trading"; id: string; startPrice: number }
+  | {
+      kind: "priceScale";
+      startY: number;
+      startMin: number;
+      startMax: number;
+      previousAutoScale: boolean;
+      previousPriceRange: { min: number; max: number } | null;
+    }
   | { kind: "timeScale"; startX: number; startFrom: number; startTo: number };
 
 export class GestureController {
@@ -379,10 +386,10 @@ export class GestureController {
   }
 
   private onPointerDown(e: PointerEvent): void {
-    if (e.pointerType === "mouse" && e.button !== 0) return;
     const h = this.host;
-    const { x, y } = this.pointerXY(e);
     h.lastPointerType = e.pointerType || "mouse";
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const { x, y } = this.pointerXY(e);
     this.pointerFocus = true;
     h.canvas.focus({ preventScroll: true });
     // Pointer focus should not masquerade as keyboard focus. A subsequent key
@@ -395,7 +402,10 @@ export class GestureController {
     if (this.activePointers.size === 2) {
       this.clearLongPress();
       this.touchCrosshair = false;
-      this.dragging = null;
+      // A second contact turns the interaction into a pinch. Roll back any
+      // partially applied one-pointer drag first so shapes/orders and their
+      // host callbacks cannot be left between lifecycle phases.
+      this.cancelDrag();
       this.startPinch();
       return;
     }
@@ -448,6 +458,7 @@ export class GestureController {
     const from = this.pinch.anchorIndex - this.pinch.anchorFrac * newSpan;
     h.context.visibleRange = { from, to: from + newSpan };
     void h.data.maybeLoadMoreHistory();
+    this.emitViewport();
   }
 
   private armLongPress(x: number, y: number): void {
@@ -502,7 +513,7 @@ export class GestureController {
       }
       h.context.selectedShapeId = null;
       h.context.selectedTradingLineId = h.hoverTradingLineId;
-      if (line?.editable) this.dragging = { kind: "trading", id: line.id };
+      if (line?.editable) this.dragging = { kind: "trading", id: line.id, startPrice: line.price };
       else h.trading.modify(h.hoverTradingLineId);
       h.requestPaint();
       return;
@@ -524,11 +535,24 @@ export class GestureController {
       }
       h.context.selectedShapeId = h.hoverShapeId;
       h.context.selectedTradingLineId = null;
-      this.dragging = { kind: "shape", id: h.hoverShapeId, startY: y, pointIndex };
+      this.dragging = {
+        kind: "shape",
+        id: h.hoverShapeId,
+        startY: y,
+        pointIndex,
+        before: h.shapes.capture(h.hoverShapeId as never),
+      };
       return;
     }
     if (inPriceAxis) {
-      this.dragging = { kind: "priceScale", startY: y, startMin: h.priceMin, startMax: h.priceMax };
+      this.dragging = {
+        kind: "priceScale",
+        startY: y,
+        startMin: h.priceMin,
+        startMax: h.priceMax,
+        previousAutoScale: h.context.autoScalePrice,
+        previousPriceRange: h.context.priceRange ? { ...h.context.priceRange } : null,
+      };
       h.context.autoScalePrice = false;
       const s = h.plotScale();
       h.context.priceRange = {
@@ -602,7 +626,6 @@ export class GestureController {
   }
 
   private onPointerUp(e: PointerEvent): void {
-    const h = this.host;
     this.activePointers.delete(e.pointerId);
     this.clearLongPress();
     if (this.pinch && this.activePointers.size < 2) {
@@ -610,13 +633,7 @@ export class GestureController {
       this.dragging = null;
     }
     if (this.activePointers.size === 0) {
-      if (this.dragging?.kind === "shape") {
-        h.context.drawingEvent.fire(this.dragging.id, "points_changed");
-      } else if (this.dragging?.kind === "trading") {
-        const line = h.trading.get(this.dragging.id);
-        if (line) h.trading.move(line.id, line.price, "moved", "drag");
-      }
-      this.dragging = null;
+      this.finishDrag(true);
       this.touchCrosshair = false;
     }
   }
@@ -624,11 +641,50 @@ export class GestureController {
   private onPointerCancel(e: PointerEvent): void {
     this.activePointers.delete(e.pointerId);
     this.clearLongPress();
-    if (this.activePointers.size < 2) this.pinch = null;
-    if (this.activePointers.size === 0) {
-      this.dragging = null;
-      this.touchCrosshair = false;
+    if (this.pinch) {
+      this.host.context.visibleRange = {
+        from: this.pinch.startFrom,
+        to: this.pinch.startTo,
+      };
+      this.emitViewport();
+      this.pinch = null;
     }
+    this.cancelDrag();
+    this.activePointers.clear();
+    this.touchCrosshair = false;
+    this.host.requestPaint();
+  }
+
+  private finishDrag(commit: boolean): void {
+    const h = this.host;
+    if (this.dragging?.kind === "shape") {
+      if (commit) {
+        h.shapes.commitUpdate(this.dragging.id as never, this.dragging.before);
+      }
+    } else if (this.dragging?.kind === "trading") {
+      const line = h.trading.get(this.dragging.id);
+      if (commit && line) h.trading.move(line.id, line.price, "moved", "drag");
+    }
+    this.dragging = null;
+  }
+
+  private cancelDrag(): void {
+    const h = this.host;
+    const drag = this.dragging;
+    if (!drag) return;
+    if (drag.kind === "pan" || drag.kind === "timeScale") {
+      h.context.visibleRange = { from: drag.startFrom, to: drag.startTo };
+      this.emitViewport();
+    } else if (drag.kind === "priceScale") {
+      h.context.autoScalePrice = drag.previousAutoScale;
+      h.context.priceRange = drag.previousPriceRange ? { ...drag.previousPriceRange } : null;
+    } else if (drag.kind === "shape" && drag.before) {
+      h.shapes.restore(drag.before);
+    } else if (drag.kind === "trading") {
+      const line = h.trading.get(drag.id);
+      if (line) h.trading.move(line.id, drag.startPrice, "moved", "drag");
+    }
+    this.finishDrag(false);
   }
 
   private onPointerLeave(e: PointerEvent): void {
@@ -645,6 +701,10 @@ export class GestureController {
   }
 
   private onWheel(e: WheelEvent): void {
+    // A purely horizontal trackpad gesture belongs to the surrounding page;
+    // treating deltaY === 0 as zoom-in made sideways scrolling unexpectedly
+    // consume and magnify the chart.
+    if (e.deltaY === 0) return;
     e.preventDefault();
     const h = this.host;
     const { from, to } = h.context.visibleRange;

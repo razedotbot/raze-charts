@@ -51,7 +51,7 @@ Legend:
 | Stop-loss / take-profit brackets | **Yes** | Linked entry/SL/TP lines, risk/reward shading and ratio, auto-scale participation, group callbacks and cancellation. |
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
 | Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
-| Save/load chart layouts | **Yes** | Versioned JSON via `save()` / `load()`; live broker/trading state is intentionally rehydrated separately. |
+| Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
 | Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |
 | Full TradingView study/drawing catalog | **No** | Compatibility is a documented subset, not feature parity. |
 | WebGL, LOD, or worker renderer | **No** | Canvas 2D is the current financial renderer. |

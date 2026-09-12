@@ -97,6 +97,22 @@ function parseHex(color: string): { r: number; g: number; b: number } | null {
   };
 }
 
+function parseRgb(color: string): { r: number; g: number; b: number } | null {
+  const match = color.trim().match(
+    /^rgba?\(\s*([\d.]+)(%)?(?:\s*,\s*|\s+)([\d.]+)(%)?(?:\s*,\s*|\s+)([\d.]+)(%)?(?:\s*[,/]\s*[\d.]+%?)?\s*\)$/i,
+  );
+  if (!match) return null;
+  const channel = (raw: string, percent: string | undefined): number => {
+    const value = Number(raw);
+    return percent ? value * 2.55 : value;
+  };
+  const r = channel(match[1]!, match[2]);
+  const g = channel(match[3]!, match[4]);
+  const b = channel(match[5]!, match[6]);
+  if (![r, g, b].every(Number.isFinite)) return null;
+  return { r, g, b };
+}
+
 /** Convert a #rrggbb / #rgb colour to an rgba() string with the given alpha. */
 export function withAlpha(color: string, alpha: number): string {
   const c = parseHex(color);
@@ -104,9 +120,15 @@ export function withAlpha(color: string, alpha: number): string {
   return color.trim(); // already rgba/named — return as-is
 }
 
-/** True when the colour reads as a light background (hex only; others → dark). */
+/** True when a hex, rgb, or common named colour reads as a light background. */
 export function isLightColor(color: string): boolean {
-  const c = parseHex(color);
+  const named: Record<string, { r: number; g: number; b: number }> = {
+    white: { r: 255, g: 255, b: 255 },
+    black: { r: 0, g: 0, b: 0 },
+    ivory: { r: 255, g: 255, b: 240 },
+    snow: { r: 255, g: 250, b: 250 },
+  };
+  const c = parseHex(color) ?? parseRgb(color) ?? named[color.trim().toLowerCase()] ?? null;
   if (!c) return false;
   // Rec. 601 luma — good enough to pick a contrasting pill colour.
   return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b > 160;

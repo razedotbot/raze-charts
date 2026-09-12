@@ -20,8 +20,8 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      # npm publish runs prepublishOnly (the portable quality gate) and prepack.
+      # Screenshot goldens remain in CI's dedicated Windows visual job.
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -5,6 +5,8 @@
 
 export interface PopupOptions {
   fontFamily: string;
+  /** Theme scope to mirror when the popup is portalled to document.body. */
+  themeRoot?: HTMLElement;
   /** Class name for tests / host-app styling hooks. */
   className?: string;
   minWidth?: number;
@@ -62,13 +64,18 @@ export function ensureBaseStyles(): void {
     ".raze-chart-left-sidebar::-webkit-scrollbar{display:none}" +
     ".raze-chart-toolbar-scroll{scrollbar-width:none}" +
     ".raze-chart-toolbar-scroll::-webkit-scrollbar{display:none}" +
+    ".raze-chart-toolbar{scrollbar-width:none}" +
+    ".raze-chart-toolbar::-webkit-scrollbar{display:none}" +
+    ".raze-chart-toolbar[data-scroll-left=\"true\"]::before,.raze-chart-toolbar[data-scroll-right=\"true\"]::after{position:absolute;top:0;bottom:1px;width:24px;display:flex;align-items:center;z-index:1;pointer-events:none;font-size:18px;font-weight:400;color:var(--tv-color-toolbar-button-text,#d1d4dc)}" +
+    ".raze-chart-toolbar[data-scroll-left=\"true\"]::before{content:\"‹\";left:0;padding-left:4px;background:linear-gradient(90deg,var(--tv-color-pane-background,#131722) 55%,transparent)}" +
+    ".raze-chart-toolbar[data-scroll-right=\"true\"]::after{content:\"›\";right:0;justify-content:flex-end;padding-right:4px;background:linear-gradient(90deg,transparent,var(--tv-color-pane-background,#131722) 45%)}" +
     ".raze-chart-root,.raze-chart-canvas{user-select:none;-webkit-user-select:none}" +
     ".raze-chart-root input,.raze-chart-root textarea{user-select:text;-webkit-user-select:text}" +
     ".raze-chart-canvas:focus,.raze-chart-canvas:focus-visible{outline:none}" +
     ".raze-chart-focusable:focus{outline:none}" +
     ".raze-chart-focusable:focus-visible{outline:2px solid var(--tv-color-toolbar-button-text-hover,#2962ff);outline-offset:1px}" +
     "@media (forced-colors:active){.raze-chart-focusable:focus-visible{outline-color:Highlight}}" +
-    "@media (prefers-reduced-motion:reduce){.raze-chart-loading-screen{transition:none!important}.raze-chart-loading-spinner{animation:none!important}}";
+    "@media (prefers-reduced-motion:reduce){.raze-chart-loading-screen{transition:none!important}.raze-chart-loading-spinner{animation:none!important}.raze-chart-toolbar{scroll-behavior:auto!important}}";
   document.head.appendChild(style);
 }
 
@@ -102,12 +109,43 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     "border-radius:6px",
     "border:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
     "background:var(--tv-color-popup-background, var(--tv-color-pane-background, #1e222d))",
-    "box-shadow:0 12px 24px -10px rgba(0,0,0,0.6)",
+    "box-shadow:var(--tv-color-popup-shadow, 0 12px 24px -10px rgba(0,0,0,0.6))",
     "z-index:2147483640",
     `font-family:${opts.fontFamily}`,
     "font-size:12px",
     "color:var(--tv-color-popup-element-text, #d1d4dc)",
   ].join(";");
+
+  // Popups live under document.body so they can escape the clipped chart
+  // viewport. Mirror the widget's custom properties explicitly; CSS variables
+  // would otherwise stop at the portal boundary and light/custom themes would
+  // fall back to the dark palette.
+  const themeRoot = opts.themeRoot ?? opts.anchor?.closest<HTMLElement>(".raze-chart-root");
+  if (themeRoot) {
+    const names = new Set<string>([
+      "--tv-color-pane-background",
+      "--tv-color-platform-background",
+      "--tv-color-toolbar-button-background",
+      "--tv-color-toolbar-button-background-hover",
+      "--tv-color-toolbar-button-background-active",
+      "--tv-color-toolbar-button-text",
+      "--tv-color-toolbar-button-text-hover",
+      "--tv-color-toolbar-divider-background",
+      "--tv-color-popup-background",
+      "--tv-color-popup-element-text",
+      "--tv-color-popup-element-background-hover",
+      "--tv-color-popup-shadow",
+    ]);
+    for (let index = 0; index < themeRoot.style.length; index++) {
+      const name = themeRoot.style.item(index);
+      if (name.startsWith("--")) names.add(name);
+    }
+    const computed = typeof getComputedStyle === "function" ? getComputedStyle(themeRoot) : null;
+    for (const name of names) {
+      const value = themeRoot.style.getPropertyValue(name) || computed?.getPropertyValue(name) || "";
+      if (value.trim()) el.style.setProperty(name, value.trim());
+    }
+  }
 
   const activeElement = document.activeElement;
   const returnFocus = opts.anchor ?? (activeElement instanceof HTMLElement ? activeElement : null);
@@ -225,17 +263,20 @@ export function openPopup(opts: PopupOptions): PopupHandle {
 
 /** Standard hover-highlighted popup row. ≥40px tall on touch devices. */
 export function popupRow(
-  html: string,
+  content: string,
   onClick: (e: MouseEvent) => void,
   options?: {
     role?: "menuitem" | "menuitemcheckbox" | "menuitemradio";
     checked?: boolean;
     label?: string;
+    /** Render trusted, library-owned markup. User/feed strings stay text by default. */
+    trustedHtml?: boolean;
   },
 ): HTMLButtonElement {
   const row = document.createElement("button");
   row.type = "button";
-  row.innerHTML = html;
+  if (options?.trustedHtml) row.innerHTML = content;
+  else row.textContent = content;
   row.className = "raze-chart-focusable";
   row.setAttribute("role", options?.role ?? "menuitem");
   if (options?.checked !== undefined) row.setAttribute("aria-checked", String(options.checked));

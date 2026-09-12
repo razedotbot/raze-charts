@@ -91,8 +91,12 @@ export class ScaleBar {
   sync(): void {
     const set = (b: HTMLButtonElement, on: boolean): void => {
       b.setAttribute("aria-pressed", String(on));
-      b.style.color = on ? "#66d89e" : "var(--tv-color-toolbar-button-text, #8b887e)";
-      b.style.background = on ? "rgba(102,216,158,0.14)" : "transparent";
+      b.style.color = on
+        ? "var(--tv-color-toolbar-button-text-hover, #66d89e)"
+        : "var(--tv-color-toolbar-button-text, #8b887e)";
+      b.style.background = on
+        ? "var(--tv-color-toolbar-button-background-active, rgba(102,216,158,0.14))"
+        : "transparent";
       b.style.fontWeight = on ? "600" : "400";
     };
     set(this.pctBtn, this.context.percentScale);

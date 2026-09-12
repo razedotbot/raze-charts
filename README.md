@@ -184,7 +184,10 @@ financialChart.onChartReady(async () => {
     quantity: 2,
     currency: "USD",
     onChange: (snapshot, event) => {
-      sendOrderAmendment(event.line.id, event.line.price);
+      // `moving` is a transient preview. Persist only the final price.
+      if (event.type === "moved") {
+        sendOrderAmendment(event.line.id, event.line.price);
+      }
       updateRiskPreview(snapshot.riskRewardRatio);
     },
     onCancel: (snapshot) => cancelOrderGroup(snapshot.id),
@@ -435,7 +438,7 @@ npm run test:visual
 
 `npm run quality` runs strict source/API type checks, builds the distributable
 artifacts, and exercises the widget, dashboard compiler and edge cases,
-SVG/Canvas color parity, React 17/18 contracts, data races, time indexing,
+SVG/Canvas color parity, React 17/18/19 contracts, data races, time indexing,
 studies, declaration watch mode, the packed ESM/CJS/NodeNext package contract,
 documentation, bundle budgets, and compiler performance. Visual tests use
 Playwright Chromium snapshots and remain a separate platform-specific gate.

@@ -1316,7 +1316,7 @@ export function mountChart(
   let fullXExtent: [number, number] | null = null;
   const wrap = document.createElement("div");
   wrap.style.cssText =
-    "position:relative;width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;touch-action:none;";
+    "position:relative;width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;";
   const stage = document.createElement("div");
   stage.style.cssText = "width:100%;flex:1 1 auto;min-height:0;position:relative;overflow:hidden;";
   const hairV = document.createElement("div");
@@ -1378,7 +1378,7 @@ export function mountChart(
       "box-sizing:border-box",
       `box-shadow:inset 0 0 0 1.5px ${theme.text}, 0 0 0 1px ${theme.background}`,
     ].join(";");
-    wrap.style.touchAction = "none";
+    wrap.style.touchAction = currentOptions.interaction === false ? "" : "none";
   };
   const hideOverlay = (): void => {
     hairV.style.display = "none";
@@ -1822,13 +1822,17 @@ export function mountChart(
   type PanDrag = {
     kind: "pan";
     startX: number;
+    startY: number;
     from: number;
     to: number;
     y?: [number, number];
+    moved: boolean;
+    viewportBeforeDrag: ChartViewport | null;
   };
   let drag: null | PanDrag | { kind: "brush"; startX: number } = null;
   let panRaf = 0;
   let lastPanCssX = 0;
+  const panActivationDistance = 4;
 
   const plotXToDomain = (compiled: CompiledChart, cssX: number, box: DOMRect): number | null => {
     if (compiled.xScale.kind !== "linear") return null;
@@ -1882,7 +1886,6 @@ export function mountChart(
     const tick = (): void => {
       panRaf = 0;
       if (destroyed || drag?.kind !== "pan") return;
-      if (liveViewport) currentOptions.onViewportChange?.(liveViewport);
       if ((currentOptions.renderer ?? "svg") !== "canvas") return;
       paint();
       if (drag?.kind !== "pan" || compiledRef?.xScale.kind !== "linear") return;
@@ -1926,6 +1929,7 @@ export function mountChart(
     }
     const box = wrap.getBoundingClientRect();
     const cssX = ev.clientX - box.left;
+    const cssY = ev.clientY - box.top;
     if (ev.shiftKey && interact.brush) {
       drag = { kind: "brush", startX: cssX };
       brushRect.style.display = "block";
@@ -1939,15 +1943,16 @@ export function mountChart(
       drag = {
         kind: "pan",
         startX: cssX,
+        startY: cssY,
         from,
         to,
         y: compiled.yScale.kind === "linear"
           ? [compiled.yScale.domain[0], compiled.yScale.domain[1]]
           : undefined,
+        moved: false,
+        viewportBeforeDrag: liveViewport,
       };
       lastPanCssX = cssX;
-      hideOverlay();
-      wrap.style.cursor = "grabbing";
       ev.preventDefault();
       window.getSelection?.()?.removeAllRanges();
       capturePointer(ev);
@@ -1961,6 +1966,7 @@ export function mountChart(
     if (!compiled) return;
     const box = wrap.getBoundingClientRect();
     const cssX = ev.clientX - box.left;
+    const cssY = ev.clientY - box.top;
     if (drag.kind === "brush") {
       const left = Math.min(drag.startX, cssX);
       brushRect.style.left = `${left}px`;
@@ -1969,6 +1975,12 @@ export function mountChart(
       brushRect.style.height = `${compiled.plot.h}px`;
       brushRect.style.display = "block";
       return;
+    }
+    if (!drag.moved) {
+      if (Math.hypot(cssX - drag.startX, cssY - drag.startY) < panActivationDistance) return;
+      drag.moved = true;
+      hideOverlay();
+      wrap.style.cursor = "grabbing";
     }
     lastPanCssX = cssX;
     const { viewport, userDx } = panShift(compiled, drag, cssX, box);
@@ -1991,11 +2003,11 @@ export function mountChart(
       if (a != null && b != null && Math.abs(a - b) > 0) {
         emitViewport({ x: a < b ? [a, b] : [b, a] });
       }
-    } else if (drag?.kind === "pan" && compiled && compiled.xScale.kind === "linear") {
+    } else if (drag?.kind === "pan" && drag.moved && compiled && compiled.xScale.kind === "linear") {
       const { viewport } = panShift(compiled, drag, cssX, box);
       applyPanPreview(0);
       emitViewport({ x: viewport.x });
-    } else if (!drag && compiled) {
+    } else if ((!drag || (drag.kind === "pan" && !drag.moved)) && compiled) {
       const scaleX = (box.width || compiled.width) / compiled.width;
       const scaleY = (box.height || compiled.height) / compiled.height;
       const x = (ev.clientX - box.left) / scaleX;
@@ -2013,6 +2025,19 @@ export function mountChart(
     }
     drag = null;
     brushRect.style.display = "none";
+  };
+
+  const onPointerCancel = (): void => {
+    const cancelled = drag;
+    drag = null;
+    cancelPanRaf();
+    wrap.style.cursor = "";
+    brushRect.style.display = "none";
+    applyPanPreview(0);
+    if (cancelled?.kind === "pan" && cancelled.moved) {
+      liveViewport = cancelled.viewportBeforeDrag;
+      if ((currentOptions.renderer ?? "svg") === "canvas") paint();
+    }
   };
 
   const onSelectStart = (ev: Event): void => {
@@ -2036,7 +2061,7 @@ export function mountChart(
     wrap.addEventListener("pointerleave", hideOverlay);
     wrap.addEventListener("pointerdown", onPointerDown);
     wrap.addEventListener("pointerup", onPointerUp);
-    wrap.addEventListener("pointercancel", onPointerUp);
+    wrap.addEventListener("pointercancel", onPointerCancel);
     wrap.addEventListener("selectstart", onSelectStart);
     wrap.addEventListener("wheel", onWheel, { passive: false });
     presetsBar.addEventListener("pointerdown", stopChromePointer);
@@ -2052,7 +2077,7 @@ export function mountChart(
     wrap.removeEventListener("pointerleave", hideOverlay);
     wrap.removeEventListener("pointerdown", onPointerDown);
     wrap.removeEventListener("pointerup", onPointerUp);
-    wrap.removeEventListener("pointercancel", onPointerUp);
+    wrap.removeEventListener("pointercancel", onPointerCancel);
     wrap.removeEventListener("selectstart", onSelectStart);
     wrap.removeEventListener("wheel", onWheel);
     presetsBar.removeEventListener("pointerdown", stopChromePointer);
@@ -2070,10 +2095,17 @@ export function mountChart(
       const previous = current;
       const previousOptions = currentOptions;
       const previousScene = compiledRef;
+      const previousViewport = liveViewport;
+      const previousHiddenSeries = hiddenSeries;
+      const previousFullXExtent = fullXExtent;
+      const definitionChanged = next !== current;
       current = next;
+      if (definitionChanged) fullXExtent = null;
       if (nextOptions) {
         currentOptions = { ...currentOptions, ...nextOptions };
-        if (nextOptions.viewport) liveViewport = nextOptions.viewport;
+        if (Object.prototype.hasOwnProperty.call(nextOptions, "viewport")) {
+          liveViewport = nextOptions.viewport ?? null;
+        }
         if (nextOptions.hiddenSeries) hiddenSeries = new Set(nextOptions.hiddenSeries);
       }
       try {
@@ -2082,6 +2114,9 @@ export function mountChart(
         current = previous;
         currentOptions = previousOptions;
         compiledRef = previousScene;
+        liveViewport = previousViewport;
+        hiddenSeries = previousHiddenSeries;
+        fullXExtent = previousFullXExtent;
         throw error;
       }
     },
@@ -2102,7 +2137,7 @@ export function mountChart(
       wrap.removeEventListener("pointerleave", hideOverlay);
       wrap.removeEventListener("pointerdown", onPointerDown);
       wrap.removeEventListener("pointerup", onPointerUp);
-      wrap.removeEventListener("pointercancel", onPointerUp);
+      wrap.removeEventListener("pointercancel", onPointerCancel);
       wrap.removeEventListener("selectstart", onSelectStart);
       wrap.removeEventListener("wheel", onWheel);
       presetsBar.removeEventListener("pointerdown", stopChromePointer);

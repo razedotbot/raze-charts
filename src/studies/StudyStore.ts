@@ -5,12 +5,15 @@
 
 import type { Bar, EntityId, StudyDefinition, StudySeries } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
+import type { CommandStack } from "../core/CommandStack";
 import { BUILTIN_STUDIES, StudyRegistry } from "./registry";
 
 /** @deprecated Studies are registry-driven; any registered name is valid. */
 export type StudyKind = string;
 
 export interface StudySpec {
+  /** Internal snapshot restore id; regular callers should let the store allocate it. */
+  id?: EntityId;
   /** Study name resolved against the registry (built-ins + custom). */
   name: string;
   /** 0 / absent → the definition's default length. */
@@ -115,6 +118,12 @@ function nextId(name: string): EntityId {
   return `study_${slug}_${seq}` as EntityId;
 }
 
+function reserveId(id: EntityId): void {
+  const match = /_(\d+)$/.exec(String(id));
+  const value = match ? Number(match[1]) : Number.NaN;
+  if (Number.isSafeInteger(value)) seq = Math.max(seq, value);
+}
+
 export class StudyStore {
   private items = new Map<EntityId, StudyInstance>();
   private runtimes = new Map<EntityId, StudyRuntime>();
@@ -125,6 +134,7 @@ export class StudyStore {
   constructor(
     private readonly context: ChartContext,
     readonly registry: StudyRegistry = new StudyRegistry(),
+    private readonly commands?: CommandStack,
   ) {
     this.barsSnapshot = this.captureBars();
     this.context.dataChanged.subscribe(
@@ -155,7 +165,10 @@ export class StudyStore {
   add(spec: StudySpec): EntityId | null {
     const def = this.registry.resolve(spec.name);
     if (!def) return null;
-    const id = nextId(def.name);
+    let id = spec.id ?? nextId(def.name);
+    if (spec.id && this.items.has(id)) return null;
+    while (!spec.id && this.items.has(id)) id = nextId(def.name);
+    if (spec.id) reserveId(id);
     const rawLength = spec.length || def.defaults?.length || 14;
     const study: StudyInstance = {
       id,
@@ -169,6 +182,89 @@ export class StudyStore {
       forceOverlay: spec.forceOverlay ?? false,
       inputs: spec.inputs ?? {},
     };
+    this.initialiseRuntime(id, def);
+    this.recompute(study);
+    this.items.set(id, study);
+    this.context.requestPaint();
+    const snapshot = this.clone(study);
+    const index = this.items.size - 1;
+    this.commands?.push({
+      undo: () => { this.remove(id); },
+      redo: () => { this.restore(snapshot, index); },
+    });
+    return id;
+  }
+
+  remove(id: EntityId): boolean {
+    const before = this.items.get(id);
+    const index = Array.from(this.items.keys()).indexOf(id);
+    if (!before || !this.items.delete(id)) return false;
+    const snapshot = this.clone(before);
+    this.runtimes.delete(id);
+    this.context.requestPaint();
+    this.commands?.push({
+      undo: () => { this.restore(snapshot, index); },
+      redo: () => { this.remove(id); },
+    });
+    return true;
+  }
+
+  clear(): void {
+    if (this.items.size === 0) return;
+    const snapshots = this.list().map((study, index) => ({ study: this.clone(study), index }));
+    this.items.clear();
+    this.runtimes.clear();
+    this.context.requestPaint();
+    this.commands?.push({
+      undo: () => {
+        for (const snapshot of snapshots) this.restore(snapshot.study, snapshot.index);
+      },
+      redo: () => { this.clear(); },
+    });
+  }
+
+  has(id: EntityId): boolean {
+    return this.items.has(id);
+  }
+
+  /** Restore a snapshot without allocating a new public entity id. */
+  restore(snapshot: StudyInstance, index?: number): boolean {
+    const def = this.registry.resolve(snapshot.name);
+    if (!def) return false;
+    const study: StudyInstance = {
+      ...snapshot,
+      def,
+      inputs: { ...snapshot.inputs },
+      values: [],
+      series: [],
+    };
+    reserveId(study.id);
+    this.initialiseRuntime(study.id, def);
+    this.recompute(study);
+    if (this.items.has(study.id) || index === undefined || index >= this.items.size) {
+      this.items.set(study.id, study);
+    } else {
+      const entries = Array.from(this.items.entries());
+      entries.splice(Math.max(0, index), 0, [study.id, study]);
+      this.items = new Map(entries);
+    }
+    this.context.requestPaint();
+    return true;
+  }
+
+  private clone(study: StudyInstance): StudyInstance {
+    return {
+      ...study,
+      inputs: { ...study.inputs },
+      values: [...study.values],
+      series: study.series.map((series) => ({
+        ...series,
+        values: [...series.values],
+      })),
+    };
+  }
+
+  private initialiseRuntime(id: EntityId, def: StudyDefinition): void {
     const builtin = BUILTIN_KINDS.get(def);
     this.runtimes.set(id, {
       // The exported definitions are mutable for compatibility. Optimise only
@@ -176,28 +272,6 @@ export class StudyStore {
       kind: builtin && builtin.compute === def.compute ? builtin.kind : null,
       rsi: null,
     });
-    this.recompute(study);
-    this.items.set(id, study);
-    this.context.requestPaint();
-    return id;
-  }
-
-  remove(id: EntityId): boolean {
-    if (!this.items.delete(id)) return false;
-    this.runtimes.delete(id);
-    this.context.requestPaint();
-    return true;
-  }
-
-  clear(): void {
-    if (this.items.size === 0) return;
-    this.items.clear();
-    this.runtimes.clear();
-    this.context.requestPaint();
-  }
-
-  has(id: EntityId): boolean {
-    return this.items.has(id);
   }
 
   private handleDataChanged(): void {

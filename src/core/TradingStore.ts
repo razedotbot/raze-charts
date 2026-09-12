@@ -133,8 +133,26 @@ export class TradingStore {
     if (!Number.isFinite(options.entryPrice)) {
       throw new Error("[raze-charts] bracket entry price must be finite");
     }
+    if (options.stopLossPrice != null && !Number.isFinite(options.stopLossPrice)) {
+      throw new Error("[raze-charts] bracket stop-loss price must be finite");
+    }
+    if (options.takeProfitPrice != null && !Number.isFinite(options.takeProfitPrice)) {
+      throw new Error("[raze-charts] bracket take-profit price must be finite");
+    }
     const id = options.id ?? nextId("bracket");
     if (this.brackets.has(id)) throw new Error(`[raze-charts] duplicate bracket id: ${id}`);
+    const entryId = `${id}:entry`;
+    const stopLossId = `${id}:sl`;
+    const takeProfitId = `${id}:tp`;
+    const requestedLineIds = [
+      entryId,
+      options.stopLossPrice == null ? null : stopLossId,
+      options.takeProfitPrice == null ? null : takeProfitId,
+    ].filter((lineId): lineId is string => lineId !== null);
+    const duplicateLineId = requestedLineIds.find((lineId) => this.lines.has(lineId));
+    if (duplicateLineId) {
+      throw new Error(`[raze-charts] duplicate trading line id: ${duplicateLineId}`);
+    }
     const common: TradingLineOptions = {
       side: options.side,
       quantity: options.quantity,
@@ -144,21 +162,21 @@ export class TradingStore {
     const exitSide: TradingSide = options.side === "buy" ? "sell" : "buy";
     const entry = this.create({
       ...common,
-      id: `${id}:entry`,
+      id: entryId,
       price: options.entryPrice,
       text: options.entryText ?? (options.side === "buy" ? "Long" : "Short"),
     }, "position", id);
     let stopLoss = options.stopLossPrice == null ? undefined : this.create({
       ...common,
       side: exitSide,
-      id: `${id}:sl`,
+      id: stopLossId,
       price: options.stopLossPrice,
       text: options.stopLossText ?? "Stop loss",
     }, "stop-loss", id);
     let takeProfit = options.takeProfitPrice == null ? undefined : this.create({
       ...common,
       side: exitSide,
-      id: `${id}:tp`,
+      id: takeProfitId,
       price: options.takeProfitPrice,
       text: options.takeProfitText ?? "Take profit",
     }, "take-profit", id);
@@ -180,11 +198,15 @@ export class TradingStore {
       entry,
       get stopLoss() { return stopLoss; },
       get takeProfit() { return takeProfit; },
-      setEntryPrice: (price) => { entry.setPrice(price); return adapter; },
+      setEntryPrice: (price) => {
+        if (this.brackets.has(id)) entry.setPrice(price);
+        return adapter;
+      },
       setStopLossPrice: (price) => {
+        if (!this.brackets.has(id)) return adapter;
         if (stopLoss && this.lines.has(stopLoss.id)) stopLoss.setPrice(price);
         else {
-          stopLoss = this.create({ ...common, side: exitSide, id: `${id}:sl`, price, text: options.stopLossText ?? "Stop loss" }, "stop-loss", id);
+          stopLoss = this.create({ ...common, side: exitSide, id: stopLossId, price, text: options.stopLossText ?? "Stop loss" }, "stop-loss", id);
           record.stopLossId = stopLoss.id;
           const line = this.lines.get(stopLoss.id);
           if (line) this.emit(line, "moved", "api");
@@ -192,9 +214,10 @@ export class TradingStore {
         return adapter;
       },
       setTakeProfitPrice: (price) => {
+        if (!this.brackets.has(id)) return adapter;
         if (takeProfit && this.lines.has(takeProfit.id)) takeProfit.setPrice(price);
         else {
-          takeProfit = this.create({ ...common, side: exitSide, id: `${id}:tp`, price, text: options.takeProfitText ?? "Take profit" }, "take-profit", id);
+          takeProfit = this.create({ ...common, side: exitSide, id: takeProfitId, price, text: options.takeProfitText ?? "Take profit" }, "take-profit", id);
           record.takeProfitId = takeProfit.id;
           const line = this.lines.get(takeProfit.id);
           if (line) this.emit(line, "moved", "api");
@@ -202,6 +225,7 @@ export class TradingStore {
         return adapter;
       },
       setQuantity: (quantity) => {
+        if (!this.brackets.has(id)) return adapter;
         record.quantity = quantityText(quantity);
         entry.setQuantity(quantity);
         stopLoss?.setQuantity(quantity);
@@ -233,7 +257,10 @@ export class TradingStore {
 
   move(id: string, price: number, phase: "moving" | "moved", reason: "drag" | "keyboard" | "api"): void {
     const line = this.lines.get(id);
-    if (!line || !Number.isFinite(price)) return;
+    if (!line) return;
+    if (!Number.isFinite(price)) {
+      throw new TypeError("[raze-charts] trading line price must be finite");
+    }
     line.price = price;
     this.emit(line, phase, reason);
     this.context.requestPaint();
@@ -252,6 +279,7 @@ export class TradingStore {
     if (!line) return;
     const adapter = this.adapters.get(id);
     if (adapter && line.callbacks.cancel) safely(() => line.callbacks.cancel!.call(adapter, adapter));
+    line.status = "cancelled";
     this.emit(line, "cancelled", "cancel");
     if (line.groupId && this.brackets.has(line.groupId)) {
       const record = this.brackets.get(line.groupId)!;
@@ -268,7 +296,12 @@ export class TradingStore {
     this.lines.delete(id);
     this.adapters.delete(id);
     if (this.context.selectedTradingLineId === id) this.context.selectedTradingLineId = null;
-    this.context.tradingEvent.fire(this.snapshotLine(line), "remove");
+    const bracket = line.groupId ? this.brackets.get(line.groupId) : undefined;
+    if (bracket) {
+      if (bracket.stopLossId === id) bracket.stopLossId = undefined;
+      if (bracket.takeProfitId === id) bracket.takeProfitId = undefined;
+    }
+    this.emit(line, "removed", "api");
     this.context.requestPaint();
   }
 

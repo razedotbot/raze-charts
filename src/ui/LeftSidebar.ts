@@ -282,7 +282,9 @@ export class LeftSidebar {
       "touch-action:manipulation",
     ].join(";");
     b.addEventListener("mouseenter", () => {
-      if (b.dataset.active !== "1") b.style.background = "rgba(255,255,255,0.06)";
+      if (b.dataset.active !== "1") {
+        b.style.background = "var(--tv-color-toolbar-button-background-hover, rgba(255,255,255,0.06))";
+      }
     });
     b.addEventListener("mouseleave", () => {
       if (b.dataset.active !== "1") b.style.background = "transparent";
@@ -305,8 +307,10 @@ export class LeftSidebar {
       const on = id === tool;
       b.setAttribute("aria-pressed", String(on));
       b.dataset.active = on ? "1" : "0";
-      b.style.background = on ? "rgba(102,216,158,0.18)" : "transparent";
-      b.style.color = on ? "#66d89e" : "inherit";
+      b.style.background = on
+        ? "var(--tv-color-toolbar-button-background-active, rgba(102,216,158,0.18))"
+        : "transparent";
+      b.style.color = on ? "var(--tv-color-toolbar-button-text-hover, #66d89e)" : "inherit";
     }
   }
 
@@ -347,13 +351,19 @@ export class LeftSidebar {
     for (const s of this.chartStyles) {
       const on = s.id === this.chartStyle;
       const row = popupRow(
-        `<span style="display:inline-flex;width:18px;color:${on ? "#66d89e" : "inherit"}">${s.svg}</span>${on ? "✓ " : ""}${s.title}`,
+        `<span style="display:inline-flex;width:18px;color:${on ? "var(--tv-color-toolbar-button-text-hover, #66d89e)" : "inherit"}">${s.svg}</span>${on ? "✓ " : ""}${s.title}`,
         () => {
           this.setChartStyle(s.id);
           this.cbs.onChartType(s.id);
           this.closeStylePanel();
         },
-        { role: "menuitemradio", checked: on, label: s.title },
+        {
+          role: "menuitemradio",
+          checked: on,
+          label: s.title,
+          // Chart-style titles and SVGs come from the library-owned table above.
+          trustedHtml: true,
+        },
       );
       popup.el.appendChild(row);
     }

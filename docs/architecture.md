@@ -86,8 +86,10 @@ public full-array `compute` contract. Custom code must not assume incremental
 calls.
 
 `widget.save()` / `widget.load()` serialize a versioned JSON snapshot: symbol,
-interval, visible range, style/scale flags, drawings, study specs (not derived
-values), and compare symbols. The host owns storage. `executeActionById("undo"|"redo")`
+interval, visible range, style/scale flags, drawings with stable IDs and behavior
+flags, study specs (not derived values), and compare symbols. The host owns
+storage. A drawing with `disableSave` remains live but is omitted from the
+snapshot. `executeActionById("undo"|"redo")`
 walks a command stack for drawings and studies. `disableUndo` on a shape skips
 that create. There is no cloud layout.
 

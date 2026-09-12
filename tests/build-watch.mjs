@@ -33,23 +33,25 @@ const waitFor = async (predicate, label, timeout = 30_000) => {
 try {
   rmSync(sourceProbe, { force: true });
   await waitFor(() => output.includes("[raze-charts] watching"), "watch startup");
+  // Corrupt only generated output, then use the temporary type-only source as
+  // the watch trigger. Tests must never rewrite tracked source files: doing so
+  // is both unsafe on interruption and flaky on Windows where editors/indexers
+  // can briefly hold a source handle open.
+  const declarationToken = "raze-watch-declaration-probe";
+  writeFileSync(compatibilityOutput, `${compatibilityOriginal}\n// ${declarationToken}\n`);
   writeFileSync(sourceProbe, "export interface WatchContractProbe { readonly synchronized: true; }\n");
   await waitFor(
     () => existsSync(emittedProbe) && readFileSync(emittedProbe, "utf8").includes("synchronized"),
     "type-only declaration emission",
   );
-  assert.ok(existsSync(resolve(root, "dist/charting_library.d.ts")), "watch keeps the compatibility declaration present");
-
-  const declarationToken = "raze-watch-declaration-probe";
-  writeFileSync(compatibilitySource, `${compatibilityOriginal}\n// ${declarationToken}\n`);
-  await waitFor(
-    () => readFileSync(compatibilityOutput, "utf8").includes(declarationToken),
-    "hand-authored declaration refresh",
-  );
-  writeFileSync(compatibilitySource, compatibilityOriginal);
   await waitFor(
     () => !readFileSync(compatibilityOutput, "utf8").includes(declarationToken),
-    "hand-authored declaration restore",
+    "hand-authored declaration refresh",
+  );
+  assert.equal(
+    readFileSync(compatibilityOutput, "utf8"),
+    compatibilityOriginal,
+    "watch restores the compatibility declaration from its tracked source",
   );
 
   rmSync(sourceProbe, { force: true });
@@ -57,7 +59,6 @@ try {
   console.log("[raze-charts] build watch synchronizes type-only sources");
 } finally {
   rmSync(sourceProbe, { force: true });
-  writeFileSync(compatibilitySource, compatibilityOriginal);
   if (child.exitCode == null) {
     const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
     child.kill();

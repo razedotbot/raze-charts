@@ -197,6 +197,11 @@ Typed.Line({ dataKey: "price" });
 // @ts-expect-error Typed axes reject unknown data keys.
 Typed.XAxis({ dataKey: "timestamp" });
 
+Typed.Brush({ dataKey: "date", startIndex: 0, endIndex: 2 });
+
+// @ts-expect-error Typed brushes reject unknown data keys.
+Typed.Brush({ dataKey: "timestamp", startIndex: 0 });
+
 const typedChart = (
   <Typed.LineChart data={data} ariaLabel="Closing price">
     <Typed.XAxis dataKey="date" />

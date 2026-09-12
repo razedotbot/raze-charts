@@ -10,9 +10,22 @@ export const TOOLBAR_HEIGHT = 38;
 
 export class Toolbar {
   readonly el: HTMLDivElement;
+  private rail: HTMLDivElement;
   private leftSlot: HTMLDivElement;
   private rightSlot: HTMLDivElement;
   private removeKeyboardNavigation: () => void;
+  private scrollObserver: ResizeObserver | null = null;
+  private readonly syncScrollHints = (): void => {
+    const max = Math.max(0, this.el.scrollWidth - this.el.clientWidth);
+    this.el.dataset.scrollLeft = String(max > 1 && this.el.scrollLeft > 1);
+    this.el.dataset.scrollRight = String(max > 1 && this.el.scrollLeft < max - 1);
+  };
+  private readonly revealFocusedControl = (event: FocusEvent): void => {
+    const target = event.target;
+    if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    }
+  };
   /** Anchor where the interval selector mounts (P3), kept left of custom buttons. */
   readonly intervalSlot: HTMLDivElement;
   readonly searchSlot: HTMLDivElement;
@@ -25,12 +38,9 @@ export class Toolbar {
     this.el.setAttribute("aria-label", "Chart toolbar");
     this.el.setAttribute("aria-orientation", "horizontal");
     this.el.style.cssText = [
-      "display:flex",
-      "align-items:center",
-      "justify-content:space-between",
+      "display:block",
       `height:${TOOLBAR_HEIGHT}px`,
       "min-height:" + TOOLBAR_HEIGHT + "px",
-      "padding:0 6px",
       "box-sizing:border-box",
       "border-bottom:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
       "background:var(--tv-color-toolbar-button-background, transparent)",
@@ -38,35 +48,52 @@ export class Toolbar {
       `font-family:${this.context.fontFamily}`,
       "font-size:13px",
       "user-select:none",
-      "overflow:visible",
+      "overflow-x:auto",
+      "overflow-y:hidden",
+      "overscroll-behavior-x:contain",
+      "scroll-behavior:smooth",
+      "-webkit-overflow-scrolling:touch",
       "position:relative",
       "z-index:3",
     ].join(";");
 
     const mkSlot = (justify: string): HTMLDivElement => {
       const s = document.createElement("div");
-      s.style.cssText = `display:flex;align-items:center;gap:2px;justify-content:${justify};`;
+      s.style.cssText = `display:flex;align-items:center;gap:2px;justify-content:${justify};flex:0 0 auto;white-space:nowrap;`;
       return s;
     };
     this.leftSlot = mkSlot("flex-start");
-    // Narrow screens scroll the left cluster horizontally instead of clipping
-    // (scrollbar hidden by the injected base stylesheet).
-    this.leftSlot.className = "raze-chart-toolbar-scroll";
-    this.leftSlot.style.cssText += ";min-width:0;flex:1 1 auto;overflow-x:auto;overflow-y:hidden;";
     this.rightSlot = mkSlot("flex-end");
-    this.rightSlot.style.flex = "0 0 auto";
     this.intervalSlot = mkSlot("flex-start");
-    this.intervalSlot.style.flex = "0 0 auto";
     this.intervalSlot.setAttribute("role", "group");
     this.intervalSlot.setAttribute("aria-label", "Chart interval");
     this.searchSlot = mkSlot("flex-start");
-    this.searchSlot.style.flex = "0 0 auto";
     this.rangeSlot = mkSlot("flex-start");
-    this.rangeSlot.style.flex = "0 0 auto";
 
     this.leftSlot.append(this.searchSlot, this.intervalSlot, this.rangeSlot);
-    this.el.appendChild(this.leftSlot);
-    this.el.appendChild(this.rightSlot);
+    this.rail = document.createElement("div");
+    this.rail.className = "raze-chart-toolbar-rail";
+    this.rail.style.cssText = [
+      "display:flex",
+      "align-items:center",
+      "justify-content:space-between",
+      "gap:10px",
+      "width:max-content",
+      "min-width:100%",
+      "height:100%",
+      "padding:0 6px",
+      "box-sizing:border-box",
+    ].join(";");
+    this.rail.append(this.leftSlot, this.rightSlot);
+    this.el.appendChild(this.rail);
+    this.el.addEventListener("scroll", this.syncScrollHints, { passive: true });
+    this.el.addEventListener("focusin", this.revealFocusedControl);
+    if (typeof ResizeObserver !== "undefined") {
+      this.scrollObserver = new ResizeObserver(this.syncScrollHints);
+      this.scrollObserver.observe(this.el);
+      this.scrollObserver.observe(this.rail);
+    }
+    queueMicrotask(this.syncScrollHints);
     this.removeKeyboardNavigation = enableToolbarKeyboardNavigation(this.el, "horizontal");
   }
 
@@ -119,10 +146,15 @@ export class Toolbar {
       btn.setAttribute("aria-label", options.title);
     }
     (align === "right" ? this.rightSlot : this.leftSlot).appendChild(btn);
+    queueMicrotask(this.syncScrollHints);
     return btn;
   }
 
   destroy(): void {
+    this.el.removeEventListener("scroll", this.syncScrollHints);
+    this.el.removeEventListener("focusin", this.revealFocusedControl);
+    this.scrollObserver?.disconnect();
+    this.scrollObserver = null;
     this.removeKeyboardNavigation();
     this.el.remove();
   }

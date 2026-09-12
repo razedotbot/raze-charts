@@ -329,10 +329,23 @@ const panDefinition = defineChart({
   legend: false,
   ariaLabel: "Revenue",
 });
-const panMount = mountChart(panHost, panDefinition, { width: 400, height: 200, interaction: { pan: true } });
+const panSelections = [];
+const panViewportChanges = [];
+const panMount = mountChart(panHost, panDefinition, {
+  width: 400,
+  height: 200,
+  onSelect: (event) => panSelections.push(event),
+  onViewportChange: (viewport) => panViewportChanges.push(viewport),
+});
 const panWrap = panHost.firstElementChild;
 const panBox = { x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, toJSON() {} };
 panWrap.getBoundingClientRect = () => panBox;
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientX: 220, clientY: 80 }));
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientX: 222, clientY: 82 }));
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, clientX: 222, clientY: 82 }));
+assert.equal(panSelections.length, 1, "a sub-threshold pointer gesture selects with default pan enabled");
+assert.equal(panMount.getViewport(), null, "a sub-threshold pointer gesture does not create a pan viewport");
+assert.equal(panViewportChanges.length, 0, "a sub-threshold pointer gesture does not emit a viewport change");
 panWrap.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientX: 220, clientY: 80 }));
 panWrap.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientX: 160, clientY: 80 }));
 const panPlot = panWrap.querySelector("[data-role='plot']");
@@ -342,13 +355,38 @@ assert.equal(panPlot?.getAttribute("transform"), panLabels?.getAttribute("transf
 const livePan = panMount.getViewport()?.x;
 assert(Array.isArray(livePan) && livePan.length === 2, "svg pan updates the live viewport while dragging");
 assert(Number(livePan[0]) > 0, "dragging left shifts the window toward later values");
+assert.equal(panViewportChanges.length, 0, "pan previews do not publish a viewport before commit");
 const panSvgBeforeCommit = panWrap.querySelector("svg");
 panWrap.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, clientX: 160, clientY: 80 }));
 assert.equal(panWrap.querySelector("[data-role='plot']")?.getAttribute("transform"), null, "svg pan clears the preview transform after commit");
 assert.notEqual(panWrap.querySelector("svg"), panSvgBeforeCommit, "svg pan commits by rewriting the scene once");
 assert.equal(panWrap.style.cursor, "", "svg pan restores the cursor after release");
+assert.equal(panViewportChanges.length, 1, "a completed pan publishes exactly one committed viewport");
+const committedPan = panMount.getViewport();
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientX: 220, clientY: 80 }));
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientX: 120, clientY: 80 }));
+assert.notDeepEqual(panMount.getViewport(), committedPan, "a second pan exposes its in-progress preview");
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointercancel", { bubbles: true, clientX: 120, clientY: 80 }));
+assert.deepEqual(panMount.getViewport(), committedPan, "pointercancel rolls a pan back to its pre-drag viewport");
+assert.equal(panViewportChanges.length, 1, "pointercancel does not publish a pan commit");
+assert.equal(panWrap.querySelector("[data-role='plot']")?.getAttribute("transform"), null, "pointercancel clears the pan preview transform");
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, shiftKey: true, clientX: 100, clientY: 80 }));
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, shiftKey: true, clientX: 260, clientY: 80 }));
+panWrap.dispatchEvent(new dom.window.MouseEvent("pointercancel", { bubbles: true, shiftKey: true, clientX: 260, clientY: 80 }));
+assert.deepEqual(panMount.getViewport(), committedPan, "pointercancel discards an in-progress brush");
+assert.equal(panViewportChanges.length, 1, "pointercancel does not publish a brush commit");
 panMount.destroy();
 panHost.remove();
+
+const staticHost = document.createElement("div");
+document.body.appendChild(staticHost);
+const staticMount = mountChart(staticHost, panDefinition, { width: 400, height: 200, interaction: false });
+const staticWrap = staticHost.firstElementChild;
+assert.notEqual(staticWrap.style.touchAction, "none", "interaction:false leaves native touch actions available");
+staticMount.update(panDefinition, { interaction: true });
+assert.equal(staticWrap.style.touchAction, "none", "enabling interaction opts the mount into gesture-owned touch handling");
+staticMount.destroy();
+staticHost.remove();
 
 const rangeHost = document.createElement("div");
 document.body.appendChild(rangeHost);
@@ -381,6 +419,35 @@ assert(Number(dayView[1]) - Number(dayView[0]) <= 86_400_000 * 1.05, "1D preset 
 assert.equal(byLabel["1D"].getAttribute("aria-pressed"), "true", "the active range preset is pressed");
 byLabel.ALL.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 assert.equal(byLabel.ALL.getAttribute("aria-pressed"), "true", "ALL restores the full window");
+
+const futureT0 = Date.UTC(2027, 7, 1);
+const futureRangeDefinition = defineChart({
+  marks: [line(Array.from({ length: 48 }, (_, i) => ({ t: futureT0 + i * 86_400_000, v: 80 + i })), { x: "t", y: "v", name: "Sales" })],
+  scales: { x: { type: "time" } },
+  legend: false,
+  ariaLabel: "Future revenue",
+});
+rangeMount.update(futureRangeDefinition);
+byLabel.ALL.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+const futureAll = rangeMount.getViewport()?.x;
+assert(Number(futureAll?.[0]) > t0 + 180 * 86_400_000, "changing definitions resets the cached full-domain extent");
+byLabel["1D"].dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+const futureDay = rangeMount.getViewport();
+let failedRangeUpdate;
+try {
+  rangeMount.update(defineChart(() => { throw new Error("invalid range update"); }), {
+    viewport: { x: [t0, t0 + 86_400_000] },
+    hiddenSeries: ["Sales"],
+  });
+} catch (error) {
+  failedRangeUpdate = error;
+}
+assert.match(failedRangeUpdate?.message ?? "", /invalid range update/, "failed range updates surface their compile error");
+assert.deepEqual(rangeMount.getViewport(), futureDay, "failed updates restore the prior live viewport");
+byLabel.ALL.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+const restoredFutureAll = rangeMount.getViewport()?.x;
+assert(Number(restoredFutureAll?.[1]) - Number(restoredFutureAll?.[0]) > 40 * 86_400_000, "failed updates restore the cached full-domain extent");
+assert(rangeMount.getScene()?.samples.some((sample) => sample.series === "Sales"), "failed updates restore the hidden-series set");
 rangeMount.destroy();
 rangeHost.remove();
 dom.window.close();

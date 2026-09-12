@@ -45,7 +45,10 @@ class TestResizeObserver {
     this.disconnected = false;
     observers.push(this);
   }
-  observe() { this.callback([]); }
+  observe(target) {
+    this.target = target;
+    this.callback([]);
+  }
   disconnect() { this.disconnected = true; }
   trigger() { this.callback([]); }
 }
@@ -69,7 +72,8 @@ function flushFrames() {
   for (const [, callback] of pending) callback(performance.now());
 }
 
-const { ChartEngine, Delegate, IntervalSelector, resolveTimeframe, widget } = await import("../dist/charting_library.esm.js");
+const { ChartEngine, Delegate, IntervalSelector, Toolbar, isLightColor, resolveTimeframe, widget } = await import("../dist/charting_library.esm.js");
+assert(isLightColor("rgb(255, 255, 255)"), "financial chrome recognises light RGB theme backgrounds");
 
 const datafeedPlaceholder = {};
 const engineHost = window.document.createElement("div");
@@ -119,6 +123,29 @@ const engineContext = {
   crosshairMoved: new Delegate(),
   requestPaint() {},
 };
+
+const scrollableToolbar = new Toolbar(engineContext);
+document.body.appendChild(scrollableToolbar.el);
+scrollableToolbar.createButton({ align: "left", title: "Left action" });
+scrollableToolbar.createButton({ align: "right", title: "Right action" });
+Object.defineProperties(scrollableToolbar.el, {
+  clientWidth: { configurable: true, value: 180 },
+  scrollWidth: { configurable: true, value: 560 },
+});
+scrollableToolbar.el.dispatchEvent(new window.Event("scroll"));
+assert(scrollableToolbar.el.dataset.scrollRight === "true", "header signals that more actions are available to the right");
+scrollableToolbar.el.scrollLeft = 380;
+scrollableToolbar.el.dispatchEvent(new window.Event("scroll"));
+assert(
+  scrollableToolbar.el.dataset.scrollLeft === "true"
+    && scrollableToolbar.el.dataset.scrollRight === "false",
+  "header scroll rail reveals actions appended to either alignment slot",
+);
+assert(
+  scrollableToolbar.el.querySelectorAll(".raze-chart-toolbar-rail .raze-chart-toolbar-btn").length === 2,
+  "header actions share one horizontal scroll rail",
+);
+scrollableToolbar.destroy();
 
 const engine = new ChartEngine(engineHost, engineContext);
 assert(frames.size === 1, "initial resize queues exactly one frame");
@@ -299,14 +326,56 @@ const nudge = new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: tru
 canvas.dispatchEvent(nudge);
 assert(Math.abs(order.getPrice() - draggedPrice - 0.01) < 1e-9 && nudge.defaultPrevented, "keyboard nudge moves a selected trading line by the symbol tick");
 assert(tradingEvents.some(([, type]) => type === "moved"), "trading lifecycle events reach widget subscriptions");
+flushFrames();
+const beforeCancelledDrag = order.getPrice();
+const movesBeforeCancelledDrag = orderMoved;
+const cancelY = (window.__razeChartState.priceMax - beforeCancelledDrag)
+  / (window.__razeChartState.priceMax - window.__razeChartState.priceMin) * 338;
+canvas.dispatchEvent(pointer("pointermove", cancelY));
+canvas.dispatchEvent(pointer("pointerdown", cancelY));
+canvas.dispatchEvent(pointer("pointermove", cancelY + 18));
+canvas.dispatchEvent(pointer("pointercancel", cancelY + 18));
+assert(
+  order.getPrice() === beforeCancelledDrag && orderMoved === movesBeforeCancelledDrag + 1,
+  "pointer cancellation publishes a final rollback price after the transient drag",
+);
 order.cancel();
 assert(orderCancelled === 1 && instance.activeChart().getTradingLineById(order.id) === null, "programmatic cancel matches the on-chart cancel lifecycle");
+assert(
+  tradingEvents.some(([line, type]) => line.id === order.id && type === "cancelled" && line.status === "cancelled"),
+  "cancel events expose a cancelled line snapshot",
+);
 bracket.remove();
 assert(instance.activeChart().getTradingLineById(bracket.entry.id) === null, "removing a bracket clears every linked trading line");
 const expandable = await instance.activeChart().createBracketOrder({ side: "sell", entryPrice: 101 });
 expandable.setStopLossPrice(103).setTakeProfitPrice(97);
 assert(expandable.stopLoss?.getPrice() === 103 && expandable.snapshot().riskRewardRatio === 2, "optional bracket legs can be added fluently after creation");
+const removedExpandableStop = expandable.stopLoss?.id;
 expandable.remove();
+expandable.setStopLossPrice(105).setTakeProfitPrice(95);
+assert(
+  !removedExpandableStop
+    || instance.activeChart().getTradingLineById(removedExpandableStop) === null,
+  "a removed bracket adapter cannot resurrect orphaned exit lines",
+);
+assert(tradingEvents.some(([, type]) => type === "removed"), "trading removals use the declared removed lifecycle event");
+
+let invalidBracketRejected = false;
+try {
+  await instance.activeChart().createBracketOrder({
+    id: "invalid-bracket",
+    side: "buy",
+    entryPrice: 100,
+    stopLossPrice: Number.NaN,
+  });
+} catch {
+  invalidBracketRejected = true;
+}
+assert(
+  invalidBracketRejected
+    && instance.activeChart().getTradingLineById("invalid-bracket:entry") === null,
+  "invalid bracket input rejects through the Promise contract without leaving a partial entry",
+);
 
 const selectStart = new window.Event("selectstart", { bubbles: true, cancelable: true });
 canvas.dispatchEvent(selectStart);
@@ -333,8 +402,41 @@ await Promise.resolve();
 assert(canvasKey.defaultPrevented, "focused canvas handles its documented keyboard shortcuts");
 assert(widgetHost.querySelector('[role="status"]')?.textContent === "Panned right.", "keyboard navigation announces its result");
 
+let resolveDismissedMenu;
+instance.onContextMenu(() => new Promise((resolve) => { resolveDismissedMenu = resolve; }));
+canvas.dispatchEvent(new window.MouseEvent("contextmenu", {
+  clientX: 100,
+  clientY: 70,
+  bubbles: true,
+  cancelable: true,
+}));
+window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+resolveDismissedMenu?.([{ position: "top", text: "Dismissed", click() {} }]);
+await Promise.resolve();
+await Promise.resolve();
+assert(
+  !window.document.querySelector(".raze-chart-context-menu"),
+  "outside pointer dismissal invalidates a pending async context menu",
+);
+
+let resolveLateMenu;
+instance.onContextMenu(() => new Promise((resolve) => { resolveLateMenu = resolve; }));
+canvas.dispatchEvent(new window.MouseEvent("contextmenu", {
+  clientX: 120,
+  clientY: 80,
+  bubbles: true,
+  cancelable: true,
+}));
 instance.remove();
-assert(!widgetHost.querySelector(".raze-chart-root") && frames.size === 0, "widget teardown removes semantics and pending frames");
+resolveLateMenu?.([{ position: "top", text: "Too late", click() {} }]);
+await Promise.resolve();
+await Promise.resolve();
+assert(
+  !widgetHost.querySelector(".raze-chart-root")
+    && !window.document.querySelector(".raze-chart-context-menu")
+    && frames.size === 0,
+  "widget teardown removes semantics, pending frames, and late async context menus",
+);
 
 {
   const parsed = resolveTimeframe({ value: "1M", type: "period-back" }, 1_800_000_000);
@@ -374,18 +476,269 @@ assert(!widgetHost.querySelector(".raze-chart-root") && frames.size === 0, "widg
   });
   await ranged.headerReady();
   const api = ranged.activeChart();
-  await api.createStudy("VWAP");
-  await api.createStudy("MACD");
+  const drawingEvents = [];
+  ranged.subscribe("drawing_event", (id, type) => drawingEvents.push([id, type]));
+  const vwapId = await api.createStudy("VWAP");
+  const macdId = await api.createStudy("MACD");
   const snap = ranged.save();
   assert(snap.version === 1 && snap.symbol === "ETHUSD", "save emits a versioned layout snapshot");
   assert(snap.studies.some((s) => s.name === "VWAP"), "layout snapshot includes studies");
+  api.executeActionById("undo");
+  assert(!ranged.save().studies.some((s) => s.id === String(macdId)), "study creation is undoable");
+  api.executeActionById("redo");
+  assert(ranged.save().studies.some((s) => s.id === String(macdId)), "study redo restores the original entity id");
+  api.removeEntity(macdId);
+  api.executeActionById("undo");
+  assert(ranged.save().studies.some((s) => s.id === String(macdId)), "study removal undo restores the original entity id");
+
+  const drawingId = await api.createShape(
+    { time: Math.floor(newest / 1000), price: 101 },
+    {
+      shape: "horizontal_line",
+      disableSelection: true,
+      showInObjectsTree: false,
+    },
+  );
+  api.executeActionById("undo");
+  assert(!ranged.save().drawings.some((drawing) => drawing.id === String(drawingId)), "drawing creation is undoable");
+  api.executeActionById("redo");
+  const redoneDrawing = ranged.save().drawings.find((drawing) => drawing.id === String(drawingId));
+  assert(
+    redoneDrawing?.disableSelection === true && redoneDrawing.showInObjectsTree === false,
+    "drawing redo keeps its stable id and interaction flags",
+  );
+  api.getShapeById(drawingId).setPriceLevel(95);
+  assert(drawingEvents.at(-1)?.[1] === "points_changed", "drawing point edits emit their declared lifecycle event");
+  api.executeActionById("undo");
+  assert(
+    api.getShapeById(drawingId).getPoints()[0]?.price === 101,
+    "programmatic drawing edits participate in the same undo history",
+  );
   await api.setVisibleRange({ from: Math.floor(older / 1000), to: Math.floor(newest / 1000) });
   const visible = api.getVisibleRange();
   assert(visible.from <= Math.floor(older / 1000) + 1, "setVisibleRange pages history when the window is older than loaded bars");
   await api.createCompare("BTCUSD");
   const afterCompare = ranged.save();
   assert(afterCompare.compare?.includes("BTCUSD"), "compare symbols persist in the snapshot");
+  const restoredState = {
+    ...afterCompare,
+    symbol: "BTCUSD",
+    drawings: [
+      ...afterCompare.drawings.map((drawing) => ({ ...drawing })),
+      { ...afterCompare.drawings[0], id: "shape_9000" },
+    ],
+    studies: [
+      ...afterCompare.studies.map((study) => ({ ...study })),
+      { id: "study_ema_9000", name: "EMA", length: 9, color: "#2962ff" },
+    ],
+  };
+  await ranged.load(restoredState);
+  const afterLoad = ranged.save();
+  assert(
+    afterLoad.drawings.some((drawing) => drawing.id === String(drawingId))
+      && afterLoad.studies.some((study) => study.id === String(vwapId)),
+    "layout load preserves drawing and study entity ids",
+  );
+  assert(
+    rangeHost.querySelector(".raze-chart-root")?.getAttribute("aria-label") === "BTCUSD financial chart",
+    "layout load refreshes the widget accessible name",
+  );
+  const noHistoryId = await api.createShape(
+    { time: Math.floor(newest / 1000), price: 110 },
+    { shape: "horizontal_line", disableUndo: true },
+  );
+  api.executeActionById("undo");
+  assert(
+    ranged.save().drawings.some((drawing) => drawing.id === String(noHistoryId)),
+    "disableUndo drawings do not add a history entry after load clears prior history",
+  );
+  const unsavedId = await api.createShape(
+    { time: Math.floor(newest / 1000), price: 111 },
+    { shape: "horizontal_line", disableSave: true, disableUndo: true },
+  );
+  assert(
+    !ranged.save().drawings.some((drawing) => drawing.id === String(unsavedId))
+      && api.getShapeById(unsavedId).getPoints().length === 1,
+    "disableSave keeps a live drawing out of layout snapshots",
+  );
+
+  api.removeEntity("shape_9000");
+  const freshShapeId = await api.createShape(
+    { time: Math.floor(newest / 1000), price: 112 },
+    { shape: "horizontal_line" },
+  );
+  api.removeEntity("study_ema_9000");
+  const freshStudyId = await api.createStudy("EMA");
+  assert(
+    String(freshShapeId) !== "shape_9000" && String(freshStudyId) !== "study_ema_9000",
+    "restored entity ids are reserved and never reused by later creations",
+  );
+
+  const orderedA = await api.createShape(
+    { time: Math.floor(newest / 1000), price: 113 },
+    { shape: "horizontal_line" },
+  );
+  const orderedB = await api.createShape(
+    { time: Math.floor(newest / 1000), price: 114 },
+    { shape: "horizontal_line" },
+  );
+  const orderedC = await api.createShape(
+    { time: Math.floor(newest / 1000), price: 115 },
+    { shape: "horizontal_line" },
+  );
+  api.removeEntity(orderedB);
+  api.executeActionById("undo");
+  const orderedIds = ranged.save().drawings.map((drawing) => drawing.id);
+  assert(
+    orderedIds.indexOf(String(orderedA)) < orderedIds.indexOf(String(orderedB))
+      && orderedIds.indexOf(String(orderedB)) < orderedIds.indexOf(String(orderedC)),
+    "undoing a middle drawing removal restores its original order",
+  );
+  api.getShapeById(orderedA).setProperties({ linecolor: "#fff" });
+  assert(drawingEvents.at(-1)?.[1] === "properties_changed", "drawing property edits emit properties_changed");
+  api.removeEntity(orderedC);
+  assert(drawingEvents.at(-1)?.[1] === "remove", "drawing removal emits remove");
   ranged.remove();
+}
+
+{
+  const overlapHost = window.document.createElement("div");
+  window.document.body.appendChild(overlapHost);
+  const pendingBars = new Map();
+  const overlapFeed = {
+    onReady(callback) { queueMicrotask(() => callback({ supported_resolutions: ["1"] })); },
+    searchSymbols(_a, _b, _c, callback) { callback([]); },
+    resolveSymbol(name, resolve) { queueMicrotask(() => resolve(symbolInfo(name))); },
+    getBars(info, _resolution, _params, onResult) {
+      if (info.name === "BASE") queueMicrotask(() => onResult([{ ...bar }]));
+      else pendingBars.set(info.name, onResult);
+    },
+    subscribeBars() {},
+    unsubscribeBars() {},
+  };
+  const overlapWidget = new widget({
+    symbol: "BASE",
+    interval: "1",
+    container: overlapHost,
+    datafeed: overlapFeed,
+    disabled_features: ["header_widget", "left_toolbar", "scale_bar"],
+  });
+  await overlapWidget.headerReady();
+  const baseState = overlapWidget.save();
+  const firstLoad = overlapWidget.load({ ...baseState, symbol: "FIRST" });
+  for (let i = 0; i < 8 && !pendingBars.has("FIRST"); i++) await Promise.resolve();
+  const secondLoad = overlapWidget.load({ ...baseState, symbol: "SECOND" });
+  for (let i = 0; i < 8 && !pendingBars.has("SECOND"); i++) await Promise.resolve();
+  pendingBars.get("SECOND")?.([{ ...bar, close: 202 }]);
+  await Promise.all([firstLoad, secondLoad]);
+  pendingBars.get("FIRST")?.([{ ...bar, close: 101 }]);
+  await Promise.resolve();
+  assert(overlapWidget.save().symbol === "SECOND", "the newest overlapping layout load wins deterministically");
+  const overlapApi = overlapWidget.activeChart();
+  const postLoadShape = await overlapApi.createShape(
+    { time: Math.floor(bar.time / 1000), price: 202 },
+    { shape: "horizontal_line" },
+  );
+  overlapApi.executeActionById("undo");
+  assert(
+    !overlapWidget.save().drawings.some((drawing) => drawing.id === String(postLoadShape)),
+    "overlapping loads leave command history enabled and usable",
+  );
+  let malformedRejected = false;
+  try {
+    await overlapWidget.load({
+      ...baseState,
+      symbol: "MALFORMED",
+      drawings: [{ ...baseState.drawings[0], id: "bad", points: [{ time: Number.NaN }] }],
+    });
+  } catch {
+    malformedRejected = true;
+  }
+  assert(
+    malformedRejected && overlapWidget.save().symbol === "SECOND",
+    "nested malformed snapshot data rejects before changing the committed chart",
+  );
+  const teardownLoad = overlapWidget.load({ ...baseState, symbol: "TEARDOWN" });
+  for (let i = 0; i < 8 && !pendingBars.has("TEARDOWN"); i++) await Promise.resolve();
+  overlapWidget.remove();
+  pendingBars.get("TEARDOWN")?.([{ ...bar }]);
+  await teardownLoad;
+  assert(!overlapHost.querySelector(".raze-chart-root"), "a pending layout load cannot repopulate a removed widget");
+}
+
+{
+  const layoutHost = window.document.createElement("div");
+  window.document.body.appendChild(layoutHost);
+  const layoutWidget = new widget({
+    symbol: "ETHUSD",
+    interval: "1",
+    container: layoutHost,
+    datafeed: feed,
+    disabled_features: ["header_widget", "left_toolbar", "scale_bar"],
+    raze: { layout: "2x1", layout_symbols: ["ETHUSD", "BTCUSD"] },
+  });
+  await layoutWidget.headerReady();
+  const panes = [...layoutHost.querySelectorAll(".raze-chart-layout-pane")];
+  const primaryCanvas = panes[0]?.querySelector("canvas");
+  assert(panes.length === 2 && primaryCanvas, "2x1 layout creates both chart panes before mounting engines");
+  assert(
+    observers.some((observer) => observer.target === panes[0]),
+    "the primary engine measures its own grid pane instead of the outer multi-chart grid",
+  );
+  assert(layoutWidget.chart(1) !== layoutWidget.activeChart(), "layout chart(index) exposes the child pane API");
+  layoutWidget.remove();
+}
+
+{
+  const emptyHost = window.document.createElement("div");
+  window.document.body.appendChild(emptyHost);
+  const emptyFeed = {
+    ...feed,
+    getBars(_info, _resolution, _params, onResult) {
+      queueMicrotask(() => onResult([], { noData: true }));
+    },
+  };
+  const emptyWidget = new widget({
+    symbol: "EMPTY",
+    interval: "1",
+    container: emptyHost,
+    datafeed: emptyFeed,
+    disabled_features: ["header_widget", "left_toolbar", "scale_bar"],
+  });
+  await emptyWidget.headerReady();
+  assert(
+    emptyHost.querySelector(".raze-chart-loading-message")?.textContent?.includes("No chart data"),
+    "an empty data response remains visible as an informative state",
+  );
+  emptyWidget.remove();
+}
+
+{
+  const errorHost = window.document.createElement("div");
+  window.document.body.appendChild(errorHost);
+  const errorFeed = {
+    ...feed,
+    getBars(_info, _resolution, _params, _onResult, onError) {
+      queueMicrotask(() => onError("offline"));
+    },
+  };
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  const errorWidget = new widget({
+    symbol: "ERROR",
+    interval: "1",
+    container: errorHost,
+    datafeed: errorFeed,
+    disabled_features: ["header_widget", "left_toolbar", "scale_bar"],
+  });
+  await errorWidget.headerReady();
+  console.error = originalConsoleError;
+  assert(
+    errorHost.querySelector('.raze-chart-loading-screen[role="alert"]')
+      ?.textContent?.includes("could not be loaded"),
+    "a failed initial data load exposes a persistent, accessible error state",
+  );
+  errorWidget.remove();
 }
 
 console.log("\nFINANCIAL RUNTIME: PASS");

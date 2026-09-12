@@ -4,6 +4,12 @@ import type { Bar } from "../../types/charting_library";
 import { drawLineArea } from "./lineArea";
 import type { FinanceView } from "./view";
 
+// Keep an OHLC body discernible when a short plot maps open and close to the
+// same (or adjacent) pixel. Two CSS pixels remain clear on high-DPI canvases
+// without materially changing normally sized candles.
+const MIN_CANDLE_BODY_HEIGHT = 2;
+const THIN_DOJI_TICK_HALF_WIDTH = 1;
+
 export function drawCandles(
   ctx: CanvasRenderingContext2D,
   v: FinanceView,
@@ -43,17 +49,28 @@ export function drawCandles(
     ctx.lineTo(cx, yL);
     ctx.stroke();
 
+    const bodyHeight = Math.abs(yC - yO);
     if (thinBars) {
       ctx.strokeStyle = body;
       ctx.beginPath();
-      ctx.moveTo(cx, yO);
-      ctx.lineTo(cx, yC);
+      if (bodyHeight < 1) {
+        // A vertical sub-pixel body disappears into its wick. Show it as a
+        // small horizontal tick instead, like a compact doji.
+        const y = Math.round((yO + yC) / 2) + 0.5;
+        ctx.moveTo(cx - THIN_DOJI_TICK_HALF_WIDTH, y);
+        ctx.lineTo(cx + THIN_DOJI_TICK_HALF_WIDTH, y);
+      } else {
+        ctx.moveTo(cx, yO);
+        ctx.lineTo(cx, yC);
+      }
       ctx.stroke();
       continue;
     }
 
-    const top = Math.min(yO, yC);
-    const h = Math.max(1, Math.abs(yC - yO));
+    const h = Math.max(MIN_CANDLE_BODY_HEIGHT, bodyHeight);
+    // Centre an enlarged body on the actual open/close values so the visual
+    // minimum does not imply a direction or shift a tiny candle's price.
+    const top = (yO + yC - h) / 2;
     if (hollow && up) {
       ctx.strokeStyle = border;
       ctx.strokeRect(

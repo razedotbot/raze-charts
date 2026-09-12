@@ -233,6 +233,88 @@ function makeContext(datafeed, symbol = "A", resolution = "1") {
   manager.destroy();
 }
 
+// A terminal initial page can still contain bars. `noData` is authoritative:
+// scrolling left must not request the same terminal page again.
+{
+  const controlled = makeControlledFeed();
+  const context = makeContext(controlled.feed);
+  const manager = new DataManager(context);
+  const boot = manager.resolveAndLoad();
+  controlled.ready();
+  await spinUntil(() => controlled.resolves.length === 1, "terminal-page resolution");
+  controlled.resolves[0].onResolve(symbolInfo("A"));
+  await spinUntil(() => controlled.history.length === 1, "terminal initial history");
+  controlled.history[0].onResult([bar(120_000, 10)], { noData: true });
+  await boot;
+
+  await manager.maybeLoadMoreHistory();
+  assert(controlled.history.length === 1, "non-empty initial noData page disables pagination");
+  manager.destroy();
+}
+
+// A feed that repeats a boundary page has made no progress. Stop pagination
+// even when that feed forgot to set `noData`, otherwise each pan retries it.
+{
+  const controlled = makeControlledFeed();
+  const context = makeContext(controlled.feed);
+  const manager = new DataManager(context);
+  const boot = manager.resolveAndLoad();
+  controlled.ready();
+  await spinUntil(() => controlled.resolves.length === 1, "duplicate-page resolution");
+  controlled.resolves[0].onResolve(symbolInfo("A"));
+  await spinUntil(() => controlled.history.length === 1, "duplicate-page initial history");
+  controlled.history[0].onResult([bar(120_000, 10), bar(180_000, 11)], { noData: false });
+  await boot;
+
+  const page = manager.maybeLoadMoreHistory();
+  await spinUntil(() => controlled.history.length === 2, "duplicate boundary page");
+  controlled.history[1].onResult([bar(120_000, 10)], { noData: false });
+  await page;
+  await manager.maybeLoadMoreHistory();
+  assert(controlled.history.length === 2, "duplicate history page permanently stops pagination");
+  manager.destroy();
+}
+
+// Unix ranges map through the continuous TimeIndex rather than an O(n) scan.
+// This preserves requested whitespace before/after the loaded series.
+{
+  const controlled = makeControlledFeed();
+  const context = makeContext(controlled.feed);
+  context.bars = [bar(120_000, 10), bar(180_000, 11), bar(240_000, 12)];
+  const manager = new DataManager(context);
+
+  manager.applyIndexRangeFromUnix(0, 60);
+  assert(
+    context.visibleRange.from === -2 && context.visibleRange.to === -1,
+    "range before the first bar maps to left logical whitespace",
+  );
+
+  manager.applyIndexRangeFromUnix(300, 360);
+  assert(
+    context.visibleRange.from === 3 && context.visibleRange.to === 4,
+    "range after the last bar maps to right logical whitespace",
+  );
+
+  manager.applyIndexRangeFromUnix(150, 210);
+  assert(
+    context.visibleRange.from === 0.5 && context.visibleRange.to === 1.5,
+    "range between bars preserves fractional logical positions",
+  );
+
+  let directError = "";
+  try {
+    manager.applyIndexRangeFromUnix(10, 5);
+  } catch (error) {
+    directError = error.message;
+  }
+  assert(directError.includes("from") && directError.includes("after"), "reversed ranges fail clearly");
+
+  let asyncError = "";
+  await manager.revealTimeRange(Number.NaN, 5).catch((error) => { asyncError = error.message; });
+  assert(asyncError.includes("finite Unix seconds"), "non-finite ranges reject before reaching the feed");
+  manager.destroy();
+}
+
 // Minimal DOM integration: Widget.setSymbol must pass the interval even when
 // the symbol string is unchanged, and remove() must settle headerReady mid-boot.
 {

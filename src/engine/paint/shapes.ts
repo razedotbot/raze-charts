@@ -259,6 +259,7 @@ export function drawDraft(ctx: CanvasRenderingContext2D, v: FinanceView): void {
     text: tool === "text" ? "…" : "",
     lock: true,
     disableSelection: true,
+    disableSave: true,
     disableUndo: true,
     showInObjectsTree: false,
     hidden: false,

@@ -138,15 +138,15 @@ export class ChartApi implements IChartWidgetApi {
   }
 
   createOrderLine(options: TradingLineOptions = {}): Promise<ITradingLineAdapter> {
-    return Promise.resolve(this.deps.createTradingLine(options, "order"));
+    return Promise.resolve().then(() => this.deps.createTradingLine(options, "order"));
   }
 
   createPositionLine(options: TradingLineOptions = {}): Promise<ITradingLineAdapter> {
-    return Promise.resolve(this.deps.createTradingLine(options, "position"));
+    return Promise.resolve().then(() => this.deps.createTradingLine(options, "position"));
   }
 
   createBracketOrder(options: BracketOrderOptions): Promise<IBracketOrderAdapter> {
-    return Promise.resolve(this.deps.createBracketOrder(options));
+    return Promise.resolve().then(() => this.deps.createBracketOrder(options));
   }
 
   getTradingLineById(id: string): ITradingLineAdapter | null {

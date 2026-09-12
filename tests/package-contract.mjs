@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import { gzipSync } from "node:zlib";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
@@ -45,13 +46,57 @@ function copyInstalledPackage(sourceName, targetName, consumerDir) {
 }
 
 function supplyReactTypes(version, consumerDir) {
-  copyInstalledPackage(version === 17 ? "react17-types" : "@types/react", "@types/react", consumerDir);
+  const source = version === 17
+    ? "react17-types"
+    : version === 19
+      ? "react19-types"
+      : "@types/react";
+  copyInstalledPackage(source, "@types/react", consumerDir);
   copyInstalledPackage("@types/prop-types", "@types/prop-types", consumerDir);
   copyInstalledPackage("@types/scheduler", "@types/scheduler", consumerDir);
   copyInstalledPackage("csstype", "csstype", consumerDir);
 }
 
 try {
+  const prepareProject = join(sandbox, "prepare-project");
+  const prepareDist = join(prepareProject, "dist");
+  const prepareSentinel = join(prepareProject, "build-ran");
+  mkdirSync(join(prepareProject, "scripts"), { recursive: true });
+  mkdirSync(join(prepareProject, "src"), { recursive: true });
+  mkdirSync(join(prepareDist, "types"), { recursive: true });
+  cpSync(join(root, "scripts", "prepare.mjs"), join(prepareProject, "scripts", "prepare.mjs"));
+  writeFileSync(join(prepareProject, "src", "index.ts"), "export const fixture = true;\n");
+  writeFileSync(
+    join(prepareProject, "build.mjs"),
+    `import { writeFileSync } from "node:fs";\nwriteFileSync(new URL("./build-ran", import.meta.url), "yes");\n`,
+  );
+  const prepareBundles = [
+    "charting_library.esm.js",
+    "charting_library.cjs",
+    "charting_library.standalone.js",
+    "chart.esm.js",
+    "chart.cjs",
+    "react.esm.js",
+    "react.cjs",
+  ];
+  for (const artifact of [
+    ...prepareBundles,
+    ...prepareBundles.map((entry) => `${entry}.map`),
+    "charting_library.d.ts",
+    "datafeed-api.d.ts",
+    join("types", "index.d.ts"),
+    join("types", "chart", "index.d.ts"),
+    join("types", "react", "index.d.ts"),
+  ]) {
+    mkdirSync(dirname(join(prepareDist, artifact)), { recursive: true });
+    writeFileSync(join(prepareDist, artifact), "fixture\n");
+  }
+  run(process.execPath, [join(prepareProject, "scripts", "prepare.mjs")], prepareProject);
+  assert.equal(existsSync(prepareSentinel), false, "prepare should skip a complete dist tree");
+  writeFileSync(join(prepareDist, "react.cjs"), "");
+  run(process.execPath, [join(prepareProject, "scripts", "prepare.mjs")], prepareProject);
+  assert.equal(existsSync(prepareSentinel), true, "prepare should rebuild a partial dist tree");
+
   const packDir = join(sandbox, "packed");
   const consumerDir = join(sandbox, "consumer");
   mkdirSync(packDir);
@@ -78,6 +123,7 @@ try {
       "install",
       "--ignore-scripts",
       "--omit=peer",
+      "--offline",
       "--no-audit",
       "--no-fund",
       "--no-package-lock",
@@ -174,6 +220,7 @@ try {
     `,
   );
   run(process.execPath, [esmConsumer], consumerDir);
+  run(process.execPath, ["--conditions=browser", esmConsumer], consumerDir);
 
   const cjsConsumer = join(consumerDir, "consume.cjs");
   writeFileSync(
@@ -183,9 +230,11 @@ try {
       const root = require("@razedotbot/charts");
       const chart = require("@razedotbot/charts/chart");
       const react = require("@razedotbot/charts/react");
+      const metadata = require("@razedotbot/charts/package.json");
 
       assert.equal(typeof root.widget, "function");
       assert.equal(typeof root.version, "string");
+      assert.equal(metadata.version, root.version);
       assert.equal(typeof chart.defineChart, "function");
       assert.equal(typeof chart.mountChart, "function");
       assert.equal(typeof react.Chart, "function");
@@ -217,12 +266,108 @@ try {
   );
   run(process.execPath, ["--conditions=browser", browserCjsConsumer], consumerDir);
 
+  // Bundle a real browser consumer from the packed install. The metafile makes
+  // export-condition selection observable without executing DOM code in Node.
+  const browserEntry = join(consumerDir, "consume-browser.ts");
+  const browserBundle = join(consumerDir, "consume-browser.js");
+  const browserMetafile = join(consumerDir, "consume-browser-meta.json");
+  writeFileSync(
+    browserEntry,
+    `
+      import rootDefault, { version } from "@razedotbot/charts";
+      import { defineChart } from "@razedotbot/charts/chart";
+      import { Chart } from "@razedotbot/charts/react";
+      export { rootDefault, version, defineChart, Chart };
+    `,
+  );
+  const esbuild = join(root, "node_modules", "esbuild", "bin", "esbuild");
+  run(
+    process.execPath,
+    [
+      esbuild,
+      browserEntry,
+      "--bundle",
+      "--platform=browser",
+      "--format=esm",
+      "--external:react",
+      "--external:react/jsx-runtime",
+      `--outfile=${browserBundle}`,
+      `--metafile=${browserMetafile}`,
+    ],
+    consumerDir,
+  );
+  assert.ok(existsSync(browserBundle), "browser consumer bundle was not emitted");
+  const browserInputs = Object.keys(JSON.parse(readFileSync(browserMetafile, "utf8")).inputs)
+    .map((path) => path.replaceAll("\\", "/"));
+  for (const target of ["charting_library.esm.js", "chart.esm.js", "react.esm.js"]) {
+    assert.ok(
+      browserInputs.some((path) => path.endsWith(`/dist/${target}`)),
+      `browser bundling did not select ${target}`,
+    );
+  }
+  assert.ok(
+    browserInputs.every((path) => !path.endsWith(".cjs")),
+    "browser bundling must not select a CommonJS package target",
+  );
+
+  // `/react` also re-exports the framework-neutral grammar. Importing only
+  // that grammar must remain a small, React-free consumer bundle.
+  const reactGrammarEntry = join(consumerDir, "consume-react-grammar.ts");
+  const reactGrammarBundle = join(consumerDir, "consume-react-grammar.js");
+  const reactGrammarMetafile = join(consumerDir, "consume-react-grammar-meta.json");
+  writeFileSync(
+    reactGrammarEntry,
+    `
+      import { defineChart } from "@razedotbot/charts/react";
+      export const definition = defineChart({ marks: [] });
+    `,
+  );
+  run(
+    process.execPath,
+    [
+      esbuild,
+      reactGrammarEntry,
+      "--bundle",
+      "--platform=browser",
+      "--format=esm",
+      "--minify",
+      "--external:react",
+      "--external:react/jsx-runtime",
+      `--outfile=${reactGrammarBundle}`,
+      `--metafile=${reactGrammarMetafile}`,
+    ],
+    consumerDir,
+  );
+  const reactGrammarSource = readFileSync(reactGrammarBundle);
+  const reactGrammarGzipBytes = gzipSync(reactGrammarSource).byteLength;
+  const reactGrammarMeta = JSON.parse(readFileSync(reactGrammarMetafile, "utf8"));
+  const reactGrammarOutput = Object.values(reactGrammarMeta.outputs)
+    .find((output) => Object.hasOwn(output, "entryPoint"));
+  assert.ok(reactGrammarOutput, "react grammar bundle metadata has no entry output");
+  const largestGrammarInputs = Object.entries(reactGrammarOutput.inputs)
+    .sort(([, left], [, right]) => right.bytesInOutput - left.bytesInOutput)
+    .slice(0, 5)
+    .map(([path, detail]) => `${path.replaceAll("\\", "/")}: ${detail.bytesInOutput}`)
+    .join(", ");
+  assert.ok(
+    reactGrammarGzipBytes <= 8 * 1024,
+    `defineChart from /react costs ${reactGrammarGzipBytes} gzip bytes (budget: 8192); largest inputs: ${largestGrammarInputs}`,
+  );
+  const adapterContribution = Object.entries(reactGrammarOutput.inputs)
+    .find(([path]) => path.replaceAll("\\", "/").endsWith("/dist/react.esm.js"))?.[1].bytesInOutput;
+  assert.ok(adapterContribution != null, "react grammar bundle did not resolve the /react entry");
+  assert.ok(
+    adapterContribution <= 512,
+    `grammar-only import retained ${adapterContribution} bytes of the React adapter (budget: 512)`,
+  );
+
   const nodeNextConsumer = join(consumerDir, "consume-types.mts");
   writeFileSync(
     nodeNextConsumer,
     `
-      import {
+      import rootDefault, {
         createDatafeed,
+        widget,
         type Crosshair,
         type PlotScale,
         type RazeDataSource,
@@ -248,6 +393,7 @@ try {
         getBars: async () => [],
       };
       const feed = createDatafeed(source, { supportedResolutions: ["1" as ResolutionString] });
+      const widgetConstructor: typeof widget = rootDefault.widget;
       const diagnostics: ChartDiagnostics | undefined = undefined;
       const scaleSpec: XScaleSpec = { type: "linear", domain: [0, 10] };
       const sceneNode: SceneNode = { type: "rect", x: 0, y: 0, w: 1, h: 1 };
@@ -257,6 +403,7 @@ try {
       const plotScale: PlotScale | undefined = undefined;
       void definition;
       void feed;
+      void widgetConstructor;
       void diagnostics;
       void scaleSpec;
       void sceneNode;
@@ -272,8 +419,10 @@ try {
     `
       import type { ReactElement } from "react";
       import {
+        Chart,
         ResponsiveContainer,
         createChartComponents,
+        defineChart,
         type ReactChartHandle,
         type ReactChartSnapshot,
       } from "@razedotbot/charts/react";
@@ -290,34 +439,96 @@ try {
           </Charts.LineChart>
         </ResponsiveContainer>
       );
+      const directView: ReactElement = <Chart definition={defineChart({ marks: [] })} />;
       declare const handle: ReactChartHandle;
       const snapshot: ReactChartSnapshot | null = handle.getSnapshot();
       const compatibilityAlias: ReactChartSnapshot | null = handle.getScene();
       void view;
+      void directView;
       void snapshot;
       void compatibilityAlias;
     `,
   );
+  const browserTypesConsumer = join(consumerDir, "consume-browser-types.tsx");
   writeFileSync(
-    join(consumerDir, "tsconfig.json"),
-    JSON.stringify({
+    browserTypesConsumer,
+    `
+      import rootDefault, { version } from "@razedotbot/charts";
+      import { defineChart, mountChart } from "@razedotbot/charts/chart";
+      import { Chart } from "@razedotbot/charts/react";
+
+      const definition = defineChart({ marks: [] });
+      const host: HTMLElement = document.createElement("div");
+      const mounted = mountChart(host, definition, { width: 320, height: 180 });
+      const view = <Chart definition={definition} width={320} height={180} />;
+      const widgetConstructor = rootDefault.widget;
+      window.document.title = version;
+      void mounted;
+      void view;
+      void widgetConstructor;
+    `,
+  );
+
+  const commonCompilerOptions = {
+    target: "ES2020",
+    strict: true,
+    skipLibCheck: false,
+    noEmit: true,
+    jsx: "react-jsx",
+    lib: ["ES2020", "DOM", "DOM.Iterable"],
+  };
+  const typeProjects = [
+    {
+      name: "tsconfig.nodenext.json",
       compilerOptions: {
-        target: "ES2020",
+        ...commonCompilerOptions,
         module: "NodeNext",
         moduleResolution: "NodeNext",
-        strict: true,
-        skipLibCheck: false,
-        noEmit: true,
-        jsx: "react-jsx",
-        lib: ["ES2020", "DOM", "DOM.Iterable"],
       },
       files: ["consume-types.mts", "consume-react-types.tsx"],
-    }),
-  );
+    },
+    {
+      name: "tsconfig.bundler.json",
+      compilerOptions: {
+        ...commonCompilerOptions,
+        module: "ESNext",
+        moduleResolution: "Bundler",
+      },
+      files: ["consume-types.mts", "consume-react-types.tsx"],
+    },
+    {
+      name: "tsconfig.browser.json",
+      compilerOptions: {
+        ...commonCompilerOptions,
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        customConditions: ["browser"],
+        types: ["react"],
+      },
+      files: ["consume-browser-types.tsx"],
+    },
+  ];
+  for (const project of typeProjects) {
+    writeFileSync(
+      join(consumerDir, project.name),
+      JSON.stringify({ compilerOptions: project.compilerOptions, files: project.files }),
+    );
+  }
   const tsc = join(root, "node_modules", "typescript", "bin", "tsc");
-  run(process.execPath, [tsc, "--project", "tsconfig.json", "--pretty", "false"], consumerDir);
+  for (const project of typeProjects) {
+    run(process.execPath, [tsc, "--project", project.name, "--pretty", "false"], consumerDir);
+  }
   supplyReactTypes(17, consumerDir);
-  run(process.execPath, [tsc, "--project", "tsconfig.json", "--pretty", "false"], consumerDir);
+  for (const project of typeProjects) {
+    run(process.execPath, [tsc, "--project", project.name, "--pretty", "false"], consumerDir);
+  }
+  copyInstalledPackage("react19", "react", consumerDir);
+  supplyReactTypes(19, consumerDir);
+  run(process.execPath, [esmConsumer], consumerDir);
+  run(process.execPath, [cjsConsumer], consumerDir);
+  for (const project of typeProjects) {
+    run(process.execPath, [tsc, "--project", project.name, "--pretty", "false"], consumerDir);
+  }
 
   const standalonePath = join(installedDir, installedPackage.unpkg);
   assert.equal(
@@ -334,7 +545,7 @@ try {
   assert.equal(browserContext.window.TradingView.widget, browserContext.RazeCharts.widget);
   assert.equal(browserContext.window.TradingView.version, browserContext.RazeCharts.version);
 
-  console.log("[raze-charts] packed package contract passed (ESM, CJS, shared chart identity, React 17/18 types, browser global)");
+  console.log("[raze-charts] packed package contract passed (ESM, CJS, browser bundle/global, NodeNext/Bundler types, React 17/18/19)");
 } finally {
-  rmSync(sandbox, { recursive: true, force: true });
+  rmSync(sandbox, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 }

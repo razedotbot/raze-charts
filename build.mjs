@@ -51,6 +51,14 @@ const common = {
   define: { __RAZE_CHARTS_VERSION__: JSON.stringify(pkg.version) },
 };
 
+// The full widget needs production compaction to stay within its public size
+// budget. Keep the composable chart and React entrypoints unminified: their
+// emitted PURE annotations are part of the downstream tree-shaking contract.
+const compactWidget = {
+  minifySyntax: true,
+  minifyWhitespace: true,
+};
+
 const widgetTargets = [
   { format: "esm", outfile: resolve(out, "charting_library.esm.js") },
   { format: "cjs", outfile: resolve(out, "charting_library.cjs") },
@@ -83,7 +91,12 @@ function externalChartRuntime(format) {
 }
 
 const buildTargets = [
-  ...widgetTargets.map((target) => ({ ...common, entryPoints: [entry], ...target })),
+  ...widgetTargets.map((target) => ({
+    ...common,
+    ...compactWidget,
+    entryPoints: [entry],
+    ...target,
+  })),
   ...(["esm", "cjs"]).flatMap((format) => {
     const filename = format === "cjs" ? "cjs" : "esm.js";
     return [

@@ -15,6 +15,7 @@ import type {
 import { applySymbolInfo, type ChartContext } from "../core/context";
 import { resolveTimeframe } from "../core/timeframe";
 import { resolutionToMs } from "../util/resolution";
+import { TimeIndex } from "./TimeIndex";
 
 let guidCounter = 0;
 const nextGuid = (): string => `raze_${++guidCounter}_${Math.floor(performance.now())}`;
@@ -197,7 +198,10 @@ export class DataManager {
       this.context.bars = this.normaliseBars(history.bars);
       this.context.marks = [];
       this.context.timescaleMarks = [];
-      this.hasMoreHistory = !(history.noData && history.bars.length === 0);
+      // `noData` means the feed has reached the beginning of the series. Some
+      // compatible feeds return their final (non-empty) page together with the
+      // flag, so checking the bar count here would request that page forever.
+      this.hasMoreHistory = !history.noData;
       this.initVisibleRange();
       await this.applyConfiguredTimeframe(generation);
       if (!this.isCurrent(generation)) return false;
@@ -315,21 +319,27 @@ export class DataManager {
         return;
       }
 
-      if (!history.bars.length) {
-        this.hasMoreHistory = false;
-      } else {
+      let changed = false;
+      if (history.bars.length) {
         const before = this.context.bars.length;
         this.mergeBars(history.bars);
         const addedCount = this.context.bars.length - before;
         if (addedCount > 0) {
+          changed = true;
           this.context.visibleRange = {
             from: this.context.visibleRange.from + addedCount,
             to: this.context.visibleRange.to + addedCount,
           };
         }
+        // A page containing only timestamps we already have made no progress.
+        // Continuing would hammer feeds which ignore the requested boundary.
+        if (addedCount === 0) this.hasMoreHistory = false;
       }
-      this.context.dataChanged.fire();
-      this.context.requestPaint();
+      if (history.noData || !history.bars.length) this.hasMoreHistory = false;
+      if (changed) {
+        this.context.dataChanged.fire();
+        this.context.requestPaint();
+      }
     } catch (error) {
       if (this.isCurrent(generation)) this.reportError("history pagination", error);
     } finally {
@@ -695,10 +705,7 @@ export class DataManager {
 
   async changeResolution(resolution: ResolutionString): Promise<void> {
     const target = { symbol: this.desiredTarget.symbol, resolution };
-    if (
-      target.symbol === this.desiredTarget.symbol &&
-      target.resolution === this.desiredTarget.resolution
-    ) {
+    if (resolution === this.desiredTarget.resolution) {
       if (this.latestReload) await this.latestReload;
       return;
     }
@@ -760,20 +767,28 @@ export class DataManager {
   }
 
   applyIndexRangeFromUnix(fromSec: number, toSec: number): void {
+    this.assertValidUnixRange(fromSec, toSec);
     const bars = this.context.bars;
     if (!bars.length) return;
     const fromMs = fromSec * 1000;
     const toMs = toSec * 1000;
-    let fi = 0;
-    let ti = bars.length - 1;
-    for (let i = 0; i < bars.length; i++) {
-      if (bars[i]!.time <= fromMs) fi = i;
-      if (bars[i]!.time <= toMs) ti = i;
-    }
-    this.context.visibleRange = { from: fi, to: Math.max(fi + 1, ti) };
+    const timeIndex = new TimeIndex(bars, resolutionToMs(this.context.resolution));
+    const from = timeIndex.indexAt(fromMs);
+    const to = timeIndex.indexAt(toMs);
+    if (from === null || to === null) return;
+    this.context.visibleRange = { from, to: Math.max(from + 1, to) };
     this.context.autoScalePrice = true;
     this.context.viewportChanged.fire(this.visibleUnixRange());
     this.context.requestPaint();
+  }
+
+  private assertValidUnixRange(fromSec: number, toSec: number): void {
+    if (!Number.isFinite(fromSec) || !Number.isFinite(toSec)) {
+      throw new RangeError("[raze-charts] visible range timestamps must be finite Unix seconds");
+    }
+    if (fromSec > toSec) {
+      throw new RangeError("[raze-charts] visible range `from` must not be after `to`");
+    }
   }
 
   async applyConfiguredTimeframe(generation = this.generation): Promise<void> {
@@ -795,6 +810,7 @@ export class DataManager {
 
   async revealTimeRange(fromSec: number, toSec: number): Promise<void> {
     if (this.destroyed) return;
+    this.assertValidUnixRange(fromSec, toSec);
     const info = this.context.symbolInfo;
     if (!info) {
       this.applyIndexRangeFromUnix(fromSec, toSec);
@@ -828,7 +844,7 @@ export class DataManager {
       }
       const before = this.context.bars.length;
       this.mergeBars(history.bars);
-      if (this.context.bars.length === before) {
+      if (history.noData || this.context.bars.length === before) {
         this.hasMoreHistory = false;
         break;
       }

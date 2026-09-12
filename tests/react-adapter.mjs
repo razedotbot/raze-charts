@@ -147,6 +147,139 @@ assert(compileCount === 2, "a material React update compiles exactly once");
 await act(async () => { countedRoot.unmount(); });
 countedContainer.remove();
 
+const optionUpdateContainer = document.createElement("div");
+document.body.appendChild(optionUpdateContainer);
+const optionUpdateRoot = createRoot(optionUpdateContainer);
+const optionUpdateDefinition = defineChart({
+  marks: [line([
+    { x: 0, y: 1 },
+    { x: 1, y: 2 },
+    { x: 2, y: 3 },
+    { x: 3, y: 4 },
+  ], { x: "x", y: "y" })],
+});
+let optionUpdateHandle;
+let oldViewportCalls = 0;
+let newViewportCalls = 0;
+let oldSelectCalls = 0;
+let newSelectCalls = 0;
+const onOptionUpdateReady = (handle) => { optionUpdateHandle = handle; };
+const oldViewportHandler = () => { oldViewportCalls += 1; };
+const newViewportHandler = () => { newViewportCalls += 1; };
+const oldSelectHandler = () => { oldSelectCalls += 1; };
+const newSelectHandler = () => { newSelectCalls += 1; };
+const enabledInteraction = { zoom: true };
+const controlledViewport = { x: [1, 2] };
+const optionChart = ({
+  interaction,
+  viewport,
+  onViewportChange,
+  onSelect,
+}) => createElement(Chart, {
+  definition: optionUpdateDefinition,
+  width: 320,
+  height: 180,
+  interaction,
+  viewport,
+  onViewportChange,
+  onSelect,
+  onReady: onOptionUpdateReady,
+});
+await act(async () => {
+  optionUpdateRoot.render(optionChart({
+    interaction: false,
+    onViewportChange: oldViewportHandler,
+    onSelect: oldSelectHandler,
+  }));
+});
+const optionUpdateHost = optionUpdateContainer.querySelector("[data-raze-chart-host]");
+const optionUpdateWrap = optionUpdateHost?.firstElementChild;
+optionUpdateWrap.getBoundingClientRect = () => ({
+  x: 0, y: 0, left: 0, top: 0, right: 320, bottom: 180, width: 320, height: 180, toJSON() {},
+});
+const zoom = () => optionUpdateWrap.dispatchEvent(new window.WheelEvent("wheel", {
+  bubbles: true,
+  cancelable: true,
+  clientX: 160,
+  clientY: 80,
+  deltaY: -1,
+}));
+zoom();
+assert(oldViewportCalls === 0, "interaction=false suppresses wheel zoom before an option-only update");
+await act(async () => {
+  optionUpdateRoot.render(optionChart({
+    interaction: enabledInteraction,
+    onViewportChange: oldViewportHandler,
+    onSelect: oldSelectHandler,
+  }));
+});
+zoom();
+assert(oldViewportCalls === 1, "an interaction-only prop update reaches the existing mount");
+const uncontrolledViewport = JSON.stringify(optionUpdateHandle?.getSnapshot()?.viewport);
+await act(async () => {
+  optionUpdateRoot.render(optionChart({
+    interaction: enabledInteraction,
+    onViewportChange: newViewportHandler,
+    onSelect: oldSelectHandler,
+  }));
+});
+assert(
+  JSON.stringify(optionUpdateHandle?.getSnapshot()?.viewport) === uncontrolledViewport,
+  "a callback-only prop update preserves the user's uncontrolled viewport",
+);
+zoom();
+assert(
+  oldViewportCalls === 1 && newViewportCalls === 1,
+  "an onViewportChange-only prop update replaces the mounted callback",
+);
+await act(async () => {
+  optionUpdateRoot.render(optionChart({
+    interaction: enabledInteraction,
+    viewport: controlledViewport,
+    onViewportChange: newViewportHandler,
+    onSelect: oldSelectHandler,
+  }));
+});
+assert(
+  JSON.stringify(optionUpdateHandle?.getSnapshot()?.viewport?.x) === JSON.stringify(controlledViewport.x),
+  "a viewport-only prop update recompiles the existing mount with the requested window",
+);
+await act(async () => {
+  optionUpdateRoot.render(optionChart({
+    interaction: enabledInteraction,
+    viewport: controlledViewport,
+    onViewportChange: newViewportHandler,
+    onSelect: newSelectHandler,
+  }));
+});
+optionUpdateWrap.dispatchEvent(new window.MouseEvent("pointerup", {
+  bubbles: true,
+  clientX: 160,
+  clientY: 80,
+}));
+assert(
+  oldSelectCalls === 0 && newSelectCalls === 1,
+  "an onSelect-only prop update replaces the mounted callback",
+);
+await act(async () => {
+  optionUpdateRoot.render(optionChart({
+    interaction: enabledInteraction,
+    viewport: undefined,
+    onViewportChange: newViewportHandler,
+    onSelect: newSelectHandler,
+  }));
+});
+assert(
+  optionUpdateHandle?.getSnapshot()?.viewport == null,
+  "removing a controlled viewport releases the mounted chart back to its full domain",
+);
+assert(
+  optionUpdateContainer.querySelector("[data-raze-chart-host]") === optionUpdateHost,
+  "option-only React updates preserve the mounted host",
+);
+await act(async () => { optionUpdateRoot.unmount(); });
+optionUpdateContainer.remove();
+
 const responsiveContainer = document.createElement("div");
 document.body.appendChild(responsiveContainer);
 const responsiveRoot = createRoot(responsiveContainer);
@@ -395,6 +528,7 @@ await act(async () => {
         { month: "Jan", revenue: 10 },
         { month: "Feb", revenue: 20 },
         { month: "Mar", revenue: 30 },
+        { month: "Apr", revenue: 40 },
       ],
       width: 420,
       height: 240,
@@ -403,11 +537,20 @@ await act(async () => {
     },
     createElement(Line, { dataKey: "revenue", name: "Revenue" }),
     createElement(XAxis, { dataKey: "month" }),
-    createElement(Brush, { startIndex: 0, endIndex: 1, height: 32 }),
+    createElement(Brush, { startIndex: 0, endIndex: 2, height: 32 }),
   ));
 });
 assert(brushHandles.length === 1, "Brush mounts without throwing");
 assert(brushContainer.querySelector("[data-raze-chart-host]"), "Brush chart still mounts a host");
+assert(
+  brushHandles[0].getSnapshot()?.diagnostics.visibleRows === 3,
+  "categorical Brush retains every row between startIndex and endIndex",
+);
+assert(
+  brushHandles[0].getSnapshot()?.xScale.domain.includes("Feb")
+    && !brushHandles[0].getSnapshot()?.xScale.domain.includes("Apr"),
+  "categorical Brush emits the complete selected category allow-list",
+);
 await act(async () => { brushRoot.unmount(); });
 brushContainer.remove();
 
@@ -435,6 +578,46 @@ brushContainer.remove();
   assert(
     invalidBrushContainer.querySelector("[data-test-error]")?.textContent.includes("travellerWidth"),
     "Brush fails actionably instead of ignoring unsupported travellerWidth",
+  );
+  await act(async () => { invalidBrushRoot.unmount(); });
+  invalidBrushContainer.remove();
+}
+
+for (const [name, brushProps, expected] of [
+  ["fractional index", { startIndex: 0.5 }, "non-negative integer"],
+  ["reversed range", { startIndex: 1, endIndex: 0 }, "cannot exceed"],
+  ["out-of-range index", { endIndex: 2 }, "outside data length 2"],
+  ["empty dataKey", { dataKey: " " }, "dataKey must be a non-empty string"],
+  ["missing dataKey", { dataKey: "missing", startIndex: 0 }, 'dataKey "missing" is missing'],
+]) {
+  const invalidBrushContainer = document.createElement("div");
+  document.body.appendChild(invalidBrushContainer);
+  const invalidBrushRoot = createRoot(invalidBrushContainer);
+  console.error = () => {};
+  try {
+    await act(async () => {
+      invalidBrushRoot.render(createElement(
+        ErrorBoundary,
+        null,
+        createElement(
+          LineChart,
+          {
+            data: [{ month: "Jan", revenue: 10 }, { month: "Feb", revenue: 20 }],
+            width: 320,
+            height: 180,
+          },
+          createElement(Line, { dataKey: "revenue" }),
+          createElement(XAxis, { dataKey: "month" }),
+          createElement(Brush, brushProps),
+        ),
+      ));
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert(
+    invalidBrushContainer.querySelector("[data-test-error]")?.textContent.includes(expected),
+    `Brush rejects ${name} with an actionable error`,
   );
   await act(async () => { invalidBrushRoot.unmount(); });
   invalidBrushContainer.remove();

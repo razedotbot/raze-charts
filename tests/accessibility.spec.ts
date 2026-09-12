@@ -120,12 +120,16 @@ test.describe("widget accessibility", () => {
         spinnerHidden: loading.el.firstElementChild?.getAttribute("aria-hidden"),
       };
       loading.hide();
+      loading.hide();
       const after = {
         busy: loading.el.getAttribute("aria-busy"),
         label: loading.el.getAttribute("aria-label"),
+        pointerEvents: loading.el.style.pointerEvents,
       };
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      const removed = !loading.el.isConnected;
       loading.destroy();
-      return { before, after };
+      return { before, after, removed };
     });
 
     expect(state.before).toEqual({
@@ -135,7 +139,12 @@ test.describe("widget accessibility", () => {
       label: "Loading chart data",
       spinnerHidden: "true",
     });
-    expect(state.after).toEqual({ busy: "false", label: "Chart data loaded" });
+    expect(state.after).toEqual({
+      busy: "false",
+      label: "Chart data loaded",
+      pointerEvents: "none",
+    });
+    expect(state.removed).toBe(true);
   });
 
   test("clicking the plot does not show a focus ring", async ({ page }) => {

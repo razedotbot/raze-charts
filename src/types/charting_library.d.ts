@@ -224,7 +224,9 @@ export interface CreateShapeOptions<TOverrides extends object = Record<string, u
   text?: string;
   lock?: boolean;
   disableSelection?: boolean;
+  /** Keep the live drawing out of widget.save() layout snapshots. */
   disableSave?: boolean;
+  /** Do not add this drawing's creation to undo history; later edits/removal remain undoable. */
   disableUndo?: boolean;
   showInObjectsTree?: boolean;
   zOrder?: "top" | "bottom";
@@ -440,10 +442,23 @@ export interface ChartLayoutSnapshot {
     points: ShapePoint[];
     text: string;
     lock: boolean;
+    disableSelection?: boolean;
+    disableSave?: boolean;
+    disableUndo?: boolean;
+    showInObjectsTree?: boolean;
+    hidden?: boolean;
     zOrder: "top" | "bottom";
     overrides: Record<string, unknown>;
   }[];
-  studies: { name: string; length: number; color: string }[];
+  studies: {
+    id?: string;
+    name: string;
+    length: number;
+    color: string;
+    lock?: boolean;
+    forceOverlay?: boolean;
+    inputs?: Record<string, number | string>;
+  }[];
   compare?: string[];
 }
 
