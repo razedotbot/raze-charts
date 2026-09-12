@@ -327,9 +327,9 @@ try {
     `,
   );
   run(
-    process.execPath,
+    esbuildCommand,
     [
-      esbuild,
+      ...esbuildArgs,
       reactGrammarEntry,
       "--bundle",
       "--platform=browser",
