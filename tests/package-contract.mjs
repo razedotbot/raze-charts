@@ -281,10 +281,14 @@ try {
     `,
   );
   const esbuild = join(root, "node_modules", "esbuild", "bin", "esbuild");
+  // The installed esbuild entry is a JavaScript launcher on Windows, but a
+  // native executable on Unix. Invoke each form with its matching runtime.
+  const esbuildCommand = process.platform === "win32" ? process.execPath : esbuild;
+  const esbuildArgs = process.platform === "win32" ? [esbuild] : [];
   run(
-    process.execPath,
+    esbuildCommand,
     [
-      esbuild,
+      ...esbuildArgs,
       browserEntry,
       "--bundle",
       "--platform=browser",
