@@ -263,6 +263,7 @@ export function drawDraft(ctx: CanvasRenderingContext2D, v: FinanceView): void {
     disableUndo: true,
     showInObjectsTree: false,
     hidden: false,
+    z: Number.MAX_SAFE_INTEGER,
     zOrder: "top",
     overrides: { linecolor: "#66d89e", linewidth: 1, linestyle: 2 },
   };

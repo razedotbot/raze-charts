@@ -54,8 +54,9 @@ registry created there is standalone; pass definitions to a widget through
 | Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. |
 | Drawing tools | **Yes** | Horizontal/vertical line, trend, ray, extended line, measure (ephemeral), Fibonacci, rectangle, and text. |
 | Magnet / stay-in-mode / objects tree | **Yes** | OHLC magnet, stay-in-drawing-mode, and an objects tree over shapes and studies. |
-| Shape editing | **Yes** | Create, drag, read/update points, remove, and remove all shapes. |
-| Order and position lines | **Yes** | TradingView-style fluent adapters, styling, quantity/P&L labels, move/modify/cancel callbacks, mouse/touch drag, and one-tick keyboard adjustment. |
+| Shape editing | **Yes** | Create, drag, read/update points, remove, and remove all shapes. `setProperties({ text })` relabels a drawing (one undo step, saved by `save()`). Integer z-order: `bringToFront`, `bringForward`, `sendBackward`, `sendToBack` and `availableZOrderOperations()`, each undoable. |
+| Shape validation | **Yes** | `createShape` / `createMultipointShape` reject unsupported kinds with a `ShapeError` (`E_SHAPE_KIND`) that lists the supported kinds, plus a one-time console warning. TradingView `extended` maps to `extended_line` and `date_and_price_range` to `measure`. Points must be finite and have the kind's anchor count; millisecond times are converted to seconds with a warning. `getShapeById` throws `E_SHAPE_NOT_FOUND` for unknown or removed ids. |
+| Order and position lines | **Yes** | TradingView-style fluent adapters, styling, quantity/P&L labels, move/modify/cancel callbacks in both the `(callback)` and TradingView `(data, callback)` forms, mouse/touch drag, and one-tick keyboard adjustment. Drag and keyboard prices land exactly on the symbol tick (`minmov / pricescale`) or a per-line `priceStep`; API prices are never rounded. |
 | Stop-loss / take-profit brackets | **Yes** | Linked entry/SL/TP lines, risk/reward shading and ratio, auto-scale participation, group callbacks and cancellation. |
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
 | Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |

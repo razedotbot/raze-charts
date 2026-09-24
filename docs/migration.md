@@ -43,8 +43,9 @@ exports are the stable resolver contract.
 | `resolveSymbol`, `getBars` | Supported | Initial history and left pagination are implemented. |
 | `subscribeBars`, `unsubscribeBars` | Supported | Old subscription callbacks are ignored after a target change. |
 | `getMarks` | Supported | Async callback results are accepted and scoped to the active request. |
-| `createShape`, `createMultipointShape` | Supported subset | Use only the drawing kinds in the capability matrix. |
-| `getShapeById`, `removeEntity`, `removeAllShapes` | Supported | Shape point editing and removal are implemented. |
+| `createShape`, `createMultipointShape` | Supported subset | Use the drawing kinds in the capability matrix; any other name rejects with a `ShapeError` listing them. `extended` and `date_and_price_range` are mapped for you. Point times are Unix seconds. |
+| `getShapeById`, `removeEntity`, `removeAllShapes` | Supported | Shape point editing, `setProperties({ text })`, z-order moves and removal are implemented. `getShapeById` throws for an unknown id instead of returning a no-op handle. |
+| Order-line `onMove` / `onModify` / `onCancel` | Supported | Both `(callback)` and TradingView's `(data, callback)` forms; drag and keyboard prices are rounded to the symbol tick. |
 | `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. `forceOverlay` / `lock` are stored but not separately enforced. |
 | `createButton` | Supported | Use it for small host actions; own complex UI outside the widget. |
 | `save()` / `load()` | Supported | Versioned JSON snapshot of symbol, interval, range, style, shapes, and studies with stable entity IDs. `disableSave` omits a live shape. The host owns storage. |

@@ -373,7 +373,7 @@ function makeContext(overrides = {}, factoryOptions = {}) {
   a.reset();
   assert(a.next("shape") === "shape_1", "reset() forgets every counter");
   assert(ID_NAMESPACES.includes("trading") && Object.isFrozen(ID_NAMESPACES), "namespaces are a frozen list");
-  assert(idSlug("  ") === "item" && idSlug("MACD (12, 26)") === "macd_12_26", "idSlug normalises free-form names");
+  assert(idSlug("") === "item" && idSlug("MACD (12, 26)") === "macd_12_26_", "idSlug normalises free-form names exactly like historical study ids");
 }
 
 // ── StateSlice contract ─────────────────────────────────────────────────────
