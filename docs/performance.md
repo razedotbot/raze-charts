@@ -67,7 +67,7 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 55 KiB |
 | | Scenario: Widget only | `import { widget }` | 49 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 42 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 44 KiB |
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 23 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
@@ -90,6 +90,10 @@ machine-readable measurements, including the largest inputs of each scenario.
 The native allowance includes the complete runtime validation boundary,
 renderer-neutral compiler, SVG and Canvas renderers, interactions, and color
 system; it does not hide those costs in runtime dependencies.
+The native artifact allowance grew from 42 to 44 KiB when the compiler and
+renderers were split into `src/chart/compile/*` and `src/chart/render/*`: the
+unminified artifact keeps every function and property name, so the module
+boundaries added about 2.2 KiB with byte-identical output.
 
 ## Dense native charts
 

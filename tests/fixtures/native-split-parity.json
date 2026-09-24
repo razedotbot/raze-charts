@@ -1,0 +1,1137 @@
+{
+  "version": 1,
+  "exports": [
+    "CHART_PALETTE:object",
+    "ChartCompileError:function",
+    "DARK_CHART_THEME:object",
+    "LIGHT_CHART_PALETTE:object",
+    "LIGHT_CHART_THEME:object",
+    "RANGE_PRESETS:object",
+    "area:function",
+    "asNumber:function",
+    "bar:function",
+    "chartColorWithOpacity:function",
+    "chartPalette:function",
+    "compileChart:function",
+    "createViewportGroup:function",
+    "customMark:function",
+    "defineChart:function",
+    "defineMarkPlugin:function",
+    "extent:function",
+    "formatChartColor:function",
+    "heatFill:function",
+    "heatLabelColor:function",
+    "heatmap:function",
+    "hitTestCompiled:function",
+    "isLightChartColor:function",
+    "line:function",
+    "mountChart:function",
+    "paintChartCanvas:function",
+    "parseChartColor:function",
+    "pie:function",
+    "point:function",
+    "presetZoomsIn:function",
+    "radar:function",
+    "readChannel:function",
+    "readableTextColor:function",
+    "renderChartSvg:function",
+    "resolveChartTheme:function",
+    "ruleX:function",
+    "ruleY:function",
+    "scaleBand:function",
+    "scaleLinear:function",
+    "scaleLog:function",
+    "scaleTime:function",
+    "svgFromCompiled:function",
+    "tooltipText:function",
+    "viewportFromPreset:function"
+  ],
+  "errors": {
+    "budget-0": "ChartCompileError:E_CHART_PERFORMANCE: [raze-charts:E_CHART_PERFORMANCE] performance.maxRenderedPoints must be a finite number greater than or equal to 1; received 0.",
+    "budget-nan": "ChartCompileError:E_CHART_PERFORMANCE: [raze-charts:E_CHART_PERFORMANCE] performance.maxRenderedPoints must be a finite number greater than or equal to 1; received NaN.",
+    "decimation-bad": "ChartCompileError:E_CHART_PERFORMANCE: [raze-charts:E_CHART_PERFORMANCE] performance.decimation must be \"auto\" or \"none\"; received fast.",
+    "performance-key": "ChartCompileError:E_CHART_PERFORMANCE: [raze-charts:E_CHART_PERFORMANCE] ChartSpec.performance does not support option \"turbo\".",
+    "y0-on-line": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0] (line) uses unsupported channel y0. Model ranged areas with an area mark or a custom mark plugin.",
+    "reserved-plugin": "ChartCompileError:E_MARK_PLUGIN_KIND: [raze-charts:E_MARK_PLUGIN_KIND] Custom mark kind \"line\" is reserved by the built-in grammar. Choose a product-specific kind.",
+    "empty-plugin": "ChartCompileError:E_MARK_PLUGIN_KIND: [raze-charts:E_MARK_PLUGIN_KIND] A mark plugin requires a non-empty kind.",
+    "custom-reserved": "ChartCompileError:E_MARK_PLUGIN_KIND: [raze-charts:E_MARK_PLUGIN_KIND] Custom mark kind \"bar\" is reserved by the built-in grammar. Choose a product-specific kind.",
+    "plugin-bypass": "ChartCompileError:E_MARK_PLUGIN_KIND: [raze-charts:E_MARK_PLUGIN_KIND] marks[0] must use a non-empty custom kind that does not collide with the built-in grammar.",
+    "plugin-mismatch": "ChartCompileError:E_MARK_PLUGIN_MISMATCH: [raze-charts:E_MARK_PLUGIN_MISMATCH] Mark kind \"one\" does not match plugin kind \"two\".",
+    "plugin-top-level": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0] (lollipop) must pass custom fields inside pluginOptions; unsupported top-level field \"color\".",
+    "unknown-kind": "ChartCompileError:E_MARK_KIND: [raze-charts:E_MARK_KIND] marks[0] uses unknown kind \"mystery\". Register it with defineMarkPlugin() and customMark().",
+    "size-zero": "ChartCompileError:E_CHART_SIZE: [raze-charts:E_CHART_SIZE] Chart width and height must be finite positive numbers; received 0×180.",
+    "size-null": "ChartCompileError:E_CHART_SIZE: [raze-charts:E_CHART_SIZE] compileChart() requires numeric width and height.",
+    "definition-bad": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] compileChart() requires a definition created by defineChart().",
+    "marks-missing": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.marks must be an array.",
+    "band-domain-missing": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.x.domain does not contain category \"C\" used by a bar mark.",
+    "heatmap-domain-missing": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.x.domain does not contain heatmap category \"C\".",
+    "heatmap-y-domain-missing": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.y.domain does not contain heatmap category \"zzz\".",
+    "pie-radius-nan": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0].innerRadius must be a finite non-negative number; received NaN.",
+    "pie-radius-inverted": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0].innerRadius cannot exceed outerRadius.",
+    "pie-negative": "ChartCompileError:E_MARK_DATA: [raze-charts:E_MARK_DATA] marks[0] (pie) requires non-negative values; row 0 resolved to -1.",
+    "pie-no-value": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0] (pie) requires valueKey. Use pie(data, { valueKey, labelKey }).",
+    "pie-composed": "ChartCompileError:E_CHART_COMPOSITION: [raze-charts:E_CHART_COMPOSITION] Pie uses polar layout and must be the chart's only mark. Use one pie per chart mount.",
+    "radar-negative": "ChartCompileError:E_MARK_DATA: [raze-charts:E_MARK_DATA] marks[0] (radar) requires finite non-negative values; row 0 resolved to -1.",
+    "radar-two-axes": "ChartCompileError:E_MARK_DATA: [raze-charts:E_MARK_DATA] marks[0] (radar) requires at least three axes.",
+    "radar-dup-axis": "ChartCompileError:E_MARK_DATA: [raze-charts:E_MARK_DATA] marks[0] (radar) contains duplicate axis \"A\".",
+    "radar-bad-axis": "ChartCompileError:E_MARK_DATA: [raze-charts:E_MARK_DATA] marks[0] (radar) requires string or finite-number axis labels; row 0 is invalid.",
+    "radar-order": "ChartCompileError:E_CHART_COMPOSITION: [raze-charts:E_CHART_COMPOSITION] Radar series 2 must use the same category order as the first radar series.",
+    "radar-mixed": "ChartCompileError:E_CHART_COMPOSITION: [raze-charts:E_CHART_COMPOSITION] Radar marks can overlay other radar series, but cannot share a chart with Cartesian, heatmap, pie, or plugin marks.",
+    "radar-scales": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] Polar charts derive their geometry from values and do not accept Cartesian scales. Remove ChartSpec.scales.",
+    "heatmap-composed": "ChartCompileError:E_CHART_COMPOSITION: [raze-charts:E_CHART_COMPOSITION] Heatmap uses two categorical axes and must be the chart's only mark. Compose annotations inside a custom mark plugin or a sibling chart.",
+    "heatmap-no-value": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0] (heatmap) requires valueKey in addition to x and y.",
+    "heatmap-linear": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.x.type must be \"band\"; received linear.",
+    "viewport-polar": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] viewport is supported on Cartesian charts only.",
+    "viewport-key": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.viewport does not support option \"z\".",
+    "viewport-x-empty": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.viewport.x must be a non-empty range.",
+    "viewport-y-bad": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.viewport.y must be a [min, max] numeric pair.",
+    "margin-nan": "ChartCompileError:E_CHART_SIZE: [raze-charts:E_CHART_SIZE] ChartSpec.margin.left must be a finite non-negative number.",
+    "margin-key": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.margin does not support option \"middle\".",
+    "margin-type": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.margin must be an object when provided.",
+    "scales-string": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] ChartSpec.scales must be an object when provided.",
+    "scales-axis": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] ChartSpec.scales does not support axis \"z\".",
+    "scale-null": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.x must be a scale configuration object.",
+    "scale-option": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.x does not support option \"ticks\".",
+    "scale-y-band": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.y.type must be \"linear\" or \"log\"; received band.",
+    "scale-x-weird": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.x.type must be \"linear\", \"band\", \"time\", or \"log\"; received ordinal.",
+    "band-nice": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.x.nice is not supported by band scales.",
+    "band-padding-bad": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.x.padding must be a finite number in [0, 1); received 1.",
+    "band-domain-object": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.x.domain must be an array for a band scale.",
+    "band-domain-nan": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.x.domain contains an invalid category (NaN). Use finite numbers or strings.",
+    "band-domain-dupe": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.x.domain cannot contain duplicate categories.",
+    "linear-padding": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.x.padding is supported by band scales only.",
+    "log-nice": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.y.nice is not supported by log scales.",
+    "nice-type": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.y.nice must be boolean when provided.",
+    "domain-three": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.y.domain must contain exactly two endpoints for a quantitative scale.",
+    "domain-nan": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.y.domain endpoints must be finite numbers or Dates.",
+    "domain-same": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.y.domain endpoints must be distinct.",
+    "domain-log-zero": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.y.domain endpoints must be greater than zero for a log scale.",
+    "tickformat-type": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.y.tickFormat must be a function when provided.",
+    "x-type-categories": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.x.type \"linear\" requires numeric or Date-compatible x values. Use type \"band\" for categories.",
+    "x-band-inferred-nice": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] scales.x.type must be \"linear\", \"band\", \"time\", or \"log\"; received undefined.",
+    "x-log-nonpositive": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] A log x scale requires every finite x value to be greater than zero.",
+    "y-log-bar": "ChartCompileError:E_SCALE_TYPE: [raze-charts:E_SCALE_TYPE] Bar and area marks require a zero baseline and cannot use a log y scale. Use line/point marks or a linear y scale.",
+    "y-log-nonpositive": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] A log y scale requires every finite y value to be greater than zero.",
+    "plugin-band-miss": "ChartCompileError:E_SCALE_DOMAIN: [raze-charts:E_SCALE_DOMAIN] scales.x.domain does not contain category \"Zed\" contributed by a plugin.",
+    "grid-type": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.grid must be boolean when provided.",
+    "theme-token": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.theme.background must be a non-empty string.",
+    "theme-unknown": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.theme does not support token \"sparkle\".",
+    "theme-type": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.theme must be \"dark\", \"light\", or a theme object.",
+    "aria-label": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.ariaLabel must be a string when provided.",
+    "aria-description": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.ariaDescription must be a string when provided.",
+    "hidden-bad": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec.hiddenSeries must be an array of strings when provided.",
+    "performance-type": "ChartCompileError:E_CHART_PERFORMANCE: [raze-charts:E_CHART_PERFORMANCE] ChartSpec.performance must be an object when provided.",
+    "unknown-option": "ChartCompileError:E_CHART_SPEC: [raze-charts:E_CHART_SPEC] ChartSpec does not support option \"mystery\".",
+    "spec-width": "ChartCompileError:E_CHART_SIZE: [raze-charts:E_CHART_SIZE] Chart width and height must be finite positive numbers; received -1×400.",
+    "mark-data": "ChartCompileError:E_MARK_DATA: [raze-charts:E_MARK_DATA] marks[0].data must be an array.",
+    "mark-option": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0] (line) does not support option \"innerRadius\". Use a compatible mark or a custom plugin.",
+    "mark-channel-type": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0].x must be a property name or accessor function.",
+    "mark-name": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0].name must be a string.",
+    "mark-fill": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0].fill must be a non-empty CSS color string.",
+    "mark-stack": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0].stackId must be a non-empty string.",
+    "mark-width": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0].strokeWidth must be a finite non-negative number.",
+    "mark-opacity": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0].fillOpacity must be a finite number in [0, 1].",
+    "mark-bool": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0].dashed must be boolean.",
+    "mark-curve": "ChartCompileError:E_MARK_OPTION: [raze-charts:E_MARK_OPTION] marks[0].curve must be \"monotone\", \"linear\", or \"step\".",
+    "mark-y0": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0].y0 must be a property name or accessor function.",
+    "mark-xy": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0] (line) requires both x and y channels. Use the typed line() builder when possible.",
+    "rule-y-missing": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0] (ruleY) requires a y channel.",
+    "rule-x-missing": "ChartCompileError:E_MARK_CHANNEL: [raze-charts:E_MARK_CHANNEL] marks[0] (ruleX) requires an x channel.",
+    "plugin-domain-throw": "ChartCompileError:E_MARK_PLUGIN_DOMAIN: [raze-charts:E_MARK_PLUGIN_DOMAIN] Failed to resolve domain for \"boom\". domain boom | cause: domain boom",
+    "plugin-domain-shape": "ChartCompileError:E_MARK_PLUGIN_DOMAIN: [raze-charts:E_MARK_PLUGIN_DOMAIN] Failed to resolve domain for \"bad-domain\". domain().x must be an array. | cause: domain().x must be an array.",
+    "plugin-domain-key": "ChartCompileError:E_MARK_PLUGIN_DOMAIN: [raze-charts:E_MARK_PLUGIN_DOMAIN] Failed to resolve domain for \"bad-domain-key\". domain() returned unsupported field \"z\". | cause: domain() returned unsupported field \"z\".",
+    "plugin-domain-y": "ChartCompileError:E_MARK_PLUGIN_DOMAIN: [raze-charts:E_MARK_PLUGIN_DOMAIN] Failed to resolve domain for \"bad-domain-y\". domain().y must contain finite numbers only. | cause: domain().y must contain finite numbers only.",
+    "plugin-compile-throw": "ChartCompileError:E_MARK_PLUGIN_COMPILE: [raze-charts:E_MARK_PLUGIN_COMPILE] Failed to compile \"kaboom\". compile boom | cause: compile boom",
+    "plugin-bad-legend": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-legend\" must return legend as an array when provided.",
+    "plugin-null-node": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"null-node\" returned an invalid node at index 0.",
+    "plugin-bad-rect": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-rect\" requires a finite x on node 0.",
+    "plugin-bad-fill": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-fill\" returned a non-string fill on node 0.",
+    "plugin-bad-opacity": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-opacity\" returned fillOpacity outside [0, 1] on node 0.",
+    "plugin-bad-size": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-size\" returned negative w on node 0.",
+    "plugin-bad-corner": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-corner\" returned an invalid corner on node 0.",
+    "plugin-bad-anchor": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-anchor\" returned an invalid anchor on node 0.",
+    "plugin-bad-boolean": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-boolean\" returned a non-boolean dashed on node 0.",
+    "plugin-bad-detail": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-detail\" returned an invalid legend item.",
+    "plugin-bad-sample": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-sample\" returned an invalid hover sample.",
+    "plugin-bad-last": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-last\" returned an invalid last value.",
+    "plugin-bad-points": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-points\" returned invalid points for line node 0.",
+    "plugin-bad-node-key": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-node-key\" returned unsupported node field \"glow\" at index 0.",
+    "plugin-bad-node-type": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-node-type\" returned an unknown node type at index 0 (hexagon).",
+    "plugin-bad-idx": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-idx\" returned a non-integer or negative idx on node 0.",
+    "plugin-bad-inner": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-inner\" returned an invalid inner radius on node 0.",
+    "plugin-bad-points-kind": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-points-kind\" returned points for incompatible circle node 0.",
+    "plugin-bad-label": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-label\" requires a string label on node 0.",
+    "plugin-bad-result": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-result\" must return an object.",
+    "plugin-bad-result-key": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-result-key\" returned unsupported field \"extra\".",
+    "plugin-bad-samples-type": "ChartCompileError:E_MARK_PLUGIN_RESULT: [raze-charts:E_MARK_PLUGIN_RESULT] Mark plugin \"bad-samples-type\" must return samples as an array when provided."
+  },
+  "facets": {
+    "scene/basic-mixed": {
+      "scene": "1dc75fc24c03ad09e3e80dfe",
+      "svg": "9266a7d1fa581208abc0082e",
+      "canvas": "c60db68f81af9e3c9fa49a69",
+      "hits": "fb968d95dc5dc1cd33d9bfdd",
+      "tooltips": "fe1e3c4227d4676019b04f7b"
+    },
+    "scene/stacked": {
+      "scene": "5a7d63c419c1cf576ef29a43",
+      "svg": "f0065e38dc4242f9268a2fcd",
+      "canvas": "9291a526c9b0d5ce9a881dcc",
+      "hits": "cce58cdfdb0be46ad67e92b8",
+      "tooltips": "d7c648e8ab20a9411ec34c74"
+    },
+    "scene/area-points": {
+      "scene": "30c1854d4a2b97f26134ce2a",
+      "svg": "f802320c77324e1c5a840d7b",
+      "canvas": "1d7cfb8e7eed3949f9166bc5",
+      "hits": "483034b98b7ca8cde340147f",
+      "tooltips": "6cf970e4b1db9d9966a82200"
+    },
+    "scene/fit-dashed": {
+      "scene": "b42274eb14eb70edb52997df",
+      "svg": "90ba55b982004c1d5c05a5bd",
+      "canvas": "0f9162bebaea1e000867fc87",
+      "hits": "803602b26bfbc8de3ae75b99",
+      "tooltips": "bcc87c1a785438a37352933d"
+    },
+    "scene/plugin-lollipop": {
+      "scene": "d1e92cbc35d69eb75243f9b1",
+      "svg": "a38a22298c73f7137a7feacb",
+      "canvas": "d6ac59d4769f6d71a71bb5c4",
+      "hits": "6e7bf00b3259dd268c325a4f",
+      "tooltips": "c5ee3481f0a1132b5e2be714"
+    },
+    "scene/plugin-band-probe": {
+      "scene": "062bc58f6c9d7544db388bad",
+      "svg": "5760302a5cb0fb28c79c2e99",
+      "canvas": "da039beb3c6d3eb0cb6a4abd",
+      "hits": "b54dac0bb22da2b75ac68afb",
+      "tooltips": "1cfad2549c5fd5287e74d113"
+    },
+    "scene/plugin-annotations": {
+      "scene": "e025433ae9f92122b44f70a7",
+      "svg": "4954e7701cd4f2b3cb31a7f7",
+      "canvas": "1bf968773ab5a35c5ab2b41b",
+      "hits": "c3d2bc8470e77c6b746913b0",
+      "tooltips": "27e7fb8b2e8999a25e7433e4"
+    },
+    "scene/dense-128": {
+      "scene": "95c986c4eded1302286b2163",
+      "svg": "114516aeabe8c71663804f3a",
+      "canvas": "fef81777b950635ae5286f58",
+      "hits": "ffe31356a26cd8da02e31531",
+      "tooltips": "7942804a43ee4b3ce49615b6"
+    },
+    "scene/dense-exact": {
+      "scene": "5d793b0778b54ef5aa82d0f9",
+      "svg": "3bfd1db7591e8881a61c7678",
+      "canvas": "a859caa9728ad48a19dc6375",
+      "hits": "5ea3eacafb650b9a3e2e8647",
+      "tooltips": "20ae432550a4733e68d911d3"
+    },
+    "scene/dense-narrow": {
+      "scene": "c099ff0bd7cae62ff1693884",
+      "svg": "33b7f895ca8380aa70446b59",
+      "canvas": "0d2381690e5dbc2d32a58696",
+      "hits": "578ec14fd3fa29ea72d435da",
+      "tooltips": "7942804a43ee4b3ce49615b6"
+    },
+    "scene/dense-cap-1": {
+      "scene": "9022e3bf3b1bd1892c79cca2",
+      "svg": "fa2a2c52b66ca43faf16ec8a",
+      "canvas": "7f8a5202abee7938489e0cd0",
+      "hits": "57ad26d03fada2b812c9cf6b",
+      "tooltips": "bb5e3da0156722ab6deef71a"
+    },
+    "scene/dense-cap-2": {
+      "scene": "72f4db64565dc52ca9734036",
+      "svg": "427512abe18ad7ea2f82638c",
+      "canvas": "532061b80950e3d28948b554",
+      "hits": "17d7f15e1f25e2362ac5c73e",
+      "tooltips": "7942804a43ee4b3ce49615b6"
+    },
+    "scene/dense-cap-3": {
+      "scene": "12850a2f5d84fe271b858070",
+      "svg": "a34397ccb0d1fca2a3d854c6",
+      "canvas": "121b5f6b92cfcefe81db79b1",
+      "hits": "682bad2664410d3b7b327cc4",
+      "tooltips": "7942804a43ee4b3ce49615b6"
+    },
+    "scene/dense-cap-4": {
+      "scene": "7b3074b3646bc678a18c334b",
+      "svg": "6211fb891aebdf8ed112e5a1",
+      "canvas": "45cd71c172055a55b1207a23",
+      "hits": "6167c8ac7825fce5923e060b",
+      "tooltips": "7942804a43ee4b3ce49615b6"
+    },
+    "scene/dense-cap-5": {
+      "scene": "7b3074b3646bc678a18c334b",
+      "svg": "77b3cc8443361efc48b32c71",
+      "canvas": "45cd71c172055a55b1207a23",
+      "hits": "6167c8ac7825fce5923e060b",
+      "tooltips": "7942804a43ee4b3ce49615b6"
+    },
+    "scene/dense-cap-15": {
+      "scene": "1a3737c4c9a57fd5563f38d1",
+      "svg": "2280574aa84a6d9d4a132c33",
+      "canvas": "3708abefb9ca1571a0779b27",
+      "hits": "06a91c4af1ca47fa037145b0",
+      "tooltips": "7942804a43ee4b3ce49615b6"
+    },
+    "scene/dense-cap-16": {
+      "scene": "8a91b12a5481ea7f4536627a",
+      "svg": "99a0464e1b124a0a12abf74a",
+      "canvas": "624abbd7ea8219ff66d2591e",
+      "hits": "df0b0b7493ac86865196318f",
+      "tooltips": "7942804a43ee4b3ce49615b6"
+    },
+    "scene/gap": {
+      "scene": "eb56f745d1b9dc596ec3b826",
+      "svg": "67d186012eb637eeed0233ea",
+      "canvas": "3d6474ccd08f420540fd28bf",
+      "hits": "725a6e3648d5435a0c7209c0",
+      "tooltips": "88bf30415f75d82e811e3fe8"
+    },
+    "scene/fragmented": {
+      "scene": "6e1c53da96d8fdc92232b78b",
+      "svg": "87105e6ed6274e700f8d4e1c",
+      "canvas": "668733eb9676e65b86b71a69",
+      "hits": "75d4ba6f5a09e4e912fa94a6",
+      "tooltips": "6ce371aed4fc0215867333e1"
+    },
+    "scene/isolated-spike": {
+      "scene": "86d4654dfcce9f843af0a6b8",
+      "svg": "fde71f9f7b98f28382bfc192",
+      "canvas": "f501dc43c7d6dcd079f381f3",
+      "hits": "ab2a2e6c38b552c7a90efbdc",
+      "tooltips": "f3b95ba9ae5a0339864f17ff"
+    },
+    "scene/internal-spike": {
+      "scene": "9143e09737d583fc1de9bc8c",
+      "svg": "02b6926163cb756bb3c331a9",
+      "canvas": "e0fecf9294e1d4e65240bc09",
+      "hits": "fde41f6842dc0097b73350f0",
+      "tooltips": "6d2cf4f955c9ca7ec6d37ff1"
+    },
+    "scene/last-value-tail": {
+      "scene": "2d725520cb258dc68b84f96e",
+      "svg": "744bc4306ec6925b1470b66c",
+      "canvas": "5f1f0f39a2e1cb1937d38bcc",
+      "hits": "b6a489f99d9d4c521a41c35b",
+      "tooltips": "eba0a4174f75f08cc60a48b5"
+    },
+    "scene/singletons": {
+      "scene": "9e2f19effdbe2cefc194f0d1",
+      "svg": "00706539f916f3d4535a64fc",
+      "canvas": "a4d2e4e24aef09ff39addd31",
+      "hits": "dd9f7af9a9503e0787a1bcab",
+      "tooltips": "026c6386ea1b927b7c0914a7"
+    },
+    "scene/final-extreme": {
+      "scene": "2bf239ff4956e929dd9c9ea2",
+      "svg": "8ccad518f1f6f464b335aec1",
+      "canvas": "a99fcd855aefa1bc16a3c1e9",
+      "hits": "0a3720fd9dbf35a50875e03f",
+      "tooltips": "bc7c94ef3210ef536583d76a"
+    },
+    "scene/decimated-area": {
+      "scene": "ad3d603cc3ae41f1eac3fbd3",
+      "svg": "63df00a67ce750ef2a723861",
+      "canvas": "438124798ba9eea59e3cb17d",
+      "hits": "484f109ca313dbe176fec2a4",
+      "tooltips": "d747ac8c9f0c335bba35b8a2"
+    },
+    "scene/ranged-area": {
+      "scene": "ddd2bd9579609f25ef1b63ce",
+      "svg": "b51f8249c34581abbf984f56",
+      "canvas": "f5f0834ee2dfca8d94e988f8",
+      "hits": "f720ef83cf87ad1ad510ba17",
+      "tooltips": "03cee14e894c6b79dfce6f39"
+    },
+    "scene/ranged-area-gaps": {
+      "scene": "ffd423604b3fe78b59dccb31",
+      "svg": "09832bc054975dd92026973d",
+      "canvas": "25bde688743cfdde44e9675a",
+      "hits": "969a9920e6217f5760a62ad4",
+      "tooltips": "b92eda1b66f7153bcb8460bf"
+    },
+    "scene/viewport-x": {
+      "scene": "4e39ae14dac8ae113b420555",
+      "svg": "65d9e97908cc54eda70220d4",
+      "canvas": "05a7dc96c8812e399b547cf2",
+      "hits": "545ecbe1153399877b7d2dd0",
+      "tooltips": "87d7a0f8d9cb156c9ad23f3d"
+    },
+    "scene/domain-only": {
+      "scene": "0e3897a60431b22328208ffe",
+      "svg": "41bf28cb8c18ee719937aa36",
+      "canvas": "2961603a67f3039a2141674b",
+      "hits": "8eda0b502622751f30628f10",
+      "tooltips": "f42b26be7d2b585f5a93d06b"
+    },
+    "scene/viewport-decimated": {
+      "scene": "14eedd2fb66713117282c56c",
+      "svg": "503f3c1e6b1c17e7e7c952be",
+      "canvas": "4d436831c236ddcce8511d7a",
+      "hits": "f1fc52d1dfca54934e5f1879",
+      "tooltips": "35047a04a738ee77fad39408"
+    },
+    "scene/viewport-y": {
+      "scene": "15c69739a38899c5d79e7a95",
+      "svg": "ecaf09b4ca38a0045131807b",
+      "canvas": "aa334a47c6b98e6569b00bb1",
+      "hits": "0dc3c77f0c7bb0c331031e6f",
+      "tooltips": "f322eb6a12223a9005622f52"
+    },
+    "scene/viewport-band": {
+      "scene": "4a39a75cce0ba05423272257",
+      "svg": "86ac9420314a23cba18daab7",
+      "canvas": "bf1ded3e7cb27dca01a48f02",
+      "hits": "cd899e068412535dd1c032e8",
+      "tooltips": "e454bedf9a3204aa97906f54"
+    },
+    "scene/viewport-time": {
+      "scene": "c675ebc0dc4199cf144a4dfe",
+      "svg": "ad52623e46354dc93ff0187c",
+      "canvas": "c9ef12ecfb1e9b3307424f0a",
+      "hits": "fcf3e48e14ca0d8d4a5be4cb",
+      "tooltips": "77728daf4d48f3d2687b4f91"
+    },
+    "scene/viewport-dates": {
+      "scene": "bbb97ebd13b17391012cbaf5",
+      "svg": "78bb733a8db32f944942e965",
+      "canvas": "a18081a1d40dba9a703df377",
+      "hits": "4e10647ba7f71e1ac8357698",
+      "tooltips": "f10ead6d8382fc36b0672bd3"
+    },
+    "scene/viewport-reversed": {
+      "scene": "c1411cbce93ded2ff963218d",
+      "svg": "e2d8ebe55f0a044ca7370040",
+      "canvas": "1b3b15fdf6c6dc7fe9515c2b",
+      "hits": "d2cf055fcf952ff32ca5951a",
+      "tooltips": "5cf4b7035071b0dddc9fbc69"
+    },
+    "scene/hidden-series": {
+      "scene": "392109201fa1d684331773d1",
+      "svg": "f5a22c32ac98e514a302a27b",
+      "canvas": "72fcf6214cae54973b43e5bc",
+      "hits": "6b34aefe8383159d856a97ce",
+      "tooltips": "36a5218915457fe186091cc7"
+    },
+    "scene/hidden-unmatched": {
+      "scene": "44ffd6516ea952abafd32231",
+      "svg": "818c2e5f0a0c4a6d6547e691",
+      "canvas": "72fcf6214cae54973b43e5bc",
+      "hits": "6b34aefe8383159d856a97ce",
+      "tooltips": "36a5218915457fe186091cc7"
+    },
+    "scene/curves": {
+      "scene": "c07ebb0663ebc26abf901a24",
+      "svg": "b290c4c27fa0f38804415298",
+      "canvas": "2e1d5781060026c1b43f502f",
+      "hits": "d99143a651802108dea97ade",
+      "tooltips": "02ec8d0048a87500b56a414f"
+    },
+    "scene/rule-x": {
+      "scene": "d4db79a11d9d390c8f23b4d6",
+      "svg": "93a34b1573aa5d43e5d78316",
+      "canvas": "b8931dc2c21ec2f1824be4ef",
+      "hits": "57e6a988add274daec6d6605",
+      "tooltips": "c43c127bbabdf422659cdcb8"
+    },
+    "scene/rule-x-time": {
+      "scene": "2efd9c947eff19edbf5d8537",
+      "svg": "787de33cabbf6adfa74cac37",
+      "canvas": "a5f6e732038a4386a763b00f",
+      "hits": "a2f6be74c3117e5641086038",
+      "tooltips": "a0068f8edd400b4e2e8a8f4d"
+    },
+    "scene/rule-only": {
+      "scene": "2b9207283c1bdc17e4d10d89",
+      "svg": "48f837de70da2fe91805b52e",
+      "canvas": "09ec725f9a3ea150f46af605",
+      "hits": "15bb0599012fd7ca89c0184f",
+      "tooltips": "98843e80a8b066ce204168bb"
+    },
+    "scene/tick-format": {
+      "scene": "f80099fe5a0686fe2cb3da12",
+      "svg": "11037ed4ac00bd3e37b12064",
+      "canvas": "88f3ffb5330f54a213497c99",
+      "hits": "a80f1b8adc04c9c691a447e3",
+      "tooltips": "068ad522bb8883b81bbaf323"
+    },
+    "scene/typed-categories": {
+      "scene": "93e9d68c27de3c9da1cf1957",
+      "svg": "69800a41771bfaeb08a78210",
+      "canvas": "8915c337145df9cee2cd4b93",
+      "hits": "d0199aeb904bde59e391f405",
+      "tooltips": "2f25f46f59fdc052f69bf134"
+    },
+    "scene/band-padding": {
+      "scene": "5d93bb011efbaf91cc5c1e28",
+      "svg": "feb2b767bea3f24dba4a48a8",
+      "canvas": "7c5f54fb5cc66cc3bc6b1621",
+      "hits": "3a13fe3cc4487f4040854dde",
+      "tooltips": "23b2f47a342ae4f5084d4724"
+    },
+    "scene/many-categories": {
+      "scene": "6697fc73bef25251920861e4",
+      "svg": "262ce88e0d74639d34aae802",
+      "canvas": "9e16074f139b4e59a305be46",
+      "hits": "d87445fa76df524a551740b3",
+      "tooltips": "326e41f4f4db81b4453632fa"
+    },
+    "scene/heatmap-basic": {
+      "scene": "9f20f27556303b5e85659815",
+      "svg": "6f6f53f69fdb71dcc5627958",
+      "canvas": "cb9bafa157e9d16ed0288b1d",
+      "hits": "85fba405c2d7009fa31bc92a",
+      "tooltips": "a4483428ac825b60fa58d829"
+    },
+    "scene/heatmap-sparse": {
+      "scene": "e59098e3bc58760181512afa",
+      "svg": "e68ef6454fc9ae0eee76221e",
+      "canvas": "5c519c256d6fee82c246a4e5",
+      "hits": "6eb5b804401aae19a0c095cf",
+      "tooltips": "33eeb72fd7e071fa67d2a008"
+    },
+    "scene/heatmap-dashboard": {
+      "scene": "adcd68eabda66750c3a1e686",
+      "svg": "8ece2cece336a65bd2bd0c62",
+      "canvas": "7bf73b4a0f4513ccdd1fcdde",
+      "hits": "c07c38e17325b4c79748430a",
+      "tooltips": "b56c3ed0d23d2769af40e965"
+    },
+    "scene/heatmap-positive": {
+      "scene": "43d59504d50b6b7482d46e89",
+      "svg": "685a2016b3bebd5ffb07582f",
+      "canvas": "48a044c269b68e4aa7ee7e68",
+      "hits": "f4ab854149a3aae50c17de8c",
+      "tooltips": "e4f6d400d01e95f64d301f8f"
+    },
+    "scene/bar-single-pos": {
+      "scene": "3b193689d57b89f0425f06ee",
+      "svg": "6eb7111fb94baa3e92744e52",
+      "canvas": "110147c7996128c87642b12e",
+      "hits": "1b13153d24aa66398e51b402",
+      "tooltips": "ada27a32c5f4ab747cf4b256"
+    },
+    "scene/bar-single-neg": {
+      "scene": "8623d9a6b220950afa0cb771",
+      "svg": "4da2006b722608bc64588b48",
+      "canvas": "313773cf57333f28b1dea888",
+      "hits": "52f97c3db593d026a66cc2ba",
+      "tooltips": "629e88b56b7a3bdd2490d80c"
+    },
+    "scene/stack-normalized": {
+      "scene": "63b221a40c083aa2ac16b922",
+      "svg": "caa34cb3a9d6a777c9bb6bde",
+      "canvas": "cba5c3fdeca02d8bfa1ef78c",
+      "hits": "6f5d9095890a079754357852",
+      "tooltips": "d31267b3658a90ab49a11a9e"
+    },
+    "scene/stack-time": {
+      "scene": "cc87f1915536e9f1fc28a5df",
+      "svg": "8b9dc38b9148e7e6d9c4d08d",
+      "canvas": "c4ce54f91f5d6743560c7b9b",
+      "hits": "de46119a4e2fda949a0eded2",
+      "tooltips": "a894917c845e01a1f5e02f36"
+    },
+    "scene/stack-diverging": {
+      "scene": "77d55a6dd08da40a54269bc2",
+      "svg": "e7605969798647c4f8f32275",
+      "canvas": "4686f96c5eb42f73a3aae16e",
+      "hits": "b30387582cf54774c29a8a78",
+      "tooltips": "6fc69f7ddfa1f32a8e5e635a"
+    },
+    "scene/stack-grouped": {
+      "scene": "86d80da9093523ff3e9681cc",
+      "svg": "4e95ac6f3da747ea4d5e4239",
+      "canvas": "c15d6bbd18b56087c42d393c",
+      "hits": "b3b4c077ecca6078d0106540",
+      "tooltips": "7f6221649095726c4170fff9"
+    },
+    "scene/bars-negative": {
+      "scene": "360de8985515f9d0d4f2d625",
+      "svg": "269274e10ef7727c23c11e72",
+      "canvas": "f2f897610286db662045f2eb",
+      "hits": "e6355572b9132ad25af8ef6b",
+      "tooltips": "5dd979bd3a7521aa837e464d"
+    },
+    "scene/bars-numeric": {
+      "scene": "4f7a4944eef52dbf919a3bc2",
+      "svg": "5e9e662d3cb3d1c0762edf75",
+      "canvas": "be0d4c7879d1da32da6d647b",
+      "hits": "a05bfd13eac66b6b2d17bd94",
+      "tooltips": "e4e36c9d752b88b3da227e43"
+    },
+    "scene/bars-log-x": {
+      "scene": "4384dfd5494b246cfeab6b9e",
+      "svg": "f5016a32a3e33d847096de32",
+      "canvas": "1f9d15b2138d08e6276d951e",
+      "hits": "1c0cfa9241cff488299ab1e2",
+      "tooltips": "5eb90513cfafadb970d54d92"
+    },
+    "scene/bars-time": {
+      "scene": "7153a478dd07bf010c23220a",
+      "svg": "6874e082eff55ac30e35f711",
+      "canvas": "0d3ca947470cff15517f6acf",
+      "hits": "5b280da77399ef21c61b19ad",
+      "tooltips": "6234df914fe7bbbde9b44495"
+    },
+    "scene/bars-time-single": {
+      "scene": "1a9f010d5af54044d180760c",
+      "svg": "c3123f44386a285de9464a80",
+      "canvas": "8dfa3e16c4b862681155a8d0",
+      "hits": "578d79070094591c87f19f91",
+      "tooltips": "79a46a0bd3efcb1e595720a2"
+    },
+    "scene/bars-grouped-dashboard": {
+      "scene": "f08eaeb72f97912d02ae039c",
+      "svg": "cbf1c73c52d0eb4ec48832fe",
+      "canvas": "66b5e953f0739268cb6402f6",
+      "hits": "b929ea458222b11d3566db7e",
+      "tooltips": "ab446828a014cfea14bb8929"
+    },
+    "scene/histogram-fade": {
+      "scene": "192ba6a8366038c8113d448a",
+      "svg": "d0f25997cde05c2553546cad",
+      "canvas": "5b702c6d758c12f30693a611",
+      "hits": "668d1e22cf3bd9a91aa1713c",
+      "tooltips": "7f658c9fc308a51146c0d41d"
+    },
+    "scene/pie-empty": {
+      "scene": "f8ce8dbf981da30d08de80e9",
+      "svg": "27407971fd4a53a532327d10",
+      "canvas": "542850ea9689125a1ced2092",
+      "hits": "a2acef9a347a7010d6440f14",
+      "tooltips": "1f6fe5e9305f8928f82ee079"
+    },
+    "scene/pie-zero-total": {
+      "scene": "f6713a94765e0dc4e07ad0ec",
+      "svg": "5b81d9e4b6a5d8f8860fbc23",
+      "canvas": "5be911dbd5973d5eb62b3d1b",
+      "hits": "7e6fc625e4f27dba694c72be",
+      "tooltips": "1f6fe5e9305f8928f82ee079"
+    },
+    "scene/pie-partial": {
+      "scene": "db9c085b7c3f416c93efb491",
+      "svg": "192809932cd263c11129e1a1",
+      "canvas": "9d7a7093c9b763fd4cbd3631",
+      "hits": "c6904966e233e90a0dcb93c1",
+      "tooltips": "f8faed6a94ea7dc4b7f20995"
+    },
+    "scene/pie-dashboard": {
+      "scene": "3ba2370ac4e7ac07ed526897",
+      "svg": "2292ce44fb80fb64954332c9",
+      "canvas": "0ba657ab55d695b767f0edb8",
+      "hits": "870d037ef861c7d293e1f28a",
+      "tooltips": "ae7a491eaed73de864d15f81"
+    },
+    "scene/pie-radii": {
+      "scene": "0b84fda1b680fd982cf97eda",
+      "svg": "9ad2494e630105b0e5f6341b",
+      "canvas": "449e2e4477f1cbe784066cac",
+      "hits": "53e6690282c06b8b344a38b9",
+      "tooltips": "a5a3da182cfd949843e41491"
+    },
+    "scene/pie-solid": {
+      "scene": "eb93895eb0b40f82cd93ebe6",
+      "svg": "2f71ae33f07a84e45d005e84",
+      "canvas": "eabb41506169cbed512e6b8a",
+      "hits": "5ee81c8afb5bafd9a784369b",
+      "tooltips": "e140d72214fd620ae770800c"
+    },
+    "scene/radar-basic": {
+      "scene": "5a330d4e187759f322869b36",
+      "svg": "01a9560f710416c1fa5b9951",
+      "canvas": "02421af8240e1f69970f969c",
+      "hits": "f8d9ffdccaf0cf1459cdd8fc",
+      "tooltips": "58e1415baa15c42447cd58d5"
+    },
+    "scene/radar-multi": {
+      "scene": "985ba31b0ef89bfb3ed903cc",
+      "svg": "985d17c71e1702a63e2f903e",
+      "canvas": "3fc3fc2a05006ef7f977b1d4",
+      "hits": "d9c07f87fff42908108237a3",
+      "tooltips": "aaed6249972f41a5a9039d8a"
+    },
+    "scene/radar-dashboard": {
+      "scene": "c536a1d298231b6b2d8f64b3",
+      "svg": "552ec3bf25e5a5812ec09245",
+      "canvas": "8f7ecb12811a76a4cec36345",
+      "hits": "b8e66995eb9dc1bac44404f5",
+      "tooltips": "d8bc856d50fb8d4657257d68"
+    },
+    "scene/radar-empty": {
+      "scene": "751d43d55cea33226f1e667f",
+      "svg": "a0cec0ac246cd0dde279be31",
+      "canvas": "a1041d058ff4a51296f5f593",
+      "hits": "afad809186ff09b729284159",
+      "tooltips": "f1adb4ad7e3730a590227ce4"
+    },
+    "scene/null-gap": {
+      "scene": "c0a5ef6243875119ad66f103",
+      "svg": "b5a2013ae7072ddff337133e",
+      "canvas": "0fb35205f970242b85b1465a",
+      "hits": "7023a1600eb90349bec3d621",
+      "tooltips": "c651d59dd209b0992fc84d9f"
+    },
+    "scene/large-metrics": {
+      "scene": "2ed99cd3d6c2d7a416d79dee",
+      "svg": "34b42b16c1528d2540dc80cc",
+      "canvas": "ad29964803eedb29d19d6ac3",
+      "hits": "39c0e05fa714072713ecb9e9",
+      "tooltips": "7da9ac34537c01b880953180"
+    },
+    "scene/small-metrics": {
+      "scene": "833a67bc838c834270701a2e",
+      "svg": "bf4ea8bb6c883e8bbd3b7085",
+      "canvas": "9d8ed3b0741951e9e02dbeb5",
+      "hits": "77f4b1975b49bc8bab07d0c6",
+      "tooltips": "9e85930cdca73be3daad28a6"
+    },
+    "scene/epoch-time": {
+      "scene": "a5b51c320afa57e149b806af",
+      "svg": "5691b998580be8a3b9ef01bc",
+      "canvas": "7f89fce7845ab5a82a86bd66",
+      "hits": "fc8a24fcb35777083435ade9",
+      "tooltips": "7b0a2bf722bc1b35d2b8ffd6"
+    },
+    "scene/inferred-dates": {
+      "scene": "c6194e90ee6339f1a521b2e8",
+      "svg": "0abbdfef6a727fb6450a4f4a",
+      "canvas": "7f89fce7845ab5a82a86bd66",
+      "hits": "fc8a24fcb35777083435ade9",
+      "tooltips": "8740ac09fe5256e2f4be7d9c"
+    },
+    "scene/long-time": {
+      "scene": "1f648b2dd2c85c8623a5ad7c",
+      "svg": "49235838b858a299140e343c",
+      "canvas": "390bb037af9932b173e85fd1",
+      "hits": "08dcd2407c863f2ea6c8a476",
+      "tooltips": "bb26a8b30e5c13baa46d54f9"
+    },
+    "scene/singleton-log": {
+      "scene": "7d27152fdc14697b06039c50",
+      "svg": "331900a2213de5032604c760",
+      "canvas": "e7a5082ec5a2643b3a209512",
+      "hits": "76ec98fbf15e1c71771dde45",
+      "tooltips": "419d8d63bc404ba68c98a9b4"
+    },
+    "scene/log-y": {
+      "scene": "988b3c15eac9b347f8397b57",
+      "svg": "d82a0a3116f5a2de3365187c",
+      "canvas": "9c33ee29d06c9fcb16f1019a",
+      "hits": "bec864d8521cdb4469c6e576",
+      "tooltips": "1f7469ed9a08d9b1d197ccc7"
+    },
+    "scene/log-x-points": {
+      "thrown": "706c4a489be922a6cd06edd4"
+    },
+    "scene/log-x-flat": {
+      "scene": "7bab2dfae8ff4f4d5e2d105f",
+      "svg": "6ed97452fcda2adb2e4220f8",
+      "canvas": "ac7a4af8f90e3d9eeefa0340",
+      "hits": "797e813d5fc74a4657d938e8",
+      "tooltips": "2cf59d5268f1110f5d06b2af"
+    },
+    "scene/theme-light": {
+      "scene": "000725543051bcd0a4d1ee9e",
+      "svg": "25386ad1448322a926388599",
+      "canvas": "2dce6558c06468c4d2dbba0f",
+      "hits": "edba3f00e8c5e7a843b4fea0",
+      "tooltips": "a1af73cf797748fe5e855820"
+    },
+    "scene/theme-custom": {
+      "scene": "25d19d019371ead40fc7f0dd",
+      "svg": "59f8cc1684babe3055cc508c",
+      "canvas": "91b6d79d74ecbdfc8f351479",
+      "hits": "0735a6e40f0e3dc0a2fbe7a2",
+      "tooltips": "d76396fd99994dbbced78234"
+    },
+    "scene/theme-area-hsla": {
+      "scene": "2f902927d98805b6b2c94691",
+      "svg": "8da8abe2422a8c28c6e001c7",
+      "canvas": "ecac88a71a3a5d21c0d782fb",
+      "hits": "7dcb966eda66ab74c3091a50",
+      "tooltips": "40da59588b0c5bcd8843b267"
+    },
+    "scene/theme-orange-bar": {
+      "scene": "25915bb6f94086dda15b8f1b",
+      "svg": "74a509e3f67a8e71bde392d8",
+      "canvas": "efc2f66732e911fd8508a54d",
+      "hits": "1068bef859d66d6773394c0f",
+      "tooltips": "fa88cc7e8e92ab35e8646630"
+    },
+    "scene/dashboard-revenue": {
+      "scene": "a1e13f01466806d11383af02",
+      "svg": "2ed4aaa5f3d5a97e5bc21a07",
+      "canvas": "7bd1432025685b63faf8a81e",
+      "hits": "ed91cc931f80deb66d75571b",
+      "tooltips": "dee6342fd9dbf15249802c62"
+    },
+    "scene/dashboard-scatter": {
+      "scene": "78cf09db645b69d238f5eea2",
+      "svg": "cd252982db55e0de35512788",
+      "canvas": "df4ecdddda6a8922ebc59ee6",
+      "hits": "39929479ba8cc5c593fb021d",
+      "tooltips": "24590802676a306a2edb1897"
+    },
+    "scene/toggles-off": {
+      "scene": "96d36b0239b179310de03a6f",
+      "svg": "39c5845c0e304f7292345237",
+      "canvas": "71afffb9636e5bca79769de3",
+      "hits": "0f6d4ae46792dd8e4ed7bd8e",
+      "tooltips": "068ad522bb8883b81bbaf323"
+    },
+    "scene/margins": {
+      "scene": "8a74343bae69f9865eb0f14f",
+      "svg": "38c35adf507a72841fe48df9",
+      "canvas": "e1f1e1bd7bbd8ad1dbb518e3",
+      "hits": "8e5a43984c77e7cbe4cee5a8",
+      "tooltips": "23b2f47a342ae4f5084d4724"
+    },
+    "scene/empty": {
+      "scene": "922de269d4be22457b6712ac",
+      "svg": "7394ba2740784c95f7ee0424",
+      "canvas": "340ea2f5dcd91185c0846261",
+      "hits": "3b9d1e954248c40e1584a35f",
+      "tooltips": "4f53cda18c2baa0c0354bb5f"
+    },
+    "scene/spec-size": {
+      "scene": "8977d128721e43f6e0bf5e9d",
+      "svg": "cbfd10277b59082c3bb549f3",
+      "canvas": "6b267888f50b8952dcead723",
+      "hits": "6c146ee7e22c8efa3560994f",
+      "tooltips": "068ad522bb8883b81bbaf323"
+    },
+    "scene/y-nice-flags": {
+      "scene": "ba50a9527b34eda8c995a056",
+      "svg": "6b9eae579e10fa0244989dd0",
+      "canvas": "6f5e2fc600d64397e8e19f80",
+      "hits": "57a3e8b5110ff1edaeb2ae16",
+      "tooltips": "1dadb4824028e81a8c4bb796"
+    },
+    "scene/x-nice": {
+      "scene": "e01e42413f57f34876cbc6a3",
+      "svg": "02a1086980297ba23d17051f",
+      "canvas": "14e82a82dc5657c2dfccfd91",
+      "hits": "680721b4face64717165048b",
+      "tooltips": "7d3cd3da788e8b6b69d970bd"
+    },
+    "scene/single-point-line": {
+      "scene": "c1f7e9a9b83bdda1b6c5eba9",
+      "svg": "978bc300d9b8ab05e8fce615",
+      "canvas": "7c1ce626b49f0626c227a8c5",
+      "hits": "8b38bde2d6798bf853c13cc1",
+      "tooltips": "1b4d1ba168631f0885c268da"
+    },
+    "scene/flat-series": {
+      "scene": "e9c5e68b5ada326419134bc3",
+      "svg": "eb5a2e989ee84eb70778ae88",
+      "canvas": "19227e3a8a9269775818180e",
+      "hits": "0e105d1cb0c462b1ae7b51ed",
+      "tooltips": "9994cac820bd4c192d6ffc59"
+    },
+    "scene/numeric-strings": {
+      "scene": "f2c4d6ea3700c9ab2c2ad79c",
+      "svg": "5de4d396181fcfd51ab385a6",
+      "canvas": "a2932e73b3593109cb894e80",
+      "hits": "eec42eac3c4df5e952a6e877",
+      "tooltips": "89723e2860cd21e8768dca12"
+    },
+    "scene/accessor-fns": {
+      "scene": "71f4d7fb1a434aa059df761a",
+      "svg": "97d723a2e43f7c200ac62fbc",
+      "canvas": "a88410cb5f8b96c8473f28fd",
+      "hits": "0c66d43611d1e3fa0d1b550a",
+      "tooltips": "b1468a6d8a36282e47c8ddf0"
+    },
+    "scene/palette-cycle": {
+      "scene": "5da7ba70a46edf877260c746",
+      "svg": "eecb691f89b5cc2a50c4b7e8",
+      "canvas": "7852fe00db1b198d8fae081e",
+      "hits": "60498d249cd88633666c7d7e",
+      "tooltips": "56199abad42d0f8c6f22de8d"
+    },
+    "scene/mixed-legend-dupes": {
+      "scene": "5b9294b20930a222fcb27399",
+      "svg": "f20c8867ec6cce2871945af6",
+      "canvas": "a5d5a93f3b9c3b331cb204d7",
+      "hits": "93be445e41b05bc761a0fa78",
+      "tooltips": "2521f9f05a6fa9b74ae85b01"
+    },
+    "scene/function-spec": {
+      "scene": "ee13b3ffc05aef7fb92d4dd4",
+      "svg": "12ecdc8ec463bcbdb123233f",
+      "canvas": "9c495df96a40a3439fb7c89a",
+      "hits": "8d893b31ce77ae67cf8a7dd4",
+      "tooltips": "869bfb6dcba183df72b3541a"
+    },
+    "scene/hand-all-nodes": {
+      "scene": "cf7dcb606460cee18f2e3bd6",
+      "svg": "ca00cdec9781fb29957bcc38",
+      "canvas": "1a8dc93029f5ad50128c0cfa",
+      "hits": "647e268f2d9a1edb87beb202",
+      "tooltips": "3ef767c4f0df6fac510ae9ba"
+    },
+    "scene/hand-right-legend": {
+      "scene": "29f5046a8462153edfa52d03",
+      "svg": "1ba1fbe47d799d7e6ab67638",
+      "canvas": "2e74feb3e46a3fe9bf2f89d0",
+      "hits": "f671f34a64ec7860e4416539",
+      "tooltips": "4f53cda18c2baa0c0354bb5f"
+    },
+    "scene/hand-colorbar-positive": {
+      "scene": "bc9fb3df75bee71ad19982a6",
+      "svg": "881de9a8a432f071f04babdd",
+      "canvas": "6acb0c137b5770b05abb5eec",
+      "hits": "f671f34a64ec7860e4416539",
+      "tooltips": "4f53cda18c2baa0c0354bb5f"
+    },
+    "scene/hand-polar-chrome": {
+      "scene": "a683160afab1ba8cbcf09e32",
+      "svg": "61b6a8f55e4085d870f30a45",
+      "canvas": "76bdb0b724426b9ddb999c89",
+      "hits": "f671f34a64ec7860e4416539",
+      "tooltips": "4f53cda18c2baa0c0354bb5f"
+    },
+    "mount/time-svg": {
+      "dom": "5f5748eedeb2ca7ed1c6178a",
+      "events": "3cbb657bf4d686921f17314b"
+    },
+    "mount/time-chrome-svg": {
+      "dom": "8556107c0fea4e0edcb355cc",
+      "events": "921c136fcb9be930f1c8e23e"
+    },
+    "mount/time-static-svg": {
+      "dom": "a0a00569ba73d9fda7b5910c",
+      "events": "2b11a1bbb07518e4dbd5550b"
+    },
+    "mount/basic-mixed-svg": {
+      "dom": "01e08dcff1e2657da9c0c4fa",
+      "events": "5862f14fda0d839a31fb22ca"
+    },
+    "mount/stacked-svg": {
+      "dom": "6ca9a6487c58fcb022c2631e",
+      "events": "e09259b36b51ad6b87c4afe2"
+    },
+    "mount/area-points-svg": {
+      "dom": "3bf23dfecf266875aadb10ba",
+      "events": "e4378df4c28e873c6864c726"
+    },
+    "mount/plugin-lollipop-svg": {
+      "dom": "b23b5cef7145aae5a8ddcb98",
+      "events": "90242dae843e6f6563a945f0"
+    },
+    "mount/plugin-band-probe-svg": {
+      "dom": "77ba128e0b3bedb8463eb83e",
+      "events": "222ec1f38432084dd22313a3"
+    },
+    "mount/plugin-annotations-svg": {
+      "dom": "11306cc3f0bc9852cef5f1cb",
+      "events": "0ea27d82ad28d6fd76822bb6"
+    },
+    "mount/dense-128-svg": {
+      "dom": "aadf1083491a24f67c31a6e1",
+      "events": "8dd6d6f0b648d3c9d234312d"
+    },
+    "mount/hidden-series-svg": {
+      "dom": "cd616ad18d236f3bd38c03f5",
+      "events": "4f6a47f61bee6161a16311bc"
+    },
+    "mount/curves-svg": {
+      "dom": "2dfa45d6b5874354da26d06c",
+      "events": "215a75912d0d26afb58e7935"
+    },
+    "mount/rule-x-svg": {
+      "dom": "1eaa01be81df1c3c9cb44b4c",
+      "events": "f18baf1ce8dfb898b9999739"
+    },
+    "mount/typed-categories-svg": {
+      "dom": "c5c260576bc84f5867c668a2",
+      "events": "4a0db0f5db25e8e1af053e0b"
+    },
+    "mount/heatmap-basic-svg": {
+      "dom": "9a3f034c26a7fda34133d1d8",
+      "events": "9257d0d12c14d053272606cd"
+    },
+    "mount/heatmap-dashboard-svg": {
+      "dom": "f60a994706fed019a0e29bdf",
+      "events": "9d2db855099e319be1fcc908"
+    },
+    "mount/bars-negative-svg": {
+      "dom": "32b769e4e2e26cd75e7d99c4",
+      "events": "332875725dc76cb8e1dffffd"
+    },
+    "mount/bars-numeric-svg": {
+      "dom": "9500a6c7a1b0270870a62b3d",
+      "events": "4b47055f9ec9594b0cb41347"
+    },
+    "mount/histogram-fade-svg": {
+      "dom": "34f607085ad50b951071690c",
+      "events": "65a5ca2e973c100156054113"
+    },
+    "mount/pie-empty-svg": {
+      "dom": "db8f541651fbcc34d6c67050",
+      "events": "0aa845ecd20144eaa8ad405b"
+    },
+    "mount/pie-dashboard-svg": {
+      "dom": "86e23ded65ce3b8d6bb393ff",
+      "events": "b401762454642256d15840a4"
+    },
+    "mount/radar-multi-svg": {
+      "dom": "67e00d738825f41da92cc7bc",
+      "events": "b994ccae61f97f8fda83f746"
+    },
+    "mount/radar-dashboard-svg": {
+      "dom": "c6efbee7d0a1d3177ae5d271",
+      "events": "ee5de7881afc610457c49810"
+    },
+    "mount/log-y-svg": {
+      "dom": "8914eb3e56377db10a61fb70",
+      "events": "09cf24baac03d0cfb107ead9"
+    },
+    "mount/theme-light-svg": {
+      "dom": "2b5482007ac8329088d7e02f",
+      "events": "2bd52e2b345b0181f062aaca"
+    },
+    "mount/theme-custom-svg": {
+      "dom": "317479b7e68194b7d1ba2115",
+      "events": "bd0161f60bf17fc3343c5150"
+    },
+    "mount/dashboard-scatter-svg": {
+      "dom": "1714ebe612e22c6495103453",
+      "events": "09c6246037af237d97947ec0"
+    },
+    "mount/toggles-off-svg": {
+      "dom": "ac9c60149ee8952075f1363d",
+      "events": "592ace0a1fbf88650f0413ca"
+    },
+    "mount/single-point-line-svg": {
+      "dom": "a1f61e1445cd1661f1aca794",
+      "events": "42a491355c770685c0310229"
+    },
+    "mount/time-canvas": {
+      "dom": "145756e8f4e1cb762243c845",
+      "events": "3cbb657bf4d686921f17314b"
+    },
+    "mount/time-chrome-canvas": {
+      "dom": "3a032e99682c0d38619cf6cc",
+      "events": "921c136fcb9be930f1c8e23e"
+    },
+    "mount/time-static-canvas": {
+      "dom": "5503be61447fb44facb87e57",
+      "events": "2b11a1bbb07518e4dbd5550b"
+    },
+    "mount/basic-mixed-canvas": {
+      "dom": "88c1de16610932a74ad6e07e",
+      "events": "5ba69c79443cb92230dcd465"
+    },
+    "mount/stacked-canvas": {
+      "dom": "4c4a734c1ca79b12bef0b3a0",
+      "events": "0ce65ff5b449042b5ea28dac"
+    },
+    "mount/area-points-canvas": {
+      "dom": "ab53515f31c08e2f8281b4ac",
+      "events": "66b7b0b1e79074145f7adeec"
+    },
+    "mount/plugin-lollipop-canvas": {
+      "dom": "7ae13f99429664b8b13ddb68",
+      "events": "1ff7bf9c97c8b5551d92bc68"
+    },
+    "mount/plugin-band-probe-canvas": {
+      "dom": "78e7a65bda8873e3c5628507",
+      "events": "3ba2261d8b6679ca9c00ce16"
+    },
+    "mount/plugin-annotations-canvas": {
+      "dom": "0a3d42bb7e94102d536513b5",
+      "events": "a2320b068b9d11a2149599d9"
+    },
+    "mount/dense-128-canvas": {
+      "dom": "65592609bca33db5a9dbbc6c",
+      "events": "5bd68ea3cfdfb25f4be30bbb"
+    },
+    "mount/hidden-series-canvas": {
+      "dom": "960d158e053834f3bc3f08df",
+      "events": "89b28ee21eccc14ab0d98283"
+    },
+    "mount/curves-canvas": {
+      "dom": "18a97d0fe83115cc86389878",
+      "events": "860b182878c12f35718bd655"
+    },
+    "mount/rule-x-canvas": {
+      "dom": "c650d42424212cf9f0952645",
+      "events": "2815b8c4ad9da40fb9525ec1"
+    },
+    "mount/typed-categories-canvas": {
+      "dom": "a1fa687cbc41a26f11732221",
+      "events": "112d43d20ac71b6d27ff5043"
+    },
+    "mount/heatmap-basic-canvas": {
+      "dom": "d8810dc91edaf9016382f841",
+      "events": "9257d0d12c14d053272606cd"
+    },
+    "mount/heatmap-dashboard-canvas": {
+      "dom": "f08e508a6e6422a1da5afea5",
+      "events": "9d2db855099e319be1fcc908"
+    },
+    "mount/bars-negative-canvas": {
+      "dom": "6698ffd7e9ddbf41f4db3d90",
+      "events": "58c737b9ceecf2c00dde62e2"
+    },
+    "mount/bars-numeric-canvas": {
+      "dom": "7bcf399d4efa27a4eac0647c",
+      "events": "5c6b427b179fec8d9dc97b1a"
+    },
+    "mount/histogram-fade-canvas": {
+      "dom": "100321bcec2764e45cf7024e",
+      "events": "65a5ca2e973c100156054113"
+    },
+    "mount/pie-empty-canvas": {
+      "dom": "335ae9d151a6f48f6f377be5",
+      "events": "0aa845ecd20144eaa8ad405b"
+    },
+    "mount/pie-dashboard-canvas": {
+      "dom": "0e3f1da010295cf6efefd11e",
+      "events": "b401762454642256d15840a4"
+    },
+    "mount/radar-multi-canvas": {
+      "dom": "79008499646e8cf0395722fb",
+      "events": "b994ccae61f97f8fda83f746"
+    },
+    "mount/radar-dashboard-canvas": {
+      "dom": "33179450aef3523dcc37cf67",
+      "events": "ee5de7881afc610457c49810"
+    },
+    "mount/log-y-canvas": {
+      "dom": "dc6d304c6d8c32e1383522dd",
+      "events": "a992cc29278a0beb9589ddb2"
+    },
+    "mount/theme-light-canvas": {
+      "dom": "d0afb5ff4c721a1cbbbc28f5",
+      "events": "43d47915af3b766495a326b0"
+    },
+    "mount/theme-custom-canvas": {
+      "dom": "8206dccd5f565bb4d37dc076",
+      "events": "c29f6dd99bcb53cbd89a06ea"
+    },
+    "mount/dashboard-scatter-canvas": {
+      "dom": "bfdc164e063d00a7c97cd3c2",
+      "events": "09c6246037af237d97947ec0"
+    },
+    "mount/toggles-off-canvas": {
+      "dom": "9b868c9d09966e936cf6e1df",
+      "events": "592ace0a1fbf88650f0413ca"
+    },
+    "mount/single-point-line-canvas": {
+      "dom": "df7c1a3bda0fd39751338d99",
+      "events": "dc214da03c8c98dffa536bbf"
+    },
+    "mount/auto-ids": {
+      "dom": "16f77ac09a11c84fc0e02b4f",
+      "events": "4f53cda18c2baa0c0354bb5f"
+    }
+  }
+}

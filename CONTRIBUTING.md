@@ -123,6 +123,7 @@ add a subpath:
 | TypeScript strict check | Public types, unused code, and cross-module contracts |
 | Widget smoke test | Basic DOM integration and public widget behavior |
 | Native chart tests | Scales, composition, mark/plugin boundaries, color semantics, renderer parity, and hit testing |
+| Native split parity | Byte-exact scene, SVG, Canvas, hit-test, mounted-DOM, and validation snapshots, plus the 700-line module ceiling for `src/chart/compile` and `src/chart/render` |
 | Data/time/study tests | Async races, gapped sessions, teardown, and incremental indicators |
 | React adapter tests | Exact series props, measured sizing, immutable handles, lifecycle, and React 17/18 types |
 | Build-watch test | Type-only and hand-authored declaration changes rebuild without restarting the watcher |
