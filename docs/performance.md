@@ -256,15 +256,20 @@ The React "React LineChart" scenario budget was raised from 52 KiB to 53 KiB
 when W1B-24 (React and docs correctness) merged after the wave 1B integration.
 On its own branch the adapter changes fit the old 37 KiB budget with about
 0.5 KiB to spare, but the integrated 52 KiB budget kept only 566 bytes of
-headroom over the merged `/chart` runtime, and W1B-24 adds 875 bytes gzip to
-the scenario (52,682 to 53,557 bytes on the merged tree): stable callback
+headroom over the merged `/chart` runtime, and W1B-24 adds about 0.9 KiB gzip
+to the scenario (about 51.4 to 52.3 KiB on the merged tree): stable callback
 trampolines and the structural JSX memo key (so inline props and fresh JSX
 children stop recompiling), `viewportGroup`/`syncId` registration for
 synchronized dashboards, and the `ResponsiveContainer` render-prop and
-wrapper-component path. The `/react` artifact stays well inside its 10 KiB
-budget (7.35 KiB). 53 KiB keeps about 0.7 KiB of headroom so the next growth
-fails loudly; the per-mark tree shaking planned in wave 2 (W2-13) is expected
-to win the shared runtime back.
+wrapper-component path. The native legend fix merged alongside it routes the
+legend's "+N more" summary through the i18n runtime, which the static compile
+path now carries, adding about 0.2 KiB more (about 52.5 KiB in total). The
+`/react` artifact stays well inside its 10 KiB budget (about 7.4 KiB). 53 KiB
+keeps about 0.5 KiB of headroom so the next growth fails loudly; the per-mark
+tree shaking planned in wave 2 (W2-13) is expected to win the shared runtime
+back. The same i18n cost leaves the native "Static line SVG" scenario with
+under 0.1 KiB of its 33 KiB budget, so the next change to the static compile
+path will need a budget decision.
 
 ## Dense native charts
 
