@@ -109,12 +109,17 @@ The study kernels artifact budget grew from 5 to 10 KiB and the "Registry with
 built-ins" scenario from 3 to 7 KiB in wave 1B (W1B-14). Session-anchored VWAP
 needs the shared DST-aware time core (`src/util/time/zone.ts` plus the Intl
 cache, about 2.3 KiB gzip) instead of UTC-day arithmetic; the kernels gained
-gap handling, source selection, offsets and the O(n) rolling moments (about
-1.2 KiB); and the registry now carries each built-in's input declarations,
-input validation with guidance, exact name resolution, search and the pane
-value formatter (about 2 KiB). The catalogue is declared in one pure
-expression and the time core's module state is annotated pure, so the
-"Single kernel" scenario still ships well under its 1 KiB budget.
+gap handling, source selection, offsets and O(n) rolling moments that stay
+exact through bad prints and price-level changes (about 1.5 KiB); and the
+registry now carries each built-in's input declarations, input validation
+with guidance, exact name resolution and the pane value formatter (about
+2.1 KiB). Keyword search is the separate `searchStudies()` export, so the
+widget does not ship it. The catalogue is declared in one pure expression and
+the time core's module state is annotated pure, so the "Single kernel"
+scenario still ships well under its 1 KiB budget. In the root widget artifact
+the same work adds about 6.2 KiB gzip (62.7 to 68.9 KiB, inside the existing
+72 KiB budget): 2.6 KiB is the time core, which other wave 1B packages also
+pull in, and about 3.5 KiB is the kernels and registry.
 
 ## Dense native charts
 

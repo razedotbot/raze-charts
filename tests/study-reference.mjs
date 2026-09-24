@@ -365,6 +365,15 @@ await test("MACD, Bollinger and moving averages honour their inputs (names, alia
   const bbRef = studies.bollinger(closes, 20, 3);
   assert.deepEqual(wide.series[1].values, bbRef.upper, "Bollinger multiplier input");
   assert.deepEqual(bb.compute(bars, { length: 20, in_1: 1.5 }).series[2].values, studies.bollinger(closes, 20, 1.5).lower);
+  assert.deepEqual(bb.compute(bars, { length: 20, StdDev: 2.5 }).series[1].values, studies.bollinger(closes, 20, 2.5).upper, "TradingView's StdDev title");
+  assert.deepEqual(bb.compute(bars, { length: 20, multiplier: 1.5 }).series[1].values, studies.bollinger(closes, 20, 1.5).upper, "multiplier alias");
+  assert.deepEqual(definition("SMA").compute(bars, { length: 9, period: 30 }), studies.sma(closes, 30), "period alias");
+  assert.deepEqual(definition("EMA").compute(bars, { length: 9, Length: 12, len: 14 }).slice(-3), studies.ema(closes, 14).slice(-3), "title and len alias");
+  assert.deepEqual(
+    definition("VWAP").compute(bars, { "Anchor Period": "week" }),
+    studies.vwap(bars, { anchor: "week" }),
+    "VWAP anchor by its title",
+  );
   const shifted = bb.compute(bars, { length: 20, offset: 3 });
   assert.deepEqual(shifted.series[0].values.slice(3), studies.sma(closes, 20).slice(0, -3), "offset shifts the plot right");
   assert.deepEqual(shifted.series[0].values.slice(0, 3), [null, null, null]);
@@ -398,13 +407,23 @@ await test("unknown or invalid built-in inputs warn with guidance instead of bei
   assert.equal(warnings.filter((w) => w.includes('"fastperiodz"')).length, 1, "each unknown key warns once");
   assert.match(warnings.find((w) => w.includes("fastperiodz")), /Supported inputs: fast \(in_0\), slow \(in_1\), signal \(in_2\), source \(in_3\)/);
   assert.ok(warnings.some((w) => /EMA input "source" expects one of open, high, low, close/.test(w)), warnings.join("\n"));
-  assert.ok(warnings.some((w) => w.includes('SMA has no input "in_7"')), warnings.join("\n"));
+  assert.ok(warnings.some((w) => w.includes('SMA input "in_7" is not supported')), warnings.join("\n"));
   assert.ok(warnings.some((w) => /Bollinger Bands input "mult" must be between/.test(w)), warnings.join("\n"));
   const silent = captureWarnings(() => {
     definition("EMA").compute(bars, { length: 9, color: "#fff" });
     definition("VWAP").compute(bars, { length: 14 });
+    definition("MACD").compute(bars, { length: 26, fast: 5, slow: 35 });
   });
   assert.deepEqual(silent, [], "the store's length/colour shorthand never warns");
+
+  // A fast length that is not below slow draws an inverted or flat MACD: say so with the effective values.
+  const inverted = captureWarnings(() => definition("MACD").compute(bars, { length: 10 }));
+  assert.ok(
+    inverted.some((w) => /MACD input "fast" is 12 but slow is 10 \(the length shorthand sets slow\).*Pass a fast length below slow/.test(w)),
+    inverted.join("\n"),
+  );
+  const flat = captureWarnings(() => definition("MACD").compute(bars, { length: 26, in_0: 9, in_1: 9 }));
+  assert.ok(flat.some((w) => w.includes('MACD input "fast" is 9 but slow is 9')), flat.join("\n"));
 });
 
 await test("createStudy name resolution is exact: unsupported TradingView names reject", () => {
@@ -446,11 +465,14 @@ await test("createStudy name resolution is exact: unsupported TradingView names 
   assert.ok(store.add({ name: "Moving Average Exponential", length: 5 }));
   store.destroy();
 
-  // Keyword matching still powers the Indicators search.
-  assert.deepEqual(registry.search("exponential").map((d) => d.name), ["EMA"]);
-  assert.deepEqual(registry.search("mov").map((d) => d.name).slice(0, 3), ["EMA", "SMA", "MACD"]);
-  assert.equal(registry.search("band")[0].name, "Bollinger Bands");
-  assert.equal(registry.search("").length, registry.list().length);
+  // Keyword matching still powers pickers, through searchStudies() only.
+  const search = (query) => studies.searchStudies(registry.list(), query).map((d) => d.name);
+  assert.deepEqual(search("exponential"), ["EMA"]);
+  assert.deepEqual(search("mov").slice(0, 3), ["EMA", "SMA", "MACD"]);
+  assert.equal(search("band")[0], "Bollinger Bands");
+  assert.deepEqual(search("momentum"), ["RSI", "MACD"]);
+  assert.equal(search("").length, registry.list().length);
+  assert.equal(registry.search, undefined, "the widget registry does not ship keyword search");
 });
 
 await test("VWAP anchors to the symbol session and time zone (Sydney, New York, Chicago, UTC)", () => {
@@ -563,6 +585,107 @@ await test("pane values keep significant digits on sub-cent symbols; RSI keeps o
   assert.equal(definition("RSI").formatValue(48.44), "48.4");
 });
 
+/** Corrected two-pass mean and population deviation of every full window: the accurate reference. */
+function refWindows(values, length) {
+  const mean = values.map(() => null);
+  const dev = values.map(() => null);
+  for (let i = length - 1; i < values.length; i++) {
+    let sum = 0;
+    for (let j = i - length + 1; j <= i; j++) sum += values[j];
+    const m = sum / length;
+    let squares = 0;
+    let residual = 0;
+    for (let j = i - length + 1; j <= i; j++) {
+      const d = values[j] - m;
+      squares += d * d;
+      residual += d;
+    }
+    mean[i] = m + residual / length;
+    dev[i] = Math.sqrt(Math.max(0, squares - (residual * residual) / length) / length);
+  }
+  return { mean, dev };
+}
+
+/**
+ * Every sample within `tolerance` of the reference relative to that sample's
+ * own magnitude (no floor of 1), and exactly 0 where the reference is 0.
+ */
+function assertRelative(actual, expected, label, tolerance) {
+  assert.equal(actual.length, expected.length, `${label}: length`);
+  for (let i = 0; i < expected.length; i++) {
+    const a = actual[i];
+    const e = expected[i];
+    if (e == null || e === 0) {
+      if (a !== e) assert.fail(`${label}[${i}]: expected ${e}, got ${a}`);
+      continue;
+    }
+    const error = Math.abs(a - e) / Math.abs(e);
+    if (!(error <= tolerance)) {
+      assert.fail(`${label}[${i}]: ${a} vs reference ${e} (relative error ${error.toExponential(2)})`);
+    }
+  }
+}
+
+/** Stdev to 1e-9 of itself, the basis to 1e-12, and each band to 1e-9 of its width (plus the level's rounding). */
+function assertBands(values, length, label) {
+  const ref = refWindows(values, length);
+  assertRelative(studies.stdev(values, length), ref.dev, `${label} stdev(${length})`, 1e-9);
+  assertRelative(studies.sma(values, length), ref.mean, `${label} sma(${length})`, 1e-12);
+  const bands = studies.bollinger(values, length, 2);
+  assertRelative(bands.mid, ref.mean, `${label} basis(${length})`, 1e-12);
+  for (let i = length - 1; i < values.length; i++) {
+    for (const [band, sign] of [[bands.upper, 1], [bands.lower, -1]]) {
+      const expected = ref.mean[i] + sign * 2 * ref.dev[i];
+      const allowed = 1e-9 * 2 * ref.dev[i] + 4 * Number.EPSILON * Math.abs(expected);
+      if (!(Math.abs(band[i] - expected) <= allowed)) {
+        assert.fail(`${label} ${sign > 0 ? "upper" : "lower"}(${length})[${i}]: ${band[i]} vs reference ${expected}`);
+      }
+    }
+  }
+}
+
+/** A price on an exact cent grid moving by at most two cents a bar. */
+function centTicks(count, start, seed) {
+  let state = seed;
+  const random = () => ((state = (state * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  let cents = Math.round(start * 100);
+  return Array.from({ length: count }, () => (cents += Math.round((random() - 0.5) * 4)) / 100);
+}
+
+await test("rolling stdev and bands stay exact through cancellation: price level, bad prints, level changes", () => {
+  // BTC-like: 60 000 with cent ticks. The spread is ~1e-7 of the level; L=2
+  // windows are often exactly flat and must read exactly 0.
+  const btc = centTicks(20_000, 60_000, 5);
+  assertBands(btc, 20, "cent ticks at 60k");
+  assertBands(btc, 2, "cent ticks at 60k");
+
+  // One bad print (1e9, and a 10000x spike) in a 50k series: the bands are
+  // exact while it is in the window and the moment it leaves.
+  const noise = Array.from({ length: 50_000 }, (_, i) => 50_000 + ((i * 7919) % 500) / 100);
+  const spike = noise.map((value, i) => (i === 25_000 ? 1e9 : value));
+  assertBands(spike, 20, "1e9 spike");
+  assertBands(noise.map((value, i) => (i === 25_000 ? value * 10_000 : value)), 20, "10000x spike");
+  const at = 25_000 + 20;
+  assert.ok(studies.stdev(spike, 20)[at] > 1, "the deviation recovers as soon as the spike leaves the window");
+
+  // Recurring spikes on a price near 1: the plain SMA stays exact between them.
+  const sawtooth = Array.from({ length: 6_000 }, (_, i) => (i % 97 === 0 ? 1e7 : 1 + ((i * 31) % 1000) / 1e6));
+  assertBands(sawtooth, 20, "recurring spikes");
+
+  // A 1000:1 level change (a rebase or a unit change mid-history).
+  const rebase = Array.from({ length: 6_000 }, (_, i) => (i < 3_000 ? 60_000 : 60) + ((i * 7919) % 1000) / (i < 3_000 ? 20 : 20_000));
+  assertBands(rebase, 20, "1000:1 rebase");
+  assertBands(rebase, 200, "1000:1 rebase");
+
+  // A volatile stretch followed by a flat one: exactly zero spread, bands on the basis.
+  const settle = [...seededWalk(300, 1_000, 50, 4), ...new Array(60).fill(1_000.1)];
+  const settled = studies.bollinger(settle, 20, 2);
+  for (let i = 300 + 19; i < settle.length; i++) {
+    assert.equal(studies.stdev(settle, 20)[i], 0, `flat window ${i} has zero deviation`);
+    assert.equal(settled.upper[i], settled.mid[i], `flat window ${i} upper band sits on the basis`);
+  }
+});
+
 await test("rolling stdev is O(n): matches the naive definition and is window-length independent", () => {
   // 1e-9 relative to the naive two-pass result, far from zero and on a long walk.
   const offset = seededWalk(5_000, 50_000, 25, 3);
@@ -573,7 +696,7 @@ await test("rolling stdev is O(n): matches the naive definition and is window-le
     const window = long.slice(i - 49, i + 1);
     const mean = window.reduce((a, b) => a + b, 0) / 50;
     const naive = Math.sqrt(window.reduce((acc, x) => acc + (x - mean) ** 2, 0) / 50);
-    assert.ok(Math.abs(fast[i] - naive) <= 1e-9 * Math.max(1, naive), `stdev[${i}] ${fast[i]} vs ${naive}`);
+    assert.ok(Math.abs(fast[i] - naive) <= 1e-9 * naive, `stdev[${i}] ${fast[i]} vs ${naive}`);
   }
 
   const big = Array.from({ length: 100_000 }, (_, i) => 50_000 + Math.sin(i / 10) * 100 + (i % 13));

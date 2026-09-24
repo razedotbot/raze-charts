@@ -31,7 +31,7 @@ export interface StudyDefinition {
   name: string;
   /** Exact-match lookup aliases (e.g. "moving average exponential"). */
   aliases?: string[];
-  /** Search terms for pickers (`StudyRegistry.search`); never used to resolve createStudy()/load() names. */
+  /** Search terms for pickers (`searchStudies()` from `@razedotbot/charts/studies`); never used to resolve createStudy()/load() names. */
   keywords?: string[];
   /** "overlay" plots on the price pane; "pane" renders in its own sub-pane. */
   pane: "overlay" | "pane";

@@ -926,7 +926,6 @@ class StudyRegistry
   list(): StudyDefinition[]
   register(def: StudyDefinition): void
   resolve(name: string): StudyDefinition | null
-  search(query: string): StudyDefinition[]
   unknownStudyMessage(name: string): string
 interface StudySeries
   color?: string | undefined

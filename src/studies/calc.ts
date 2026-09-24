@@ -60,16 +60,19 @@ function num(value: unknown): number {
  * not plot a flat zero line.
  */
 export function sourceValue(bar: Bar, source: StudySource = "close"): number {
+  const high = num(bar.high);
+  const low = num(bar.low);
+  const close = num(bar.close);
   switch (source) {
     case "open": return num(bar.open);
-    case "high": return num(bar.high);
-    case "low": return num(bar.low);
-    case "hl2": return (num(bar.high) + num(bar.low)) / 2;
-    case "hlc3": return (num(bar.high) + num(bar.low) + num(bar.close)) / 3;
-    case "ohlc4": return (num(bar.open) + num(bar.high) + num(bar.low) + num(bar.close)) / 4;
-    case "hlcc4": return (num(bar.high) + num(bar.low) + 2 * num(bar.close)) / 4;
+    case "high": return high;
+    case "low": return low;
+    case "hl2": return (high + low) / 2;
+    case "hlc3": return (high + low + close) / 3;
+    case "ohlc4": return (num(bar.open) + high + low + close) / 4;
+    case "hlcc4": return (high + low + 2 * close) / 4;
     case "volume": return num(bar.volume);
-    default: return num(bar.close);
+    default: return close;
   }
 }
 
@@ -114,14 +117,37 @@ interface Moments {
 }
 
 /**
+ * M2 below this fraction of the rounding budget means the sliding update has
+ * cancelled (a spike or an old price level just left the window): recompute.
+ * Rounding since the last exact pass is a few ulps of the budget, so M2 stays
+ * within ~1e-10 relative of the two-pass value. Ordinary series keep
+ * budget/M2 below ~1e3 between resyncs, so this only fires on real cancellation.
+ */
+const CANCELLATION = 1e-5;
+
+/** Rounding error of `total + value` (Neumaier), to carry alongside the sum. */
+function roundoff(total: number, value: number): number {
+  const next = total + value;
+  return Math.abs(total) >= Math.abs(value) ? total - next + value : value - next + total;
+}
+
+/**
  * Rolling mean and population standard deviation of every full window, in
  * one O(n) pass over gap-free samples.
  *
- * The window sum slides by add/subtract and the sum of squared deviations by
- * the exact identity M2' = M2 + (x - y)(x - mean' + y - mean). Both are
- * recomputed from scratch (the deviations with Welford's method) every few
- * windows, which bounds rounding error independently of the history length at
- * an amortised cost of at most 1/8 of a pass; a flat window reads exactly 0.
+ * The mean slides a Neumaier-compensated window sum, adding the new sample
+ * and subtracting the old one separately so a spike entering and leaving
+ * cancels exactly; SMA and the Bollinger basis share it bit for bit.
+ *
+ * The spread slides the sum of squared deviations by the exact identity
+ * M2' = M2 + (x - y)(x - mean' + y - mean) on samples taken relative to a
+ * shift (the window's first sample at the last exact pass), so a level far
+ * from zero (BTC at 60 000 with cent ticks) does not cancel, while `budget`
+ * bounds the rounding those updates made. The window is recomputed exactly
+ * (corrected two-pass) when M2 cancels against that budget, which recovers
+ * the bands the moment a bad print or an old price level leaves the window,
+ * and every max(256, 8·len) windows regardless, at an amortised cost of at
+ * most 1/4 of a pass. A flat window reads exactly 0.
  */
 function rollingMoments(xs: number[], len: number, spread: "none" | "dev" | number): Moments {
   const n = xs.length;
@@ -131,44 +157,68 @@ function rollingMoments(xs: number[], len: number, spread: "none" | "dev" | numb
   const dev = spread === "dev" ? nulls(n) : null;
   const upper = typeof spread === "number" ? nulls(n) : null;
   const lower = typeof spread === "number" ? nulls(n) : null;
-  if (n < len) return { mean, dev, upper, lower };
+  let total = 0; // Σx over the window…
+  let carry = 0; // …and its Neumaier compensation
   const resync = Math.max(256, len * 8);
-  let sum = 0;
+  let shift = 0;
+  let sum = 0; // Σ(x - shift) over the window…
+  let sumCarry = 0; // …and its compensation
+  let m = 0; // window mean - shift
   let m2 = 0;
-  let previousMean = 0;
+  let budget = 0;
   let sinceExact = resync;
-  for (let i = 0; i < len - 1; i++) sum += xs[i]!;
+  for (let i = 0; i < len - 1 && i < n; i++) {
+    carry += roundoff(total, xs[i]!);
+    total += xs[i]!;
+  }
+  // Branch-free window: add the entering sample before the outputs and
+  // subtract the leaving one after them (keeps this loop as fast as a plain sum).
   for (let i = len - 1; i < n; i++) {
     const x = xs[i]!;
-    let m: number;
-    if (sinceExact >= resync) {
-      sum = 0;
-      let wm = 0;
-      m2 = 0;
-      for (let j = i - len + 1, count = 1; j <= i; j++, count++) {
-        const v = xs[j]!;
-        sum += v;
-        const delta = v - wm;
-        wm += delta / count;
-        m2 += delta * (v - wm);
-      }
-      m = sum / len;
-      sinceExact = 0;
-    } else {
-      const y = i >= len ? xs[i - len]! : 0;
-      sum += x - y;
-      m = sum / len;
-      if (withDev) m2 += (x - y) * (x - m + y - previousMean);
+    carry += roundoff(total, x);
+    total += x;
+    const basis = (total + carry) / len;
+    mean[i] = basis;
+    const leaving = xs[i - len + 1]!;
+    carry += roundoff(total, -leaving);
+    total -= leaving;
+    if (!withDev) continue;
+    if (sinceExact < resync) {
+      const xv = x - shift;
+      const yv = xs[i - len]! - shift;
+      const step = xv - yv;
+      const previous = m;
+      sumCarry += roundoff(sum, step);
+      sum += step;
+      m = (sum + sumCarry) / len;
+      m2 += step * (xv - m + yv - previous);
+      const size = Math.abs(xv) + Math.abs(yv);
+      budget += size * (size + Math.abs(m) + Math.abs(previous));
       sinceExact++;
     }
-    mean[i] = m;
-    if (!withDev) continue;
-    previousMean = m;
-    const d = Math.sqrt(m2 > 0 ? m2 / len : 0);
+    if (sinceExact >= resync || m2 < budget * CANCELLATION) {
+      const first = i - len + 1;
+      shift = xs[first]!;
+      sum = 0;
+      sumCarry = 0;
+      for (let j = first + 1; j <= i; j++) sum += xs[j]! - shift;
+      m = sum / len;
+      let squares = 0;
+      let residual = 0;
+      for (let j = first; j <= i; j++) {
+        const d = xs[j]! - shift - m;
+        squares += d * d;
+        residual += d;
+      }
+      m2 = Math.max(0, squares - (residual * residual) / len);
+      budget = 0;
+      sinceExact = 0;
+    }
+    const d = Math.sqrt(m2 / len);
     if (dev) dev[i] = d;
     if (upper && lower) {
-      upper[i] = m + k * d;
-      lower[i] = m - k * d;
+      upper[i] = basis + k * d;
+      lower[i] = basis - k * d;
     }
   }
   return { mean, dev, upper, lower };
@@ -176,7 +226,7 @@ function rollingMoments(xs: number[], len: number, spread: "none" | "dev" | numb
 
 // ── Moving averages ─────────────────────────────────────────────────────────
 
-/** Simple moving average: O(n) for any window, resynchronised so it never drifts. */
+/** Simple moving average: O(n) for any window; the compensated window sum never drifts, even past a bad print. */
 export function sma(closes: number[], length: number): (number | null)[] {
   const len = period(length);
   if (!len) return nulls(closes.length);

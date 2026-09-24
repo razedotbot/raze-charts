@@ -7,7 +7,7 @@
 // name or one of its aliases (case-insensitively), never a keyword substring,
 // so an unsupported TradingView study ("Double Exponential Moving Average")
 // fails loudly instead of drawing a different indicator. Keywords only feed
-// search() for the Indicators UI.
+// searchStudies() for pickers.
 
 import type {
   Bar,
@@ -71,10 +71,12 @@ export function formatStudyValue(value: number, digits = 4): string {
 export type StudyInputValueMap = Record<string, number | string | boolean>;
 
 interface BuiltinInputs {
-  /** Declaration order is TradingView's `in_N` order. */
+  /**
+   * Declaration order is TradingView's `in_N` order. Besides its id, each
+   * input accepts its title ("Fast Length", `slowLength`, `signal_smoothing`)
+   * and the common spellings in INPUT_ALIASES.
+   */
   readonly schema: StudyInputSchema;
-  /** Extra spellings per input id (compared without case, spaces or punctuation). */
-  readonly aliases: Readonly<Record<string, readonly string[]>>;
   /** The input the store's `length` shorthand sets, if any. */
   readonly lengthInput: string | null;
 }
@@ -84,6 +86,15 @@ const BUILTIN_INPUTS = new WeakMap<StudyDefinition, BuiltinInputs>();
 /** Keys every definition receives from the store or chrome; never "unknown". */
 const RESERVED_KEYS = new Set(["length", "color"]);
 
+/** Pine/TradingView spellings of built-in input ids, by `spelling()`. */
+const INPUT_ALIASES: Readonly<Record<string, string>> = {
+  src: "source",
+  len: "length",
+  period: "length",
+  multiplier: "mult",
+};
+
+/** Compare input keys without case, spaces or punctuation. */
 function spelling(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -93,8 +104,8 @@ const lengthInput = (title: string, value: number): StudyInput =>
 const sourceInput = (value: StudySource): StudyInput => ({ type: "source", title: "Source", default: value });
 const offsetInput: StudyInput = { type: "int", title: "Offset", default: 0, min: -500, max: 500, inLabel: false };
 
-function describeInputs(inputs: BuiltinInputs): string {
-  return Object.keys(inputs.schema).map((id, index) => `${id} (in_${index})`).join(", ");
+function warnInput(study: string, key: string, problem: string): void {
+  warnOnce(`[raze-charts] ${study} input "${key}" ${problem}`);
 }
 
 function coerce(
@@ -104,9 +115,7 @@ function coerce(
   raw: unknown,
 ): number | string | boolean | undefined {
   const reject = (expected: string): undefined => {
-    warnOnce(
-      `[raze-charts] ${study} input "${key}" expects ${expected}; got ${JSON.stringify(raw)}. Using ${JSON.stringify(input.default)}.`,
-    );
+    warnInput(study, key, `expects ${expected}; got ${JSON.stringify(raw)}. Using ${JSON.stringify(input.default)}.`);
     return undefined;
   };
   switch (input.type) {
@@ -120,7 +129,7 @@ function coerce(
       if (numeric < min || numeric > max) {
         const clamped = Math.min(max, Math.max(min, numeric));
         const range = max === Infinity ? `at least ${min}` : `between ${min} and ${max}`;
-        warnOnce(`[raze-charts] ${study} input "${key}" must be ${range}; ${value} is clamped to ${clamped}.`);
+        warnInput(study, key, `must be ${range}; ${value} is clamped to ${clamped}.`);
         return clamped;
       }
       return numeric;
@@ -143,22 +152,25 @@ function coerce(
 
 /**
  * Read a built-in's effective inputs from what createStudy()/the store passed.
- * Accepted keys: the input id, its aliases (`fastLength`, `Fast Length`, `src`,
- * `mult`, …) and TradingView's positional `in_0`…`in_N`. Precedence, lowest
- * first: defaults, the store's `length` shorthand, named keys, `in_N` keys.
- * Unknown keys and invalid values warn (once) instead of being ignored.
+ * Accepted keys: the input id, its title (`fastLength`, `Fast Length`), the
+ * INPUT_ALIASES spellings (`src`, `multiplier`) and TradingView's positional
+ * `in_0`…`in_N`. Precedence, lowest first: defaults, the store's `length`
+ * shorthand, named keys, `in_N` keys. Unknown keys and invalid values warn
+ * (once) instead of being ignored.
  */
 function readInputs(study: string, inputs: BuiltinInputs, raw: StudyInputs): StudyInputValueMap {
-  const ids = Object.keys(inputs.schema);
+  const { schema } = inputs;
+  const ids = Object.keys(schema);
   const values: StudyInputValueMap = {};
-  for (const id of ids) values[id] = inputs.schema[id]!.default;
   const names = new Map<string, string>();
+  for (const [alias, id] of Object.entries(INPUT_ALIASES)) if (id in schema) names.set(alias, id);
   for (const id of ids) {
+    values[id] = schema[id]!.default;
+    names.set(spelling(schema[id]!.title), id);
     names.set(spelling(id), id);
-    for (const alias of inputs.aliases[id] ?? []) names.set(spelling(alias), id);
   }
   const apply = (id: string, key: string, value: unknown): void => {
-    const next = coerce(study, key, inputs.schema[id]!, value);
+    const next = coerce(study, key, schema[id]!, value);
     if (next !== undefined) values[id] = next;
   };
 
@@ -169,7 +181,8 @@ function readInputs(study: string, inputs: BuiltinInputs, raw: StudyInputs): Stu
     const position = /^in_(\d+)$/.exec(key);
     const id = position ? ids[Number(position[1])] : names.get(spelling(key));
     if (!id) {
-      warnOnce(`[raze-charts] ${study} has no input "${key}"; it is ignored. Supported inputs: ${describeInputs(inputs)}.`);
+      const supported = ids.map((name, index) => `${name} (in_${index})`).join(", ");
+      warnInput(study, key, `is not supported and is ignored. Supported inputs: ${supported}.`);
       continue;
     }
     if (position) positional.push([id, key, value]);
@@ -220,21 +233,18 @@ const src = (values: StudyInputValueMap, id = "source"): StudySource => values[i
 
 // ── Built-in catalogue ──────────────────────────────────────────────────────
 
-const MA_ALIASES = { length: ["len", "period", "periods"], source: ["src"], offset: [] };
-
 // One pure IIFE keeps the catalogue tree-shakable for kernel-only imports.
 export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
   builtin(
     {
       name: "EMA",
       aliases: ["moving average exponential", "exponential moving average"],
-      keywords: ["exponential", "moving average"],
+      keywords: ["exponential"],
       pane: "overlay",
       defaults: { length: 9, color: "#f5a623" },
     },
     {
       schema: { length: lengthInput("Length", 9), source: sourceInput("close"), offset: offsetInput },
-      aliases: MA_ALIASES,
       lengthInput: "length",
     },
     (bars, v) => offsetSeries(ema(sourceValues(bars, src(v)), num(v, "length")), num(v, "offset")),
@@ -242,14 +252,13 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
   builtin(
     {
       name: "SMA",
-      aliases: ["ma", "moving average", "simple moving average", "moving average simple"],
-      keywords: ["simple moving", "moving average"],
+      aliases: ["ma", "moving average", "simple moving average"],
+      keywords: ["simple"],
       pane: "overlay",
       defaults: { length: 20, color: "#2962ff" },
     },
     {
       schema: { length: lengthInput("Length", 20), source: sourceInput("close"), offset: offsetInput },
-      aliases: MA_ALIASES,
       lengthInput: "length",
     },
     (bars, v) => offsetSeries(sma(sourceValues(bars, src(v)), num(v, "length")), num(v, "offset")),
@@ -258,7 +267,7 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
     {
       name: "RSI",
       aliases: ["relative strength index"],
-      keywords: ["relative strength", "oscillator", "momentum"],
+      keywords: ["oscillator", "momentum"],
       pane: "pane",
       defaults: { length: 14, color: "#7E57C2" },
       range: { min: 0, max: 100 },
@@ -271,7 +280,6 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
     },
     {
       schema: { length: lengthInput("Length", 14), source: sourceInput("close") },
-      aliases: { length: MA_ALIASES.length, source: MA_ALIASES.source },
       lengthInput: "length",
     },
     (bars, v) => rsi(sourceValues(bars, src(v)), num(v, "length")),
@@ -280,7 +288,7 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
     {
       name: "VWAP",
       aliases: ["volume weighted average price"],
-      keywords: ["vwap", "volume weighted"],
+      keywords: ["volume"],
       pane: "overlay",
       defaults: { color: "#e040fb" },
     },
@@ -295,7 +303,6 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
         source: sourceInput("hlc3"),
         offset: offsetInput,
       },
-      aliases: { anchor: ["anchor period", "anchorperiod", "period"], source: ["src"], offset: [] },
       lengthInput: null,
     },
     (bars, v, ctx) => {
@@ -323,8 +330,8 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
   builtin(
     {
       name: "Bollinger Bands",
-      aliases: ["bb", "bollinger"],
-      keywords: ["bollinger", "bands", "volatility"],
+      aliases: ["bb"],
+      keywords: ["volatility"],
       pane: "overlay",
       defaults: { length: 20, color: "#2962ff" },
     },
@@ -334,10 +341,6 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
         mult: { type: "float", title: "StdDev", default: 2, min: 0.001, max: 50, step: 0.5 },
         source: sourceInput("close"),
         offset: offsetInput,
-      },
-      aliases: {
-        ...MA_ALIASES,
-        mult: ["multiplier", "stddev", "std dev", "stdev", "deviation", "deviations", "stddevs"],
       },
       lengthInput: "length",
     },
@@ -356,8 +359,8 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
   builtin(
     {
       name: "MACD",
-      aliases: ["moving average convergence divergence", "moving average convergence/divergence"],
-      keywords: ["macd", "convergence", "divergence"],
+      aliases: ["moving average convergence divergence"],
+      keywords: ["momentum"],
       pane: "pane",
       // `length` is the slow EMA length (the store's length shorthand).
       defaults: { length: 26, color: "#2962ff" },
@@ -372,16 +375,20 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
         signal: lengthInput("Signal smoothing", 9),
         source: sourceInput("close"),
       },
-      aliases: {
-        fast: ["fast length", "fast period"],
-        slow: ["slow length", "slow period"],
-        signal: ["signal length", "signal smoothing", "signal period"],
-        source: ["src"],
-      },
       lengthInput: "slow",
     },
     (bars, v) => {
-      const result = macd(sourceValues(bars, src(v)), num(v, "fast"), num(v, "slow"), num(v, "signal"));
+      const fast = num(v, "fast");
+      const slow = num(v, "slow");
+      if (fast >= slow) {
+        warnInput(
+          "MACD",
+          "fast",
+          `is ${fast} but slow is ${slow} (the length shorthand sets slow), so the MACD line is inverted or flat. `
+            + "Pass a fast length below slow.",
+        );
+      }
+      const result = macd(sourceValues(bars, src(v)), fast, slow, num(v, "signal"));
       return {
         series: [
           { values: result.macd, style: "line", name: "MACD", color: "#2962ff" },
@@ -398,11 +405,34 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
 /** Lower-case, collapse whitespace, and drop a TradingView `@tv-basicstudies` id suffix. */
 function normaliseName(name: string): string {
   return String(name ?? "")
-    .trim()
     .toLowerCase()
-    .replace(/@tv-basicstudies(?:-\d+)?$/, "")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(/ ?@tv-basicstudies(-\d+)?$/, "");
+}
+
+/**
+ * Loose search for pickers such as an Indicators dialog: exact matches first,
+ * then name/alias prefixes, name/alias substrings and keywords, each in
+ * catalogue order. An empty query lists every definition. Pass
+ * `registry.list()`; this lives outside StudyRegistry so bundles that never
+ * search do not ship it.
+ */
+export function searchStudies(defs: readonly StudyDefinition[], query: string): StudyDefinition[] {
+  const q = normaliseName(query);
+  if (!q) return [...defs];
+  const ranked: { def: StudyDefinition; rank: number; order: number }[] = [];
+  defs.forEach((def, order) => {
+    const names = [def.name, ...(def.aliases ?? [])].map(normaliseName);
+    const keywords = (def.keywords ?? []).map(normaliseName).filter(Boolean);
+    let rank = -1;
+    if (names.includes(q)) rank = 0;
+    else if (names.some((n) => n.startsWith(q))) rank = 1;
+    else if (names.some((n) => n.includes(q))) rank = 2;
+    else if (keywords.some((k) => k.includes(q) || q.includes(k))) rank = 3;
+    if (rank >= 0) ranked.push({ def, rank, order });
+  });
+  return ranked.sort((a, b) => a.rank - b.rank || a.order - b.order).map((item) => item.def);
 }
 
 export class StudyRegistry {
@@ -435,41 +465,15 @@ export class StudyRegistry {
   resolve(name: string): StudyDefinition | null {
     const q = normaliseName(name);
     if (!q) return null;
-    for (const d of this.defs) {
-      if (normaliseName(d.name) === q) return d;
-    }
-    for (const d of this.defs) {
-      if ((d.aliases ?? []).some((a) => normaliseName(a) === q)) return d;
-    }
-    return null;
-  }
-
-  /**
-   * Loose search for pickers such as the Indicators dialog: exact matches
-   * first, then name/alias prefixes, name/alias substrings and keywords.
-   * An empty query lists every definition.
-   */
-  search(query: string): StudyDefinition[] {
-    const q = normaliseName(query);
-    if (!q) return this.list();
-    const ranked: { def: StudyDefinition; rank: number; order: number }[] = [];
-    this.defs.forEach((def, order) => {
-      const names = [def.name, ...(def.aliases ?? [])].map(normaliseName);
-      const keywords = (def.keywords ?? []).map(normaliseName).filter(Boolean);
-      let rank = -1;
-      if (names.includes(q)) rank = 0;
-      else if (names.some((n) => n.startsWith(q))) rank = 1;
-      else if (names.some((n) => n.includes(q))) rank = 2;
-      else if (keywords.some((k) => k.includes(q) || q.includes(k))) rank = 3;
-      if (rank >= 0) ranked.push({ def, rank, order });
-    });
-    return ranked.sort((a, b) => a.rank - b.rank || a.order - b.order).map((item) => item.def);
+    return this.defs.find((d) => normaliseName(d.name) === q)
+      ?? this.defs.find((d) => (d.aliases ?? []).some((a) => normaliseName(a) === q))
+      ?? null;
   }
 
   /** The error message for a name resolve() does not know, listing what is available. */
   unknownStudyMessage(name: string): string {
     const available = this.defs.map((d) => d.name).join(", ") || "none";
     return `[raze-charts] unknown study: ${name}. Available studies: ${available}. `
-      + "Names match a study's name or alias exactly; register other indicators through raze.custom_studies.";
+      + "Names match a study's name or alias exactly; add others through raze.custom_studies.";
   }
 }

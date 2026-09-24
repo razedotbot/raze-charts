@@ -7,6 +7,8 @@ type ChartWindow = Window & {
   __razeReady?: boolean;
   __razeChart?: {
     activeChart(): { createStudy(name: string, forceOverlay?: boolean, lock?: boolean, inputs?: Record<string, unknown>): Promise<unknown> };
+    save(): { studies: Record<string, unknown>[] } & Record<string, unknown>;
+    load(state: Record<string, unknown>): Promise<void>;
   };
   __drawnText?: string[];
 };
@@ -74,6 +76,30 @@ test.describe("study behaviour in the browser", () => {
     expect(tags.length, `crosshair tag drawn: ${texts.join(" | ")}`).toBeGreaterThan(0);
   });
 
+  test("RSI keeps one decimal in the legend and its pane's crosshair tag next to MACD", async ({ page }) => {
+    await recordCanvasText(page);
+    await openCase(page, "panes");
+    const canvas = page.locator(".raze-chart-root canvas").first();
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("canvas not laid out");
+    const before = (await drawnSince(page, 0)).length;
+    // The RSI pane sits between the price pane and the MACD pane (about 55-75% of the height).
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.64);
+    await page.waitForTimeout(250);
+    const texts = await drawnSince(page, before);
+    const label = texts.findIndex((text) => /^RSI\s?\d/.test(text));
+    const domText = await page.locator(".raze-chart-root").innerText();
+    const legendValue = label >= 0
+      ? texts[label + 1] ?? ""
+      : /RSI[^\n]*?(\d+\.\d+)/.exec(domText)?.[1] ?? "";
+    expect(legendValue, `RSI legend value in ${texts.join(" | ")}`).toMatch(/^\d{1,3}\.\d$/);
+    // The RSI pane's crosshair tag: a 0-100 value with exactly one decimal
+    // (legend values, which follow their "RSI14" label on every frame, excluded).
+    const tags = texts.filter((text, index) => !/^RSI\s?\d/.test(texts[index - 1] ?? "") && /^\d{1,3}\.\d$/.test(text));
+    expect(tags.length, `RSI crosshair tag drawn: ${texts.join(" | ")}`).toBeGreaterThan(0);
+    for (const tag of tags) expect(Number(tag)).toBeLessThanOrEqual(100);
+  });
+
   test("createStudy rejects TradingView names Raze does not implement", async ({ page }) => {
     await openCase(page, "dark");
     const outcome = await page.evaluate(async () => {
@@ -93,5 +119,21 @@ test.describe("study behaviour in the browser", () => {
     expect(outcome["Bollinger Bands %B"]).toMatch(/unknown study/);
     expect(outcome["Anchored VWAP"]).toMatch(/unknown study/);
     expect(outcome["Moving Average Exponential"]).toBe("created");
+
+    // load() resolves names the same way and rejects with the same guidance.
+    const loaded = await page.evaluate(async () => {
+      const widget = (window as ChartWindow).__razeChart!;
+      const state = widget.save();
+      try {
+        await widget.load({
+          ...state,
+          studies: [...state.studies, { name: "Double Exponential Moving Average", length: 9, color: "#2962ff", inputs: {} }],
+        });
+        return "loaded";
+      } catch (error) {
+        return (error as Error).message;
+      }
+    });
+    expect(loaded).toMatch(/unknown study: Double Exponential Moving Average\. Available studies: EMA, SMA, RSI, VWAP, Bollinger Bands, MACD/);
   });
 });

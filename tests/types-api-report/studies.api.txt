@@ -32,7 +32,6 @@ class StudyRegistry
   list(): StudyDefinition[]
   register(def: StudyDefinition): void
   resolve(name: string): StudyDefinition | null
-  search(query: string): StudyDefinition[]
   unknownStudyMessage(name: string): string
 interface StudySeries
   color?: string | undefined
@@ -52,6 +51,7 @@ function closesFromBars(bars: Bar[]): number[]
 function ema(closes: number[], length: number): (null | number)[]
 function macd(closes: number[], fast?: number | undefined, slow?: number | undefined, signal?: number | undefined): { macd: (null | number)[]; signal: (null | number)[]; hist: (null | number)[]; }
 function rsi(closes: number[], length: number): (null | number)[]
+function searchStudies(defs: readonly StudyDefinition[], query: string): StudyDefinition[]
 function sma(closes: number[], length: number): (null | number)[]
 function sourceValues(bars: readonly Bar[], source?: StudySource | undefined): number[]
 function stdev(closes: number[], length: number): (null | number)[]

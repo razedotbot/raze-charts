@@ -26,11 +26,11 @@ Legend:
 
 Indicator math also ships on its own: `@razedotbot/charts/studies` exports the
 pure kernels (`sma`, `ema`, `rsi`, `stdev`, `bollinger`, `macd`, `vwap`,
-`closesFromBars`, `sourceValues`), `StudyRegistry`, `BUILTIN_STUDIES`, and the
-`StudyDefinition` contract types, with no DOM or widget code (**Yes** — ESM,
-CommonJS, and NodeNext types are covered by the packed package contract). A
-registry created there is standalone; pass definitions to a widget through
-`raze.custom_studies`.
+`closesFromBars`, `sourceValues`), `StudyRegistry`, `BUILTIN_STUDIES`,
+`searchStudies`, and the `StudyDefinition` contract types, with no DOM or
+widget code (**Yes** — ESM, CommonJS, and NodeNext types are covered by the
+packed package contract). A registry created there is standalone; pass
+definitions to a widget through `raze.custom_studies`.
 
 ## Financial domain
 
@@ -50,9 +50,9 @@ registry created there is standalone; pass definitions to a widget through
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
 | Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. Every documented input is honoured (see the next row); zero and negative prices are ordinary values, and a non-finite bar is a gap (`null`) that no window or recurrence carries forward. Stdev/Bollinger are O(n) for any length. MACD values keep at least four significant digits in the legend and crosshair tag (`-0.00000318`, not `-0.0`). |
-| Built-in study inputs | **Yes** | By id, alias or TradingView `in_N` position (`createStudy('MACD', false, false, { in_0: 14, in_1: 30, in_3: 'close', in_2: 9 })`). EMA/SMA: `length`, `source`, `offset`; RSI: `length`, `source`; Bollinger Bands: `length`, `mult`, `source`, `offset`; MACD: `fast`, `slow`, `signal`, `source` (`length` sets `slow`); VWAP: `anchor` (`session`/`week`/`month`/`quarter`/`year`), `source` (default `hlc3`), `offset`. Sources: `open`, `high`, `low`, `close`, `hl2`, `hlc3`, `ohlc4`, `hlcc4`, `volume`. An unknown key or invalid value warns once with the supported list; out-of-range numbers are clamped. Legend labels still show the store's `length`. |
+| Built-in study inputs | **Yes** | By id, TradingView input title (`Fast Length`, `fastLength`, `StdDev`), the aliases `src`, `len`, `period` and `multiplier`, or TradingView `in_N` position (`createStudy('MACD', false, false, { in_0: 14, in_1: 30, in_3: 'close', in_2: 9 })`). EMA/SMA: `length`, `source`, `offset`; RSI: `length`, `source`; Bollinger Bands: `length`, `mult`, `source`, `offset`; MACD: `fast`, `slow`, `signal`, `source` (`length` sets `slow`; a `fast` that is not below `slow` warns); VWAP: `anchor` (`session`/`week`/`month`/`quarter`/`year`), `source` (default `hlc3`), `offset`. Sources: `open`, `high`, `low`, `close`, `hl2`, `hlc3`, `ohlc4`, `hlcc4`, `volume`. An unknown key or invalid value warns once with the supported list; out-of-range numbers are clamped. Legend labels still show the store's `length`. |
 | VWAP sessions | **Yes** | Resets at the start of each trading day of `symbolInfo.session` in `symbolInfo.timezone` (DST-aware), so sessions crossing UTC midnight (ASX, CME Globex `1700-1600`) stay continuous; `24x7` symbols reset at midnight as before. A zero-volume bar carries the running VWAP; a feed with no volume at all warns. An unknown zone or session string warns and falls back to UTC days. |
-| Study names | **Yes** | `createStudy()` and `load()` match a definition's name or alias exactly (case-insensitive; a TradingView `@tv-basicstudies` suffix is ignored). Names Raze lacks, such as `Double Exponential Moving Average`, `Bollinger Bands %B` or `Anchored VWAP`, reject with the list of available studies instead of resolving to a similar built-in. `keywords` only feed `StudyRegistry.search()`. |
+| Study names | **Yes** | `createStudy()` and `load()` match a definition's name or alias exactly (case-insensitive; a TradingView `@tv-basicstudies` suffix is ignored). Names Raze lacks, such as `Double Exponential Moving Average`, `Bollinger Bands %B` or `Anchored VWAP`, reject with the list of available studies instead of resolving to a similar built-in. `keywords` only feed `searchStudies(registry.list(), query)` (exported by `@razedotbot/charts/studies`) for pickers. |
 | Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` and `lock` are stored on the instance. |
 | Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. |
 | Drawing tools | **Yes** | Horizontal/vertical line, trend, ray, extended line, measure (ephemeral), Fibonacci, rectangle, and text. |

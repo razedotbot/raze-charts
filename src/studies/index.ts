@@ -17,7 +17,7 @@ export { bollinger, closesFromBars, ema, macd, rsi, sma, sourceValues, stdev, vw
 export type { VwapAnchor, VwapOptions } from "./calc";
 
 // ── Registry ────────────────────────────────────────────────────────────────
-export { BUILTIN_STUDIES, StudyRegistry } from "./registry";
+export { BUILTIN_STUDIES, StudyRegistry, searchStudies } from "./registry";
 
 // ── Contract types ──────────────────────────────────────────────────────────
 export type {
