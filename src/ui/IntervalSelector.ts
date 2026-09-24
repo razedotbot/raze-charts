@@ -24,7 +24,6 @@ import { parseResolution, resolutionLabel } from "../util/resolution";
 /** Default header buttons when `options.favorites.intervals` is omitted. */
 export const DEFAULT_INTERVAL_FAVORITES = ["1S", "1", "5", "15", "60", "240", "1D"];
 
-
 interface Resolved {
   /** Canonical key: "1D" and "D", "60" and "060" compare equal. */
   key: string;
