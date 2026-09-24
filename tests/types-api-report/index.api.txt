@@ -607,6 +607,7 @@ interface PopupHandle
   close: (options?: undefined | { restoreFocus?: boolean | undefined; }) => void
   el: HTMLDivElement
   focusItem: (index?: number | undefined) => void
+  presentation: 'anchored' | 'sheet'
   reposition: () => void
 interface PopupOptions
   anchor?: HTMLElement | undefined
@@ -618,6 +619,7 @@ interface PopupOptions
   onClose?: (() => void) | undefined
   padding?: string | undefined
   place?: 'below-start' | 'right-start' | undefined
+  presentation?: 'anchored' | 'auto' | 'sheet' | undefined
   role?: 'dialog' | 'menu' | undefined
   themeRoot?: HTMLElement | undefined
   x?: number | undefined
@@ -702,7 +704,7 @@ class ShapeStore
 type ShapeStyle = string
 type SidebarActionId = 'chart_type' | 'fit' | 'fullscreen' | 'indicators' | 'objects_tree' | 'screenshot'
 interface SidebarCustomItem
-  icon: string
+  icon: Element | string
   id: string
   onClick: () => void
   title: string
@@ -963,7 +965,7 @@ function decimalsFromPricescale(pricescale: number): number
 const default: { widget: typeof Widget; version: string; }
 function defineDataSource<T extends RazeDataSource>(source: T): T
 function ema(closes: number[], length: number): (null | number)[]
-function ensureBaseStyles(): void
+function ensureBaseStyles(target?: Node | undefined, options?: StyleOptions | undefined): void
 function floorToBar(timeMs: number, res: string): number
 function formatCompact(value: number): string
 function formatPrice(value: number, pricescale: number): string
@@ -1001,3 +1003,6 @@ class widget implements IChartingLibraryWidget
   subscribe(event: string, callback: (...args: never[]) => void): void
   unsubscribe(event: string, callback: (...args: never[]) => void): void
 function withAlpha(color: string, alpha: number): string
+# referenced, not exported
+interface StyleOptions
+  nonce?: string | undefined

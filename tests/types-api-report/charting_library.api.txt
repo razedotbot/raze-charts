@@ -306,7 +306,7 @@ interface ShapePoint
 type ShapeStyle = string
 type SidebarActionId = 'chart_type' | 'fit' | 'fullscreen' | 'indicators' | 'objects_tree' | 'screenshot'
 interface SidebarCustomItem
-  icon: string
+  icon: Element | string
   id: string
   onClick: () => void
   title: string
