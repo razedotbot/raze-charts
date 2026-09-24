@@ -404,10 +404,12 @@ export function Chart({
       && sameViewport(previous.viewport, viewport)
     ) return;
     const updateOptions: MountChartOptions = { width, height, renderer, idPrefix, interaction };
-    // An absent viewport means “preserve the user's live pan/zoom”. Forward the
-    // viewport only when the controlled value actually changed, including the
+    // An absent viewport means “preserve the user's live pan/zoom”. A
+    // controlled viewport is forwarded on every update, so the mount treats
+    // it as navigation and keeps its cached full-data scene (a resize or an
+    // interaction change does not recompile every row). Also forward the
     // explicit undefined of a controlled -> uncontrolled transition.
-    if (!sameViewport(previous.viewport, viewport)) updateOptions.viewport = viewport;
+    if (viewport !== undefined || previous.viewport !== undefined) updateOptions.viewport = viewport;
     mounted.update(def, updateOptions);
     applied.current = { definition: def, width, height, renderer, idPrefix, interaction, viewport };
   }, [def, width, height, renderer, idPrefix, interaction, viewport]);

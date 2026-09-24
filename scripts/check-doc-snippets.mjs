@@ -14,6 +14,8 @@
 //   <!-- prelude: financial, trading-host -->
 //       Prepend hidden ambient declarations from PRELUDES below, so a snippet
 //       can use `financialChart` or `widget` without repeating setup code.
+//       A prelude that stands for code an earlier fence shows refers to that
+//       fence through PRELUDE_MODULES instead of restating its types.
 //   <!-- no-check: reason -->
 //       Skip the fence. The reason is mandatory and should say why the code
 //       cannot compile standalone (for example, it is pseudo-code).
@@ -78,18 +80,53 @@ declare const points: { time: number; value: number }[];
 declare const revenue: { month: string; value: number }[];
 declare const returns: { month: string; asset: string; change: number }[];
 `,
-  indicator: `// The Envelope indicator from the first docs/indicators.md example, and an
+  indicator: `// The Envelope indicator, typed from the defineIndicator() fence in
+// docs/indicators.md itself (PRELUDE_MODULES "indicators-envelope"), and an
 // active chart to create it on.
-declare const Envelope: {
-  readonly inputs: {
-    readonly length: import("@razedotbot/charts").StudyIntInput;
-    readonly percent: import("@razedotbot/charts").StudyFloatInput;
-    readonly src: import("@razedotbot/charts").StudySourceInput;
-  };
-};
+declare const Envelope: typeof import("./doc-module-indicators-envelope.js").Envelope;
 declare const chart: import("@razedotbot/charts").IChartWidgetApi;
 `,
 });
+
+/**
+ * Prelude modules: a documentation fence compiled as its own module, so a
+ * prelude can refer to what the page really shows (`typeof
+ * import("./doc-module-<name>.js").Name`) instead of a hand-written copy that
+ * would keep passing after the documented code changed. The module is the
+ * first checked fence in `file` that declares `export const <exports>`.
+ */
+export const PRELUDE_MODULES = Object.freeze({
+  "indicators-envelope": Object.freeze({ file: "docs/indicators.md", exports: "Envelope" }),
+});
+
+const PRELUDE_MODULE_REFERENCE = /\.\/doc-module-([\w-]+)\.js/g;
+
+/** Names of the prelude modules a prelude's source refers to. */
+export function preludeModulesOf(source) {
+  return [...source.matchAll(PRELUDE_MODULE_REFERENCE)].map((match) => match[1]);
+}
+
+/**
+ * The fence a prelude module is compiled from: the first checked fence in
+ * `markdown` that declares `export const <exports>`, or null when the page no
+ * longer has one.
+ */
+export function findPreludeModuleFence(markdown, { file, exports }) {
+  const declares = new RegExp(`^export\\s+const\\s+${exports}\\b`, "m");
+  return extractFences(markdown, file).fences.find((fence) => (
+    CHECKED_LANGUAGES.includes(fence.lang) && !fence.directives.noCheck && declares.test(fence.code)
+  )) ?? null;
+}
+
+/** Read every prelude module's fence from the documentation under `root`. */
+export function readPreludeModules(root = repositoryRoot) {
+  const modules = {};
+  for (const [name, source] of Object.entries(PRELUDE_MODULES)) {
+    const path = resolve(root, source.file);
+    modules[name] = existsSync(path) ? findPreludeModuleFence(readFileSync(path, "utf8"), source) : null;
+  }
+  return modules;
+}
 
 const RESOLUTION_MODES = Object.freeze([
   { id: "bundler", module: "ESNext", moduleResolution: "Bundler" },
@@ -190,9 +227,14 @@ function loadTypeScript(root) {
 
 /**
  * Type-check snippets. Each snippet is `{ file, line, lang, code, directives }`
- * (see extractFences). Returns failures as "file:line:col [mode] TSxxxx message".
+ * (see extractFences). `preludeModules` maps a PRELUDE_MODULES name to the
+ * fence it is compiled from (default: read from the documentation under
+ * `root`). Returns failures as "file:line:col [mode] TSxxxx message".
  */
-export function typecheckSnippets(snippets, { root = repositoryRoot, ts = loadTypeScript(root) } = {}) {
+export function typecheckSnippets(
+  snippets,
+  { root = repositoryRoot, ts = loadTypeScript(root), preludeModules = undefined } = {},
+) {
   const failures = [];
   const checked = snippets.filter((snippet) => !snippet.directives.noCheck);
   if (!checked.length) return failures;
@@ -211,6 +253,30 @@ export function typecheckSnippets(snippets, { root = repositoryRoot, ts = loadTy
   for (const [name, source] of Object.entries(PRELUDES)) {
     virtual.set(join(virtualDir, `prelude-${name}.d.ts`), source);
   }
+  // Prelude modules are compiled only for the preludes a checked snippet uses;
+  // a prelude whose documented fence disappeared fails instead of passing.
+  const used = [...new Set(checked.flatMap((snippet) => snippet.directives.preludes))];
+  const needed = new Set(used.flatMap((name) => preludeModulesOf(PRELUDES[name] ?? "")));
+  const fences = needed.size ? (preludeModules ?? readPreludeModules(root)) : {};
+  const moduleOrigin = new Map();
+  for (const name of needed) {
+    const source = PRELUDE_MODULES[name];
+    const fence = fences[name];
+    if (!source) {
+      failures.push(`a prelude imports "./doc-module-${name}.js", which is not in PRELUDE_MODULES (scripts/check-doc-snippets.mjs)`);
+    } else if (!fence) {
+      const users = used.filter((prelude) => preludeModulesOf(PRELUDES[prelude] ?? "").includes(name));
+      failures.push(
+        `${source.file}: no checked ts fence declares \`export const ${source.exports}\`, but the prelude(s) `
+          + `${users.join(", ")} are typed from it. Restore the fence, or point PRELUDE_MODULES["${name}"] at the one that replaced it.`,
+      );
+    } else {
+      const path = join(virtualDir, `doc-module-${name}.${fence.lang === "tsx" ? "tsx" : "ts"}`);
+      virtual.set(path, `${fence.code}\n`);
+      moduleOrigin.set(path, fence);
+    }
+  }
+  if (failures.length) return failures;
 
   const groups = new Map();
   for (const [path, snippet] of origin) {
@@ -240,7 +306,11 @@ export function typecheckSnippets(snippets, { root = repositoryRoot, ts = loadTy
     const fileExists = host.fileExists.bind(host);
     const readFile = host.readFile.bind(host);
     const getSourceFile = host.getSourceFile.bind(host);
+    const directoryExists = host.directoryExists?.bind(host);
     host.fileExists = (fileName) => virtual.has(resolve(fileName)) || fileExists(fileName);
+    // The virtual directory is not on disk, and module resolution only probes
+    // for files (the prelude modules) inside directories that exist.
+    host.directoryExists = (name) => resolve(name) === virtualDir || (directoryExists ? directoryExists(name) : true);
     host.readFile = (fileName) => virtual.get(resolve(fileName)) ?? readFile(fileName);
     host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
       const text = virtual.get(resolve(fileName));
@@ -258,10 +328,12 @@ export function typecheckSnippets(snippets, { root = repositoryRoot, ts = loadTy
         const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
         const code = `TS${diagnostic.code}`;
         const path = diagnostic.file ? resolve(diagnostic.file.fileName) : undefined;
-        const snippet = path ? origin.get(path) : undefined;
+        const snippet = path ? origin.get(path) ?? moduleOrigin.get(path) : undefined;
         if (snippet && diagnostic.start !== undefined) {
           const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-          failures.push(`${snippet.file}:${snippet.line + line}:${character + 1} [${mode.id}] ${code} ${message}`);
+          const failure = `${snippet.file}:${snippet.line + line}:${character + 1} [${mode.id}] ${code} ${message}`;
+          // A prelude module's fence is usually checked as a snippet too: report it once.
+          if (!failures.includes(failure)) failures.push(failure);
         } else if (path && path.startsWith(virtualDir)) {
           failures.push(`prelude ${displayPath(virtualDir, path)} [${mode.id}] ${code} ${message}`);
         } else if (!path || !path.includes(`${sep}node_modules${sep}`)) {

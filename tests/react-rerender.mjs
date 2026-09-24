@@ -1,5 +1,7 @@
 // React adapter update discipline (W1B-24):
 // - inline callback / interaction / viewport literals never recompile,
+// - a real update is one compile; a controlled viewport keeps the mount's
+//   full-data cache, so a resize does not rebuild it,
 // - Recharts-shaped JSX memoizes on structure, not on children identity,
 // - viewportGroup / syncId synchronize charts and leave on unmount,
 // - ResponsiveContainer accepts wrapper components and render functions.
@@ -34,6 +36,10 @@ globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.SVGElement = dom.window.SVGElement;
 globalThis.PointerEvent = dom.window.PointerEvent ?? dom.window.MouseEvent;
 globalThis.MutationObserver = dom.window.MutationObserver;
+// The navigator paints a Canvas sparkline; jsdom has no 2D context, so record nothing.
+dom.window.HTMLCanvasElement.prototype.getContext = function getContext() {
+  return new Proxy({}, { get: () => () => ({ addColorStop() {} }), set: () => true });
+};
 const resizeObservers = [];
 globalThis.ResizeObserver = class {
   constructor(callback) {
@@ -142,12 +148,16 @@ async function withSilencedErrors(body) {
   assert(calls.at(-1) === "select:5", "the latest onSelect runs after inline re-renders");
   assert(!calls.some((call) => /:(0|1|2|3|4)$/.test(call)), "superseded callbacks are never invoked");
 
-  // The wheel above zoomed the mount, so an update() now also rebuilds the
-  // cached full-data scene (update() bumps the content revision); the exact
-  // single-compile count is asserted on an unzoomed mount below.
+  // The wheel above zoomed this uncontrolled mount. An update() without a
+  // viewport may carry rows mutated in place, so the mount bumps its content
+  // revision and compiles twice: the zoomed scene, plus the full-data scene
+  // behind the zoom limits. Anything more is a regression.
   const beforeInteractionChange = compiles;
   await view.render(createElement(Chart, { definition, width: 320, height: 180, interaction: { zoom: false } }));
-  assert(compiles > beforeInteractionChange, "a real interaction change still reaches the mount after inline re-renders");
+  assert(
+    compiles === beforeInteractionChange + 2,
+    "a real interaction change on a zoomed mount costs exactly the zoomed scene plus one full-data rebuild",
+  );
   observer.disconnect();
   await view.unmount();
 }
@@ -187,6 +197,74 @@ async function withSilencedErrors(body) {
   assert(compiles === afterDates, "controlled Date viewports compare by time value");
   await renderWith({ x: [2, 4] });
   assert(compiles > afterDates, "a changed controlled viewport still recompiles");
+  await view.unmount();
+}
+
+{
+  // A controlled viewport rides along with every update(), so the mount
+  // treats a resize or an option change as navigation and keeps its cached
+  // full-data scene: one compile per update, never an extra rebuild over
+  // every row (ResponsiveContainer resizes on every observed frame).
+  let compiles = 0;
+  const rows = Array.from({ length: 50 }, (_, index) => ({ x: index, y: Math.sin(index) }));
+  const definition = defineChart(() => {
+    compiles += 1;
+    return { marks: [line(rows, { x: "x", y: "y" })] };
+  });
+  const view = scene();
+  let handle;
+  const renderWith = (props) => view.render(createElement(Chart, {
+    definition, width: 300, height: 180, viewport: { x: [5, 20] }, onReady: (h) => { handle = h; }, ...props,
+  }));
+  await renderWith({});
+  let before = compiles;
+  await renderWith({ width: 320 });
+  assert(compiles === before + 1, "a width change with a controlled viewport costs exactly one compile");
+  before = compiles;
+  await renderWith({ width: 340 });
+  assert(compiles === before + 1, "a second width change with a controlled viewport costs exactly one compile");
+  before = compiles;
+  await renderWith({ width: 340, height: 200 });
+  assert(compiles === before + 1, "a height change with a controlled viewport costs exactly one compile");
+  before = compiles;
+  await renderWith({ width: 340, height: 200, idPrefix: "renamed" });
+  assert(compiles === before + 1, "an idPrefix change with a controlled viewport costs exactly one compile");
+  before = compiles;
+  await renderWith({ width: 340, height: 200, idPrefix: "renamed", viewport: { x: [5, 20] } });
+  assert(compiles === before, "re-rendering the same controlled viewport literal is still free");
+  await renderWith({ width: 340, height: 200, idPrefix: "renamed", viewport: undefined });
+  assert(handle.getViewport() === null, "dropping the controlled viewport still resets the mount to the full domain");
+  await view.unmount();
+}
+
+{
+  // The same with a navigator: its sparkline is the cached full-data scene.
+  let compiles = 0;
+  const rows = Array.from({ length: 50 }, (_, index) => ({ x: index, y: Math.cos(index) }));
+  const definition = defineChart(() => {
+    compiles += 1;
+    return { marks: [line(rows, { x: "x", y: "y" })] };
+  });
+  const view = scene();
+  const renderWith = (props) => view.render(createElement(Chart, {
+    definition, width: 300, height: 180, viewport: { x: [5, 20] }, interaction: { navigator: true }, ...props,
+  }));
+  await renderWith({});
+  assert(
+    view.container.querySelector("[data-raze-chart-host] canvas[aria-hidden='true']") !== null,
+    "the navigator paints its sparkline next to the SVG scene",
+  );
+  let before = compiles;
+  await renderWith({ height: 200 });
+  assert(compiles === before + 1, "a height change with a navigator and a controlled viewport costs exactly one compile");
+  before = compiles;
+  await renderWith({ height: 200, interaction: { navigator: true, zoom: true } });
+  assert(compiles === before + 1, "an interaction change with a navigator and a controlled viewport costs exactly one compile");
+  before = compiles;
+  // A new width also resizes the navigator, whose sparkline is compiled once at
+  // the new size (jsdom reports no layout, so the navigator follows the width).
+  await renderWith({ width: 320, height: 200, interaction: { navigator: true, zoom: true } });
+  assert(compiles === before + 2, "a width change with a navigator costs the scene plus one resized sparkline");
   await view.unmount();
 }
 

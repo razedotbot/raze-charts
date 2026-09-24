@@ -9,8 +9,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   PRELUDES,
+  PRELUDE_MODULES,
   checkDocSnippets,
   extractFences,
+  findPreludeModuleFence,
+  preludeModulesOf,
   typecheckSnippets,
 } from "../scripts/check-doc-snippets.mjs";
 import {
@@ -136,6 +139,43 @@ test("every prelude compiles on its own", () => {
   for (const name of Object.keys(PRELUDES)) {
     assert.deepEqual(typecheckSnippets([snippet("export {};", { directives: { preludes: [name], noCheck: null } })], { root }), [], name);
   }
+});
+
+// The indicator prelude is typed from docs/indicators.md's defineIndicator()
+// fence, so the typed createStudy fence cannot keep passing against a stale copy.
+const indicatorsDoc = readFileSync(resolve(root, "docs/indicators.md"), "utf8");
+const envelopeFence = findPreludeModuleFence(indicatorsDoc, PRELUDE_MODULES["indicators-envelope"]);
+const typedCreateStudy = extractFences(indicatorsDoc, "docs/indicators.md").fences
+  .find((fence) => fence.directives.preludes.includes("indicator"));
+
+test("the indicator prelude is compiled from the documented Envelope fence", () => {
+  assert.deepEqual(preludeModulesOf(PRELUDES.indicator), ["indicators-envelope"]);
+  assert.ok(envelopeFence?.code.includes("defineIndicator({"), "docs/indicators.md declares Envelope with defineIndicator()");
+  assert.ok(typedCreateStudy?.code.includes('createStudy("Envelope"'), "the typed createStudy fence uses the indicator prelude");
+  assert.deepEqual(typecheckSnippets([typedCreateStudy], { root }), []);
+});
+
+test("renaming a documented Envelope input fails the typed createStudy fence", () => {
+  // `src` rather than `length`: createStudy() also accepts an input array, so a
+  // stray `length` key type-checks against the array half of that union.
+  const renamed = { ...envelopeFence, code: envelopeFence.code.replace(/\bsrc\b/g, "input") };
+  assert.notEqual(renamed.code, envelopeFence.code);
+  const failures = typecheckSnippets([typedCreateStudy], { root, preludeModules: { "indicators-envelope": renamed } });
+  assert.ok(failures.length > 0, "the stale createStudy inputs are rejected");
+  assert.ok(
+    failures.every((failure) => {
+      const line = Number(/^docs\/indicators\.md:(\d+):/.exec(failure)?.[1]);
+      return line >= typedCreateStudy.line && failure.includes("'src'");
+    }),
+    failures.join("\n"),
+  );
+});
+
+test("a prelude whose documented fence disappeared fails instead of passing", () => {
+  const failures = typecheckSnippets([typedCreateStudy], { root, preludeModules: { "indicators-envelope": null } });
+  assert.equal(failures.length, 1, failures.join("\n"));
+  assert.match(failures[0], /^docs\/indicators\.md: no checked ts fence declares `export const Envelope`.*indicator/);
+  assert.equal(findPreludeModuleFence(indicatorsDoc.replace("export const Envelope", "export const Band"), PRELUDE_MODULES["indicators-envelope"]), null);
 });
 
 test("every documentation fence in the repository type-checks", () => {

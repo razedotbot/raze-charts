@@ -357,8 +357,16 @@ categories stay near-linear: 5,000 bar categories compile in about 6 ms and
 ## React update flow
 
 The React `<Chart>` component mounts the framework-neutral runtime once and
-calls `MountHandle.update()` (one compile, one repaint) only when something
-that changes the picture changed:
+calls `MountHandle.update()` only when something that changes the picture
+changed. An update is one scene compile and one repaint. A chart that is zoomed
+or hides series also keeps a full-data scene for the navigator and the zoom
+limits. The mount compiles that scene once more when the content may have
+changed: on a new definition, and on every update of a chart without a
+controlled `viewport`, because rows may have been mutated in place. A
+controlled `viewport` is forwarded with every update, so a resize or an option
+change counts as navigation and reuses the cached full-data scene; only a
+navigator whose size changed compiles its sparkline again. The props compare
+as follows:
 
 | Prop | Compared by | Recompiles when |
 | --- | --- | --- |
