@@ -72,13 +72,13 @@ function flushFrames() {
   for (const [, callback] of pending) callback(performance.now());
 }
 
-const { ChartEngine, Delegate, IntervalSelector, Toolbar, isLightColor, resolveTimeframe, widget } = await import("../dist/charting_library.esm.js");
+const { ChartEngine, Delegate, IntervalSelector, Toolbar, createChartContext, isLightColor, resolveTimeframe, widget } = await import("../dist/charting_library.esm.js");
 assert(isLightColor("rgb(255, 255, 255)"), "financial chrome recognises light RGB theme backgrounds");
 
 const datafeedPlaceholder = {};
 const engineHost = window.document.createElement("div");
 window.document.body.appendChild(engineHost);
-const engineContext = {
+const engineContext = createChartContext({
   options: {
     symbol: "BTCUSD",
     interval: "1",
@@ -102,7 +102,8 @@ const engineContext = {
   },
   features: new Set(),
   bars: [],
-    timescaleMarks: [],
+  marks: [],
+  timescaleMarks: [],
   visibleRange: { from: 0, to: 1 },
   autoScalePrice: true,
   priceRange: null,
@@ -116,13 +117,15 @@ const engineContext = {
   syncedCrosshair: null,
   drawingTool: "cursor",
   selectedShapeId: null,
+  selectedTradingLineId: null,
   intervalChanged: new Delegate(),
   dataChanged: new Delegate(),
   drawingEvent: new Delegate(),
+  tradingEvent: new Delegate(),
   viewportChanged: new Delegate(),
   crosshairMoved: new Delegate(),
   requestPaint() {},
-};
+});
 
 const scrollableToolbar = new Toolbar(engineContext);
 document.body.appendChild(scrollableToolbar.el);

@@ -55,14 +55,39 @@ exports are the stable resolver contract.
 
 - Emit `Bar.time` in Unix milliseconds. `PeriodParams.from` / `to` and mark
   times use Unix seconds; these units are intentionally different and typed.
+  Times below 1e11 are reported as seconds, and bars with non-finite or string
+  OHLC are dropped with one warning naming the field and index. Set
+  `raze.coerce_bars: true` to convert strings, seconds and inverted high/low
+  instead.
+- Mark gaps with `HistoryMetadata.nextTime` (Unix seconds) on an empty page;
+  the next request uses `to = nextTime`. Reserve `noData` without `nextTime`
+  for the true start of history.
+- Use TradingView resolution strings: `"1S"`, `"15"`, `"240"`, `"D"`/`"1D"`,
+  `"W"`, `"M"`/`"3M"`. The chart and your feed receive the canonical spelling
+  (`"D"` arrives as `"1D"`). Invalid values such as `"4h"` or `"1H"` throw a
+  `RangeError` instead of loading one-minute bars. The exported
+  `parseResolution`, `resolutionToMs`, `resolutionLabel` and `floorToBar`
+  helpers throw the same error instead of returning one minute; test untrusted
+  strings with `isValidResolution()`. Saved layouts whose interval is invalid
+  (for example `"4h"`, which used to load as one minute) now make `load()`
+  reject with the same `RangeError`; rewrite them with `normalizeResolution()`
+  or check them with `isValidResolution()` before loading.
 - Return bars in ascending order. The manager canonicalizes and de-duplicates,
   but a sorted feed avoids unnecessary work.
 - Treat the subscription GUID as opaque and stop producing work after
   `unsubscribeBars`.
 - Call the error callback with useful context; active failures are surfaced and
-  already committed data remains visible.
-- Implement `getMarks` only if marks are enabled. Late results from an obsolete
-  symbol or interval are intentionally discarded.
+  already committed data remains visible. A call without a reason is still a
+  failure (logged, and backed off during pagination), never a cancellation.
+- Call the `onReady` callback once; later calls are ignored with a warning.
+- Set `supports_marks` / `supports_timescale_marks` in the `onReady`
+  configuration to have `getMarks` / `getTimescaleMarks` called; bar marks
+  then render by default (the Raze-only `enabled_features: ["mark_on_bars"]`
+  no longer turns them on, and `disabled_features: ["mark_on_bars"]` hides
+  them). Late results from an obsolete symbol or interval are discarded.
+- Set `supports_time: true` with `getServerTime` (Unix seconds) to end the
+  first history window, and resolve `options.timeframe`, at the server's time
+  instead of the client clock's.
 - Always call `remove()` when the host unmounts.
 
 ### Move a callback feed to the native data source

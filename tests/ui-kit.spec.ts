@@ -1012,7 +1012,7 @@ test.describe("content security", () => {
     await page.keyboard.press("Escape");
     await expect(indicators).toHaveCount(0);
 
-    // Objects tree and the chart context menu.
+    // Objects tree and the chart context menu (which needs host items).
     await sidebar.getByRole("button", { name: "Objects tree" }).click();
     await expect(page.locator('[role="menu"],[role="dialog"]').first()).toBeVisible();
     // Escape reaches the menu only once it has taken focus.

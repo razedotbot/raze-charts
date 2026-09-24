@@ -146,6 +146,12 @@ export interface RazeChartsOptions {
    * fractions throw.
    */
   undo_limit?: number;
+  /**
+   * Repair common datafeed mistakes instead of only reporting them: numeric
+   * strings become numbers, `Bar.time` below 1e11 (seconds) is multiplied by
+   * 1000, and an inverted high/low is swapped. Default false.
+   */
+  coerce_bars?: boolean;
 }
 
 export interface ChartingLibraryWidgetOptions {

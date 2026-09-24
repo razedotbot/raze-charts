@@ -5,9 +5,14 @@ import { xForIndex, yForPrice } from "../plotScale";
 import { roundRect } from "./primitives";
 import type { FinanceView } from "./view";
 
+/**
+ * Bar marks render whenever the datafeed delivered them: DataManager requests
+ * them only when `configuration.supports_marks` is true, as TradingView does.
+ * `disabled_features: ["mark_on_bars"]` remains as the Raze opt-out.
+ */
 export function drawMarks(ctx: CanvasRenderingContext2D, v: FinanceView): void {
   v.markScreen.length = 0;
-  if (!v.context.features.has("mark_on_bars")) return;
+  if (v.context.options.disabled_features?.includes("mark_on_bars")) return;
   const marks = v.context.marks;
   const bars = v.context.bars;
   if (!marks.length || !bars.length) return;

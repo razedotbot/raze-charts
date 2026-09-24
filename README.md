@@ -163,7 +163,6 @@ const financialChart = new widget({
   datafeed,
   autosize: true,
   theme: "dark",
-  enabled_features: ["mark_on_bars"],
   raze: {
     chart_types: ["candles", "line"],
     compact_breakpoint: 520,

@@ -79,7 +79,7 @@ const w = new widget({
   theme: "dark",
   autosize: true,
   disabled_features: ["header_symbol_search"],
-  enabled_features: ["seconds_resolution", "mark_on_bars"],
+  enabled_features: ["seconds_resolution"],
   overrides: {
     "paneProperties.background": "#181615",
     "mainSeriesProperties.candleStyle.upColor": "#66d89e",

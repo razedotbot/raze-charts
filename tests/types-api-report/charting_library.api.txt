@@ -290,6 +290,8 @@ interface IndicatorPreset
   label?: string | undefined
   length?: number | undefined
   name: string
+interface IntervalChangedParameters
+  timeframe: TimeFrameValue
 interface LibrarySymbolInfo
   [key: string]: unknown
   daily_multipliers?: string[] | undefined
@@ -345,6 +347,7 @@ interface RazeChartsOptions
   aria_description?: string | undefined
   aria_label?: string | undefined
   chart_types?: ChartStyleName[] | undefined
+  coerce_bars?: boolean | undefined
   compact_breakpoint?: number | undefined
   custom_studies?: StudyDefinition[] | undefined
   format_price?: ((value: number, pricescale: number) => string) | undefined
@@ -587,6 +590,14 @@ type StudyValues = (null | number)[] | Float64Array<ArrayBufferLike>
 type SubscribeBarsCallback = (bar: Bar) => void
 type ThemeName = 'dark' | 'light'
 type TickMarkType = 'DayOfMonth' | 'Month' | 'Time' | 'TimeWithSeconds' | 'Year'
+interface TimeFramePeriodBack
+  type: 'period-back'
+  value: string
+interface TimeFrameTimeRange
+  from: number
+  to: number
+  type: 'time-range'
+type TimeFrameValue = TimeFramePeriodBack | TimeFrameTimeRange
 interface TimescaleMark
   [key: string]: unknown
   color: string

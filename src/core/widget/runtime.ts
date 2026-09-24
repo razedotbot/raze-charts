@@ -9,6 +9,7 @@ import { ChartRenderer } from "../../engine/ChartRenderer";
 import { StudyRegistry } from "../../studies/registry";
 import { StudyStore } from "../../studies/StudyStore";
 import { createPriceFormatter } from "../../util/format";
+import { canonicalResolutions, normalizeResolution, RESOLUTION_FORMS } from "../../util/resolution";
 import { Delegate } from "../../util/delegate";
 import { CommandStack } from "../CommandStack";
 import { buildFeatureSet, createChartContext, type ChartContext } from "../context";
@@ -21,7 +22,24 @@ import { LifecycleController } from "./LifecycleController";
 
 const DEFAULT_FONT = "'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
-export function createWidgetContext(options: ChartingLibraryWidgetOptions): ChartContext {
+/**
+ * Canonicalise `favorites.intervals` ("D" -> "1D") so the header matches them
+ * against the chart's canonical resolution. Invalid entries are dropped with
+ * one warning (from the primary chart, not each layout child) instead of
+ * throwing later, inside the header build.
+ */
+function withCanonicalFavorites(options: ChartingLibraryWidgetOptions): ChartingLibraryWidgetOptions {
+  const intervals: unknown = options.favorites?.intervals;
+  if (intervals == null) return options;
+  const { valid, invalid } = canonicalResolutions(Array.isArray(intervals) ? intervals : [intervals]);
+  if (invalid.length && !options.raze?.layout_child) {
+    console.warn(`[raze-charts] ignored invalid favorites.intervals ${invalid.join(", ")}. Accepted forms: ${RESOLUTION_FORMS}.`);
+  }
+  return { ...options, favorites: { ...options.favorites, intervals: valid } };
+}
+
+export function createWidgetContext(input: ChartingLibraryWidgetOptions): ChartContext {
+  const options = withCanonicalFavorites(input);
   const raze = options.raze;
   return createChartContext({
     options,
@@ -29,7 +47,8 @@ export function createWidgetContext(options: ChartingLibraryWidgetOptions): Char
     locale: options.locale ?? "en",
     fontFamily: options.custom_font_family || DEFAULT_FONT,
     symbol: options.symbol,
-    resolution: options.interval,
+    // Strict: an invalid interval throws a RangeError before any DOM work.
+    resolution: normalizeResolution(options.interval),
     symbolInfo: null,
     formatPrice: createPriceFormatter(options, null),
     theme: buildTheme(options),

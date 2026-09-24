@@ -54,7 +54,10 @@ export function makeMockDatafeed({
 
   return {
     onReady(cb) {
-      setTimeout(() => cb({ supported_resolutions: ["1S", "5S", "1", "5", "15", "60", "1D"] }), 0);
+      setTimeout(() => cb({
+        supported_resolutions: ["1S", "5S", "1", "5", "15", "60", "1D"],
+        supports_marks: true,
+      }), 0);
     },
     searchSymbols(_a, _b, _c, cb) { cb([]); },
     resolveSymbol(symbol, onResolve) {

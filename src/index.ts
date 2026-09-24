@@ -135,8 +135,11 @@ export {
   parseResolution,
   resolutionLabel,
   resolutionToMs,
+  normalizeResolution,
+  isValidResolution,
+  RESOLUTION_FORMS,
 } from "./util/resolution";
-export type { ParsedResolution } from "./util/resolution";
+export type { ParsedResolution, FloorToBarOptions } from "./util/resolution";
 export {
   createPriceFormatter,
   decimalsFromPricescale,
