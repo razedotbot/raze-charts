@@ -55,7 +55,7 @@ node scripts/check-bundle-size.mjs
 | Entrypoint | Artifact | Gzip budget |
 | --- | --- | ---: |
 | Root financial widget | `charting_library.esm.js` | 52 KiB |
-| Native chart | `chart.esm.js` | 42 KiB |
+| Native chart | `chart.esm.js` | 44 KiB |
 | React adapter | `react.esm.js` | 30 KiB |
 
 Budgets live in [bundle-budgets.json](../benchmarks/bundle-budgets.json). They
@@ -64,6 +64,10 @@ consumer receives after tree shaking. Use `--json` for machine-readable
 measurements. The native allowance includes the complete runtime validation
 boundary, renderer-neutral compiler, SVG and Canvas renderers, interactions,
 and color system; it does not hide those costs in runtime dependencies.
+The native allowance grew from 42 to 44 KiB when the compiler and renderers
+were split into `src/chart/compile/*` and `src/chart/render/*`: the unminified
+artifact keeps every function and property name, so the module boundaries
+added about 2.2 KiB with byte-identical output.
 
 ## Dense native charts
 

@@ -608,7 +608,7 @@ function mountScenario(name, definition, options, script) {
     target.dispatchEvent(new Ctor(type, { bubbles: true, cancelable: true, ...init }));
   };
   snap("mounted");
-  script({ handle, wrap, fire, snap, scene: () => handle.getScene() });
+  script({ handle, wrap, fire, snap, box, scene: () => handle.getScene() });
   handle.destroy();
   snap("destroyed");
   host.remove();
@@ -620,8 +620,16 @@ function hoverAll(ctx, limit = 24) {
   const scene = ctx.scene();
   const points = probes(scene).slice(0, 40);
   for (const sample of scene.samples.slice(0, limit)) points.push([sample.x, sample.y]);
+  // Plot-edge probes exercise crosshair and chip clamping.
+  const { plot } = scene;
+  for (const fx of [0.01, 0.5, 0.99]) {
+    for (const fy of [0.005, 0.5, 0.995]) points.push([plot.x + plot.w * fx, plot.y + plot.h * fy]);
+  }
+  // Probes are scene coordinates; the mounted box may be CSS-scaled.
+  const sx = ctx.box.width / scene.width;
+  const sy = ctx.box.height / scene.height;
   for (const [x, y] of points) {
-    ctx.fire("pointermove", { clientX: x, clientY: y });
+    ctx.fire("pointermove", { clientX: x * sx, clientY: y * sy });
     ctx.snap(`move ${x},${y}`);
   }
   ctx.fire("pointerleave");

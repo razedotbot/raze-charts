@@ -11,7 +11,7 @@
     {
       "name": "native chart",
       "path": "dist/chart.esm.js",
-      "budgetGzipBytes": 43008
+      "budgetGzipBytes": 45056
     },
     {
       "name": "React adapter",

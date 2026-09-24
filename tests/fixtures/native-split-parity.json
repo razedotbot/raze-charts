@@ -898,236 +898,236 @@
       "tooltips": "4f53cda18c2baa0c0354bb5f"
     },
     "mount/time-svg": {
-      "dom": "066add6828f740fe8116bb62",
-      "events": "46d6eab14a339724fe0dc77f"
+      "dom": "5f5748eedeb2ca7ed1c6178a",
+      "events": "3cbb657bf4d686921f17314b"
     },
     "mount/time-chrome-svg": {
-      "dom": "9c1650ea8529285084dfd641",
-      "events": "dde554551be54f4a7141ed94"
+      "dom": "8556107c0fea4e0edcb355cc",
+      "events": "921c136fcb9be930f1c8e23e"
     },
     "mount/time-static-svg": {
-      "dom": "d43b1b1aeabd1da3575630d2",
-      "events": "2cfc3f069bf3b3320176a34b"
+      "dom": "a0a00569ba73d9fda7b5910c",
+      "events": "2b11a1bbb07518e4dbd5550b"
     },
     "mount/basic-mixed-svg": {
-      "dom": "5f3608ec9080002adc3b7490",
-      "events": "f4650bc90d0767fa75391bb5"
+      "dom": "01e08dcff1e2657da9c0c4fa",
+      "events": "5862f14fda0d839a31fb22ca"
     },
     "mount/stacked-svg": {
-      "dom": "b7b20c08f61aab3047a9e75a",
-      "events": "5329eb1ea703b5fef6fb8d97"
+      "dom": "6ca9a6487c58fcb022c2631e",
+      "events": "e09259b36b51ad6b87c4afe2"
     },
     "mount/area-points-svg": {
-      "dom": "6cb3a91fb758f77cfed33bf6",
-      "events": "7ee5215a68cdd05254bd0bae"
+      "dom": "3bf23dfecf266875aadb10ba",
+      "events": "e4378df4c28e873c6864c726"
     },
     "mount/plugin-lollipop-svg": {
-      "dom": "04909eaed11c29edd949e391",
-      "events": "045a5a441122269bda6cf1f4"
+      "dom": "b23b5cef7145aae5a8ddcb98",
+      "events": "90242dae843e6f6563a945f0"
     },
     "mount/plugin-band-probe-svg": {
-      "dom": "26872b27db5f6adb0acc48f4",
-      "events": "92c14cf10b0fce94fc1516a2"
+      "dom": "77ba128e0b3bedb8463eb83e",
+      "events": "222ec1f38432084dd22313a3"
     },
     "mount/plugin-annotations-svg": {
-      "dom": "9275f576a460e77f6a9850d3",
-      "events": "6682cb5f2a8099008ff284d4"
+      "dom": "11306cc3f0bc9852cef5f1cb",
+      "events": "0ea27d82ad28d6fd76822bb6"
     },
     "mount/dense-128-svg": {
-      "dom": "50f567fa02939880c488d5d7",
-      "events": "a36cc86de63d8605bcb40b03"
+      "dom": "aadf1083491a24f67c31a6e1",
+      "events": "8dd6d6f0b648d3c9d234312d"
     },
     "mount/hidden-series-svg": {
-      "dom": "1c3cca3e12900ddfcf8a0458",
-      "events": "31ebbbc0e83e3960ebd0bccb"
+      "dom": "cd616ad18d236f3bd38c03f5",
+      "events": "4f6a47f61bee6161a16311bc"
     },
     "mount/curves-svg": {
-      "dom": "4a505d4579c84956ea108adc",
-      "events": "72fe2b2e8ab4dc6e61f02c69"
+      "dom": "2dfa45d6b5874354da26d06c",
+      "events": "215a75912d0d26afb58e7935"
     },
     "mount/rule-x-svg": {
-      "dom": "cda587204e1c6595f4738812",
-      "events": "0d92b873f56d0018d142f2d5"
+      "dom": "1eaa01be81df1c3c9cb44b4c",
+      "events": "f18baf1ce8dfb898b9999739"
     },
     "mount/typed-categories-svg": {
-      "dom": "30a4e4e1f08d89a9c69a8694",
-      "events": "ed3d3c17d58f45844fc88c54"
+      "dom": "c5c260576bc84f5867c668a2",
+      "events": "4a0db0f5db25e8e1af053e0b"
     },
     "mount/heatmap-basic-svg": {
-      "dom": "e73d851f49b27941a8409e4f",
-      "events": "bd2aba24217c68586d4b6581"
+      "dom": "9a3f034c26a7fda34133d1d8",
+      "events": "9257d0d12c14d053272606cd"
     },
     "mount/heatmap-dashboard-svg": {
-      "dom": "e5cad629fa4ce8ed91cede7d",
-      "events": "c5c8d433a76495e18b7d4e8b"
+      "dom": "f60a994706fed019a0e29bdf",
+      "events": "9d2db855099e319be1fcc908"
     },
     "mount/bars-negative-svg": {
-      "dom": "4d59e5855e927546b4119470",
-      "events": "a94d9868ed53597c2cca08be"
+      "dom": "32b769e4e2e26cd75e7d99c4",
+      "events": "332875725dc76cb8e1dffffd"
     },
     "mount/bars-numeric-svg": {
-      "dom": "0a7223f1e94e25f35449d0fb",
-      "events": "5ccd346300f414c9e09e43c6"
+      "dom": "9500a6c7a1b0270870a62b3d",
+      "events": "4b47055f9ec9594b0cb41347"
     },
     "mount/histogram-fade-svg": {
-      "dom": "423aaf12531f87b8f0097081",
-      "events": "4dd033ed428f8f8a66a396d7"
+      "dom": "34f607085ad50b951071690c",
+      "events": "65a5ca2e973c100156054113"
     },
     "mount/pie-empty-svg": {
-      "dom": "f84dd74c4e2496d130234a18",
-      "events": "75d538f698207c3c76f5a1f2"
+      "dom": "db8f541651fbcc34d6c67050",
+      "events": "0aa845ecd20144eaa8ad405b"
     },
     "mount/pie-dashboard-svg": {
-      "dom": "340823ba138eb87bcd41e77d",
-      "events": "825b6fd493b80c62bbe67555"
+      "dom": "86e23ded65ce3b8d6bb393ff",
+      "events": "b401762454642256d15840a4"
     },
     "mount/radar-multi-svg": {
-      "dom": "14e45b7e63f2c9045f88cbc3",
-      "events": "730ef1698308624b878be93e"
+      "dom": "67e00d738825f41da92cc7bc",
+      "events": "b994ccae61f97f8fda83f746"
     },
     "mount/radar-dashboard-svg": {
-      "dom": "0251b3eff66994d1b8bbdfa7",
-      "events": "86a612f5e01c44e812316461"
+      "dom": "c6efbee7d0a1d3177ae5d271",
+      "events": "ee5de7881afc610457c49810"
     },
     "mount/log-y-svg": {
-      "dom": "450e379771076dc56693e736",
-      "events": "daab1d4a3b2d6f0f29fa21b7"
+      "dom": "8914eb3e56377db10a61fb70",
+      "events": "09cf24baac03d0cfb107ead9"
     },
     "mount/theme-light-svg": {
-      "dom": "61f183349eaf1f905808515a",
-      "events": "c6a2e80c7e724b03759c20b6"
+      "dom": "2b5482007ac8329088d7e02f",
+      "events": "2bd52e2b345b0181f062aaca"
     },
     "mount/theme-custom-svg": {
-      "dom": "41ae39976ecfd8eb00fc37f8",
-      "events": "5e459755e6242ad657797219"
+      "dom": "317479b7e68194b7d1ba2115",
+      "events": "bd0161f60bf17fc3343c5150"
     },
     "mount/dashboard-scatter-svg": {
-      "dom": "b95b0b087cd61657da2274f7",
-      "events": "711e6b189732f5fc7dda6dea"
+      "dom": "1714ebe612e22c6495103453",
+      "events": "09c6246037af237d97947ec0"
     },
     "mount/toggles-off-svg": {
-      "dom": "bb89bad90e69c5ff613b9a65",
+      "dom": "ac9c60149ee8952075f1363d",
       "events": "592ace0a1fbf88650f0413ca"
     },
     "mount/single-point-line-svg": {
-      "dom": "3dafaacebfddfb1b15be802d",
-      "events": "d1be51148f1237e7f9d02995"
+      "dom": "a1f61e1445cd1661f1aca794",
+      "events": "42a491355c770685c0310229"
     },
     "mount/time-canvas": {
-      "dom": "e6434182b5496e2553d0362f",
-      "events": "46d6eab14a339724fe0dc77f"
+      "dom": "145756e8f4e1cb762243c845",
+      "events": "3cbb657bf4d686921f17314b"
     },
     "mount/time-chrome-canvas": {
-      "dom": "107281841e4ced1e914120ce",
-      "events": "dde554551be54f4a7141ed94"
+      "dom": "3a032e99682c0d38619cf6cc",
+      "events": "921c136fcb9be930f1c8e23e"
     },
     "mount/time-static-canvas": {
-      "dom": "f81f3f8ba3f70d0332b76a13",
-      "events": "2cfc3f069bf3b3320176a34b"
+      "dom": "5503be61447fb44facb87e57",
+      "events": "2b11a1bbb07518e4dbd5550b"
     },
     "mount/basic-mixed-canvas": {
-      "dom": "432cdf5741ded99cfe6d4074",
-      "events": "dc2ff6db49a0b7a3a437ce1e"
+      "dom": "88c1de16610932a74ad6e07e",
+      "events": "5ba69c79443cb92230dcd465"
     },
     "mount/stacked-canvas": {
-      "dom": "28a09f0307c04c1a757f688c",
-      "events": "2559b9e441f034717ce1131d"
+      "dom": "4c4a734c1ca79b12bef0b3a0",
+      "events": "0ce65ff5b449042b5ea28dac"
     },
     "mount/area-points-canvas": {
-      "dom": "510a66e51cd51fe73ad940e1",
-      "events": "edd24448ff416b419904f4f5"
+      "dom": "ab53515f31c08e2f8281b4ac",
+      "events": "66b7b0b1e79074145f7adeec"
     },
     "mount/plugin-lollipop-canvas": {
-      "dom": "1bae018d7451fdcd9f786dba",
-      "events": "157eaa88d9ec057f70294748"
+      "dom": "7ae13f99429664b8b13ddb68",
+      "events": "1ff7bf9c97c8b5551d92bc68"
     },
     "mount/plugin-band-probe-canvas": {
-      "dom": "005d1b17352ffccffcb6d6cf",
-      "events": "57970ccfbd2a1ffca42f0702"
+      "dom": "78e7a65bda8873e3c5628507",
+      "events": "3ba2261d8b6679ca9c00ce16"
     },
     "mount/plugin-annotations-canvas": {
-      "dom": "ccafcfeb78a1f08e762d940e",
-      "events": "0ee67c21e2423a04652a5653"
+      "dom": "0a3d42bb7e94102d536513b5",
+      "events": "a2320b068b9d11a2149599d9"
     },
     "mount/dense-128-canvas": {
-      "dom": "6721b0d6adc454876833934a",
-      "events": "eb831e7377a0e4115a092d6e"
+      "dom": "65592609bca33db5a9dbbc6c",
+      "events": "5bd68ea3cfdfb25f4be30bbb"
     },
     "mount/hidden-series-canvas": {
-      "dom": "859c16067ba4107c71fe5552",
-      "events": "10693101a2e49757662e6b58"
+      "dom": "960d158e053834f3bc3f08df",
+      "events": "89b28ee21eccc14ab0d98283"
     },
     "mount/curves-canvas": {
-      "dom": "1bdd8a3d95777340938c0f7c",
-      "events": "e274ea17c2049728c965ef8f"
+      "dom": "18a97d0fe83115cc86389878",
+      "events": "860b182878c12f35718bd655"
     },
     "mount/rule-x-canvas": {
-      "dom": "c8954ca79545c9511185cc2b",
-      "events": "91757691020d41d8435c55f8"
+      "dom": "c650d42424212cf9f0952645",
+      "events": "2815b8c4ad9da40fb9525ec1"
     },
     "mount/typed-categories-canvas": {
-      "dom": "9671c159160cfe76f2eaf3d7",
-      "events": "5e63d28575d1492d6dd0e3cd"
+      "dom": "a1fa687cbc41a26f11732221",
+      "events": "112d43d20ac71b6d27ff5043"
     },
     "mount/heatmap-basic-canvas": {
-      "dom": "19dcfea7b17b95ec4aa77800",
-      "events": "bd2aba24217c68586d4b6581"
+      "dom": "d8810dc91edaf9016382f841",
+      "events": "9257d0d12c14d053272606cd"
     },
     "mount/heatmap-dashboard-canvas": {
-      "dom": "3dc7366c23f9b69cf49b46a6",
-      "events": "c5c8d433a76495e18b7d4e8b"
+      "dom": "f08e508a6e6422a1da5afea5",
+      "events": "9d2db855099e319be1fcc908"
     },
     "mount/bars-negative-canvas": {
-      "dom": "28b48803c4290b5bd8c540d9",
-      "events": "8395681c95034c582748e3df"
+      "dom": "6698ffd7e9ddbf41f4db3d90",
+      "events": "58c737b9ceecf2c00dde62e2"
     },
     "mount/bars-numeric-canvas": {
-      "dom": "2ffa9e70e726ab7a5ad0e50d",
-      "events": "a889e4ccb0eda8fefb2ed4e6"
+      "dom": "7bcf399d4efa27a4eac0647c",
+      "events": "5c6b427b179fec8d9dc97b1a"
     },
     "mount/histogram-fade-canvas": {
-      "dom": "a1e20e87aa08dee4d388a28a",
-      "events": "4dd033ed428f8f8a66a396d7"
+      "dom": "100321bcec2764e45cf7024e",
+      "events": "65a5ca2e973c100156054113"
     },
     "mount/pie-empty-canvas": {
-      "dom": "631bee92e62bc2e9673940ee",
-      "events": "75d538f698207c3c76f5a1f2"
+      "dom": "335ae9d151a6f48f6f377be5",
+      "events": "0aa845ecd20144eaa8ad405b"
     },
     "mount/pie-dashboard-canvas": {
-      "dom": "22c63b1f72f5ac101b98569a",
-      "events": "825b6fd493b80c62bbe67555"
+      "dom": "0e3f1da010295cf6efefd11e",
+      "events": "b401762454642256d15840a4"
     },
     "mount/radar-multi-canvas": {
-      "dom": "ef2d724f50631913e5e774d2",
-      "events": "730ef1698308624b878be93e"
+      "dom": "79008499646e8cf0395722fb",
+      "events": "b994ccae61f97f8fda83f746"
     },
     "mount/radar-dashboard-canvas": {
-      "dom": "b9a6c0a96f9ad8d4651c80ef",
-      "events": "86a612f5e01c44e812316461"
+      "dom": "33179450aef3523dcc37cf67",
+      "events": "ee5de7881afc610457c49810"
     },
     "mount/log-y-canvas": {
-      "dom": "55cc92878872d411e8e655ae",
-      "events": "659cff9615cca668a0225468"
+      "dom": "dc6d304c6d8c32e1383522dd",
+      "events": "a992cc29278a0beb9589ddb2"
     },
     "mount/theme-light-canvas": {
-      "dom": "9eade1fb4e5a80f1d15335cb",
-      "events": "4fbd51ee3c30c8e67bb650a3"
+      "dom": "d0afb5ff4c721a1cbbbc28f5",
+      "events": "43d47915af3b766495a326b0"
     },
     "mount/theme-custom-canvas": {
-      "dom": "9da1ec0e78c298fd9ca7262b",
-      "events": "4e4c5895ebbfaa11f3b9a1bf"
+      "dom": "8206dccd5f565bb4d37dc076",
+      "events": "c29f6dd99bcb53cbd89a06ea"
     },
     "mount/dashboard-scatter-canvas": {
-      "dom": "882f23a46418c75a298cd38a",
-      "events": "711e6b189732f5fc7dda6dea"
+      "dom": "bfdc164e063d00a7c97cd3c2",
+      "events": "09c6246037af237d97947ec0"
     },
     "mount/toggles-off-canvas": {
-      "dom": "3ee3cff611d295384d9efbe8",
+      "dom": "9b868c9d09966e936cf6e1df",
       "events": "592ace0a1fbf88650f0413ca"
     },
     "mount/single-point-line-canvas": {
-      "dom": "1d1e43eb3514fcd213fa6f87",
-      "events": "9458c5a47496860042ebd822"
+      "dom": "df7c1a3bda0fd39751338d99",
+      "events": "dc214da03c8c98dffa536bbf"
     },
     "mount/auto-ids": {
       "dom": "16f77ac09a11c84fc0e02b4f",

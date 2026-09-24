@@ -148,6 +148,52 @@ scans source rows to infer domains and build the envelope, so it remains O(n).
 geometry. Set `performance.maxRenderedPoints` to tune the bound or
 `performance.decimation: "none"` when exact output geometry is required.
 
+### Native source layout
+
+The compiler and renderers are split by concern. `src/chart/defineChart.ts`
+and `src/chart/render.ts` are thin facades that re-export the modules below,
+so internal imports and the public `/chart` barrel do not depend on the
+layout. No module in either directory may exceed 700 lines, and
+`tests/native-split-parity.mjs` enforces that limit.
+
+```text
+src/chart/compile/
+  types.ts      spec, scale-spec, scene, compiled-chart, and plugin contracts
+  marks.ts      mark shapes, options, builders, defineMarkPlugin/customMark
+  define.ts     defineChart() and typed composition rules
+  validate.ts   runtime ChartSpec, scale, mark, and composition validation
+  legend.ts     series names/colours, hidden series, legend rows and placement
+  domain.ts     viewport windowing, X-type inference, domain checks, X/Y scales
+  axes.ts       margins, plot rectangle, time/band/linear ticks
+  format.ts     number, date, and signed formatting; axis formatters
+  cartesian.ts  line/area, point, ruleY/ruleX, grouped and stacked bars
+  decimate.ts   extrema decimation and per-series budget allocation
+  polar.ts      pie and radar
+  heatmap.ts    square-cell layout and colour cells
+  plugin.ts     isolated scales, plugin domains, compile, result validation
+  context.ts    per-compile mark context and scene accumulators
+  chart.ts      compileChart() pipeline orchestration
+  shared.ts, errors.ts   channel helpers and ChartCompileError
+
+src/chart/render/
+  svg.ts        SVG nodes, grid, axes, colour bar, document assembly
+  canvas.ts     Canvas painter for the same scene
+  legend.ts     top/right legend for both renderers
+  chips.ts      last-value chip layout and crosshair chip labels
+  hit.ts        hit testing, hover-sample index, tooltip text
+  primitives.ts shared paths, arcs, rounded bars, shading, escaping
+  mount.ts      mountChart() lifecycle, compile/paint, resize, handle
+  overlay.ts    mount DOM, hover crosshair/tooltip overlay
+  gestures.ts   select, wheel zoom, pan preview, brush, legend toggles
+  chrome.ts     range presets and navigator
+  types.ts      mount options/handle/event types and shared runtime state
+```
+
+The parity suite pins every fixture's scene, SVG, Canvas command stream, hit
+tests, mounted DOM, callback payloads, and validation messages. If you change
+native output on purpose, regenerate its snapshot with
+`node tests/native-split-parity.mjs --update` and explain the diff in review.
+
 ### Validation and truthful gaps
 
 Type inference rejects invalid datum keys in TypeScript, while compilation also
@@ -248,7 +294,8 @@ built-in mark kind. Plugin-specific top-level options belong in the typed
 
 ```text
 src/
-  chart/       typed native grammar, scales, scene compiler, SVG/Canvas output
+  chart/       typed native grammar, scales, scene compiler (compile/),
+               SVG/Canvas output and mounts (render/)
   react/       lifecycle adapter and Recharts-shaped descriptors
   core/        financial widget, API, context, theme, shape state
   data/        financial feed orchestration and TimeIndex
