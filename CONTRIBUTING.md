@@ -49,6 +49,46 @@ npm run test:visual:update
 `npm test` starts with the strict source and API type tests. During development,
 `npm run typecheck` runs that faster type-only feedback loop by itself.
 
+## Running and adding tests
+
+`npm test` runs `scripts/run-tests.mjs`: typecheck, build,
+`examples/smoke.mjs`, then every `tests/*.mjs` file in name order, with the
+slow `build-watch` and `package-contract` suites last. Tests are discovered;
+never add a test to `package.json`.
+
+- Add a regression as `tests/<name>.mjs`: a self-executing Node script that
+  exits non-zero on failure (a thrown assertion is enough). Tests may import
+  `dist/` because the runner builds first.
+- Put shared test modules in `tests/helpers/`; they are never run directly.
+  `tests/static-server.mjs` is the Playwright web server, not a test.
+- Run a subset while iterating. It builds, then runs only the named tests:
+
+  ```bash
+  npm test -- chart data-manager
+  npm test -- "chart*" --no-build
+  node scripts/run-tests.mjs --list
+  ```
+
+  A name that matches no test fails and lists the available ones.
+- Real-browser behaviour belongs in a Playwright spec (`tests/*.spec.ts`),
+  run by `npm run test:visual`.
+
+## Adding a package subpath
+
+Public entrypoints are one table, `PACKAGE_ENTRIES` in `scripts/entries.mjs`.
+It drives the esbuild outputs, `package.json` `exports` and `typesVersions`,
+the prepare script, the packed package contract, and the bundle-size gate. To
+add a subpath:
+
+1. Add the entry row and its `src/<name>/index.ts` barrel with real exports.
+2. Run `node scripts/entries.mjs --write` to regenerate the `package.json`
+   fields (`tests/package-entries.mjs` fails while they are out of sync).
+3. Add `benchmarks/budgets/<id>.json` with an artifact budget and at least one
+   consumer scenario, then `node scripts/check-bundle-size.mjs --write-docs`
+   to refresh the table in [performance](./docs/performance.md#bundle-budgets).
+4. Document the subpath in the README surface table and the
+   [capability matrix](./docs/capabilities.md).
+
 ## Change checklist
 
 - Keep the root widget, native `/chart`, and React `/react` responsibilities
@@ -80,9 +120,10 @@ npm run test:visual:update
 | Data/time/study tests | Async races, gapped sessions, teardown, and incremental indicators |
 | React adapter tests | Exact series props, measured sizing, immutable handles, lifecycle, and React 17/18 types |
 | Build-watch test | Type-only and hand-authored declaration changes rebuild without restarting the watcher |
-| Packed package contract | ESM, CommonJS, NodeNext declarations, shared runtime identity, optional React peer, export paths, standalone global |
+| Test runner and entry table | Test discovery, subset selection, and `package.json` exports generated from `scripts/entries.mjs` |
+| Packed package contract | ESM, CommonJS, NodeNext declarations for every entry, shared runtime identity, optional React peer, export paths, standalone global |
 | Playwright goldens | Product-level financial and native-dashboard appearance and interaction states |
-| Bundle budget | Gzip size of root, native chart, and React ESM entrypoints |
+| Bundle budget | Gzip size of each published ESM entrypoint and of tree-shaken, minified consumer scenarios, one budget file per entry |
 | Compiler benchmark | Repeatable 1k through 1M native scene compilation and regression budget |
 
 ## Architecture and style

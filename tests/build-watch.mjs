@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { bundleArtifacts } from "../scripts/entries.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceProbe = resolve(root, "src/types/WatchContractProbe.ts");
@@ -33,6 +34,10 @@ const waitFor = async (predicate, label, timeout = 30_000) => {
 try {
   rmSync(sourceProbe, { force: true });
   await waitFor(() => output.includes("[raze-charts] watching"), "watch startup");
+  // Watch mode builds every public entry from scripts/entries.mjs up front.
+  for (const artifact of bundleArtifacts()) {
+    assert.ok(existsSync(resolve(root, "dist", artifact)), `watch startup did not emit dist/${artifact}`);
+  }
   // Corrupt only generated output, then use the temporary type-only source as
   // the watch trigger. Tests must never rewrite tracked source files: doing so
   // is both unsafe on interruption and flaky on Windows where editors/indexers

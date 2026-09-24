@@ -20,10 +20,17 @@ prevents a compatibility adapter from becoming the architecture.
                 -> renderer-neutral CompiledChart scene
                     -> SVG string, SVG mount, or Canvas mount
 @razedotbot/charts/chart
+
+@razedotbot/charts/studies
+  pure indicator kernels + StudyRegistry / StudyDefinition
+        (the same modules the widget bundles; no DOM, no widget)
 ```
 
-The root, `/chart`, and `/react` package exports are public. Source paths and
-individual distribution files are not. The project is pre-1.0, so additions
+The root, `/chart`, `/react`, and `/studies` package exports are public. Every
+public entrypoint is one row in `scripts/entries.mjs`, which drives the build,
+`package.json` exports, the packed package contract, and the per-entry budget
+files in `benchmarks/budgets/`. Source paths and individual distribution
+files are not public. The project is pre-1.0, so additions
 should still preserve documented behavior wherever practical and call out
 breaking changes explicitly.
 
@@ -254,9 +261,11 @@ src/
   data/        financial feed orchestration and TimeIndex
   engine/      financial layout, interactions, renderer, Canvas paint layers
   studies/     built-in calculations, registry, active study state
+               (index.ts is the /studies entrypoint)
   ui/          optional financial chrome and popup primitives
   util/        formatting, resolution, delegates, Heikin Ashi
 tests/         unit, lifecycle, package contract, and visual regressions
-scripts/       packaging helpers and dependency-free quality tooling
+scripts/       entry table, test runner, packaging helpers, and quality tooling
+benchmarks/    compiler baseline and per-entry bundle budgets (budgets/<entry>.json)
 docs/          capability, migration, architecture, a11y, and performance guides
 ```
