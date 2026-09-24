@@ -261,6 +261,19 @@ pending readiness work.
 This rule is more important than transport cancellation: a callback API may
 not offer `AbortSignal`, but an obsolete callback still cannot commit.
 
+Compare series follow the same rule. `CompareController` watches the main
+series (`dataChanged` and viewport changes) and, through `CompareLoader`,
+refetches each compare after a symbol or resolution commit, pages it over the
+range the main series just added, and gives it its own live subscription and
+reset callback. `resetData()` refetches compares once the main series has
+committed its reset, over the reloaded window, so a stale main window is never
+copied. Every compare request belongs to a cancellable group, so a
+newer reload, `removeEntity()` or `remove()` drops pending callbacks, and a
+compare never keeps bars of another resolution on the axis while it reloads.
+A failed reload leaves the compare on the failed target (empty, or with its
+still-valid bars live after a symbol-only change), so the next move of the
+main series, back to the previous target included, or a reset refetches it.
+
 For new code, `defineDataSource` describes a Promise-first data source and
 `createDatafeed` adapts it to the callback contract consumed by the widget.
 Native realtime subscriptions receive an `AbortSignal` and may return a cleanup
@@ -290,7 +303,11 @@ request, the visible range). See [indicators.md](./indicators.md).
 
 `widget.save()` / `widget.load()` serialize a versioned JSON snapshot: symbol,
 interval, visible range, style/scale flags, drawings with stable IDs and behavior
-flags, study specs (not derived values), and compare symbols. The host owns
+flags, study specs (not derived values), and compare symbols. `load()` switches
+the symbol and interval, then fetches every compare before it replaces
+drawings, studies and compares. A compare that no longer resolves or loads is
+reported with a `[raze-charts]` console error and skipped, so the rest of the
+layout still loads. The host owns
 storage. A drawing with `disableSave` remains live but is omitted from the
 snapshot. `executeActionById("undo"|"redo")`
 walks a command stack for drawings and studies. `disableUndo` on a shape skips
