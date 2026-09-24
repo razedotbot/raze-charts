@@ -295,6 +295,7 @@ interface ChartingLibraryWidgetOptions
   studies_overrides?: ChartOverrides | undefined
   symbol: string
   theme?: ThemeName | undefined
+  time_scale?: TimeScaleOptions | undefined
   timeframe?: string | undefined | { value: string; type: 'period-back' | 'time-range'; }
   timezone?: string | undefined
   toolbar_bg?: string | undefined
@@ -447,6 +448,7 @@ interface GestureHost
   fitContent(): void
   hoverMark: Mark | null
   hoverShapeId: null | string
+  hoverTimescaleMark: TimescaleMark | null
   hoverTradingHit: 'body' | 'cancel' | null
   hoverTradingLineId: null | string
   lastPointerType: string
@@ -464,6 +466,7 @@ interface GestureHost
   shapeScreen: ShapeHit[]
   readonly shapes: ShapeStore
   subPanes: SubPaneGeom[]
+  timescaleMarkScreen: TimescaleMarkHit[]
   readonly trading: TradingStore
   tradingScreen: TradingHit[]
   volumePane: null | { top: number; h: number; }
@@ -756,6 +759,7 @@ interface RazeChartsOptions
   layout_symbols?: string[] | undefined
   magnet?: boolean | undefined
   sidebar?: SidebarItem[] | undefined
+  snap_drawings_to_bars?: boolean | undefined
   volume_mode?: VolumeMode | undefined
 interface RazeDataSource
   configuration?: (() => MaybePromise<DatafeedConfiguration>) | DatafeedConfiguration | undefined
@@ -1004,6 +1008,10 @@ class TimeIndex
   timeAt(index: number): null | number
 interface TimePoint
   readonly time: number
+interface TimeScaleOptions
+  fix_left_edge?: boolean | undefined
+  fix_right_edge?: boolean | undefined
+  min_bar_spacing?: number | undefined
 class TimeframeBar
   new (context: ChartContext, el: HTMLElement, onPreset: (preset: '1D' | '1M' | '1W' | '3M' | 'ALL' | 'YTD') => void, onGoToDate: () => void): TimeframeBar
   destroy(): void

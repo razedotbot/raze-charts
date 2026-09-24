@@ -11,6 +11,7 @@ import { ApiController } from "./ApiController";
 import { ChromeController } from "./ChromeController";
 import { CompareController } from "./CompareController";
 import { ContextMenuController } from "./ContextMenuController";
+import { DrawingEventsController } from "./DrawingEventsController";
 import { EventHub } from "./EventHub";
 import { defineWidgetController, type WidgetControllerDefinition } from "./host";
 import { LayoutController } from "./LayoutController";
@@ -25,4 +26,5 @@ export const WIDGET_CONTROLLERS: readonly WidgetControllerDefinition[] = [
   defineWidgetController("compare", (host) => new CompareController(host)),
   defineWidgetController("persistence", (host) => new PersistenceController(host)),
   defineWidgetController("contextMenu", (host) => new ContextMenuController(host)),
+  defineWidgetController("drawingEvents", (host) => new DrawingEventsController(host)),
 ];

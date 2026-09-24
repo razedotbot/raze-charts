@@ -70,6 +70,7 @@ interface ChartingLibraryWidgetOptions
   studies_overrides?: ChartOverrides | undefined
   symbol: string
   theme?: ThemeName | undefined
+  time_scale?: TimeScaleOptions | undefined
   timeframe?: string | undefined | { value: string; type: 'period-back' | 'time-range'; }
   timezone?: string | undefined
   toolbar_bg?: string | undefined
@@ -287,6 +288,7 @@ interface RazeChartsOptions
   layout_symbols?: string[] | undefined
   magnet?: boolean | undefined
   sidebar?: SidebarItem[] | undefined
+  snap_drawings_to_bars?: boolean | undefined
   volume_mode?: VolumeMode | undefined
 type ResolutionString = string & { [Symbol.species]?: 'ResolutionString' | undefined; }
 type ResolveCallback = (symbolInfo: LibrarySymbolInfo) => void
@@ -339,6 +341,10 @@ interface StudySeries
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
 type SubscribeBarsCallback = (bar: Bar) => void
 type ThemeName = 'dark' | 'light'
+interface TimeScaleOptions
+  fix_left_edge?: boolean | undefined
+  fix_right_edge?: boolean | undefined
+  min_bar_spacing?: number | undefined
 interface TimescaleMark
   [key: string]: unknown
   color: string

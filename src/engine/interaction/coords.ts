@@ -20,34 +20,29 @@ export function pointerXY(host: GestureHost, e: MouseEvent): { x: number; y: num
   };
 }
 
-/** Unix time (seconds) and price under a canvas point; the magnet snaps to OHLC. */
+/**
+ * Unix time (seconds) and price under a canvas point. The time snaps to the
+ * nearest bar centre (so anchors sit on a candle, not between two) unless
+ * `raze.snap_drawings_to_bars` is false. With the magnet on, the point snaps
+ * to the nearest bar in the data and to that bar's closest OHLC price.
+ */
 export function timePriceAt(host: GestureHost, x: number, y: number): { unixTime: number; price: number } {
   const s = host.plotScale();
-  const bars = host.context.bars;
-  let unixTime = 0;
-  let idx = 0;
-  if (bars.length) {
-    idx = indexForX(s, x);
-    const timeIndex = new TimeIndex(bars, resolutionToMs(host.context.resolution));
-    unixTime = (timeIndex.timeAt(idx) ?? 0) / 1000;
-  }
-  let price = priceForY(s, y);
-  if (host.context.magnet && bars.length) {
-    const bar = bars[Math.max(0, Math.min(bars.length - 1, Math.round(idx)))];
-    if (bar) {
-      let best = bar.close;
-      let bestD = Math.abs(price - bar.close);
-      for (const candidate of [bar.open, bar.high, bar.low]) {
-        const d = Math.abs(price - candidate);
-        if (d < bestD) {
-          bestD = d;
-          best = candidate;
-        }
-      }
-      price = best;
+  const { bars, magnet, options, resolution } = host.context;
+  const price = priceForY(s, y);
+  if (!bars.length) return { unixTime: 0, price };
+  let idx = indexForX(s, x);
+  if (magnet) {
+    const bar = bars[Math.max(0, Math.min(bars.length - 1, Math.round(idx)))]!;
+    let best = bar.close;
+    for (const candidate of [bar.open, bar.high, bar.low]) {
+      if (Math.abs(price - candidate) < Math.abs(price - best)) best = candidate;
     }
+    return { unixTime: bar.time / 1000, price: best };
   }
-  return { unixTime, price };
+  if (options?.raze?.snap_drawings_to_bars !== false) idx = Math.round(idx);
+  const timeIndex = new TimeIndex(bars, resolutionToMs(resolution));
+  return { unixTime: (timeIndex.timeAt(idx) ?? 0) / 1000, price };
 }
 
 export function zoneAt(host: GestureHost, x: number, y: number): PointerZone {
@@ -60,9 +55,4 @@ export function zoneAt(host: GestureHost, x: number, y: number): PointerZone {
     inPlot: x <= right && y >= host.plotT && y <= bottom,
     contentBottom,
   };
-}
-
-/** Publish the current visible range after an interactive viewport change. */
-export function emitViewport(host: GestureHost): void {
-  host.context.viewportChanged.fire(host.data.visibleUnixRange());
 }

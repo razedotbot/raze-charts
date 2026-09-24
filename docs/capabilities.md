@@ -44,17 +44,19 @@ registry created there is standalone; pass definitions to a widget through
 | Abortable native realtime setup | **Yes** | The native adapter supplies `AbortSignal` and runs cleanup even when async setup finishes after unsubscribe. |
 | Symbol and resolution races | **Yes** | Latest request wins; stale history, marks, and subscription callbacks are ignored. |
 | Async marks | **Yes** | Callback-based asynchronous `getMarks` results are applied only to the active target. |
-| Timescale marks | **Yes** | `getTimescaleMarks` is requested with history and painted on the time axis. |
+| Timescale marks | **Yes** | `getTimescaleMarks` is requested with history and painted on the time axis; hovering a badge shows its `tooltip` lines in a themed overlay tooltip linked to the canvas. |
 | Gapped market sessions | **Yes** | `TimeIndex` maps actual timestamps onto adjacent logical bar indices; `session_breaks` draws optional gap lines. |
+| Pan and zoom | **Yes** | Wheel zoom scales with the wheel distance and `deltaMode` (a 100 px notch zooms about 11%, trackpad deltas zoom gently) and ctrl+wheel follows the trackpad pinch curve, around the pointer. Drag, pinch, time-axis drag and the keyboard keep at least min(3 bars, 10% of the span) in the plot and share one zoom limit; zooming out never narrows a wider view (for example after ALL). `time_scale: { min_bar_spacing, fix_left_edge, fix_right_edge }` sets the zoom-out limit and pins the data edges; invalid values warn. |
 | Timeframe / go-to-date | **Yes** | Honours `options.timeframe`; header presets and go-to-date call `setVisibleRange`, which pages history when needed. |
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
 | Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. |
 | Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` and `lock` are stored on the instance. |
 | Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. |
-| Drawing tools | **Yes** | Horizontal/vertical line, trend, ray, extended line, measure (ephemeral), Fibonacci, rectangle, and text. |
-| Magnet / stay-in-mode / objects tree | **Yes** | OHLC magnet, stay-in-drawing-mode, and an objects tree over shapes and studies. |
-| Shape editing | **Yes** | Create, drag, read/update points, remove, and remove all shapes. |
+| Drawing tools | **Yes** | Horizontal/vertical line, trend, ray, extended line, measure (ephemeral), Fibonacci, rectangle, and text. Text is typed in an inline editor (Enter commits, Shift+Enter adds a line, Escape cancels, double-click re-edits; no `window.prompt`, so it works in sandboxed iframes). |
+| Magnet / stay-in-mode / objects tree | **Yes** | OHLC magnet (the anchor takes the bar's time and nearest OHLC price), stay-in-drawing-mode, and an objects tree over shapes and studies. Without the magnet, anchors snap to bar centres unless `raze.snap_drawings_to_bars: false`. |
+| Shape editing | **Yes** | Create, select (topmost drawing first), drag a handle to move one anchor or the body to move every anchor by the same bars and price, read/update points, remove, and remove all shapes. Moves under 3 px (6 px touch) are clicks; each drag is one undo entry; Escape cancels a drag; double-clicking a drawing never refits the chart. |
+| Drawing events | **Yes** | `drawing_event` fires `create`, `remove`, `points_changed`, `properties_changed`, `hide`, `show`, `click` and `move` (at most once per frame while dragging). Widget events `drawing_selection_changed` (selected ids) and `drawing_tool_changed` (tool id) fire once per change. |
 | Order and position lines | **Yes** | TradingView-style fluent adapters, styling, quantity/P&L labels, move/modify/cancel callbacks, mouse/touch drag, and one-tick keyboard adjustment. |
 | Stop-loss / take-profit brackets | **Yes** | Linked entry/SL/TP lines, risk/reward shading and ratio, auto-scale participation, group callbacks and cancellation. |
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
