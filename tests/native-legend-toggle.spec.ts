@@ -6,6 +6,11 @@ import { expect, test, type Page } from "@playwright/test";
 // serves the keyboard and screen readers without intercepting the pointer.
 // Regression: the merged W1B-02/W1B-03 mount stacked a pointer-hit button over
 // each clickable SVG row, so the row itself could not be clicked.
+// Like the button it replaces as the pointer target, a painted entry toggles
+// on release (WCAG 2.5.2 Pointer Cancellation): a primary press arms it, the
+// release toggles it only over the same entry, and moving off cancels, so a
+// right-click, a middle-click, a press dragged away and a touch that scrolls
+// the page toggle nothing.
 
 type Renderer = "svg" | "canvas";
 
@@ -32,6 +37,11 @@ function entryPoints(page: Page): Promise<EntryPoint[]> {
   });
 }
 
+/** onSelect calls counted by the fixture. */
+function selections(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { __razeSelections: number }).__razeSelections);
+}
+
 function hiddenIds(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const handle = (window as unknown as { __razeHandle: { getScene(): { legendLayout: { rows: { id: string; hidden: boolean }[] } } } }).__razeHandle;
@@ -40,6 +50,21 @@ function hiddenIds(page: Page): Promise<string[]> {
 }
 
 const toggle = (page: Page, id: string) => page.locator(`#host button[data-series="${id}"]`);
+
+/** Raw touch input through CDP, so a finger can move between press and release. */
+async function touchDrag(page: Page, path: { x: number; y: number }[]): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  const [start, ...rest] = path.map(({ x, y }) => ({ x, y }));
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start!] });
+  for (const point of rest) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [point] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
+
+/** `steps` points from `from` to `to`, inclusive of both ends. */
+function line(from: { x: number; y: number }, to: { x: number; y: number }, steps = 8): { x: number; y: number }[] {
+  return Array.from({ length: steps + 1 }, (_, i) => ({ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }));
+}
 
 for (const renderer of ["svg", "canvas"] as Renderer[]) {
   test.describe(`native legend toggles (${renderer})`, () => {
@@ -88,6 +113,47 @@ for (const renderer of ["svg", "canvas"] as Renderer[]) {
       await expect(toggle(page, second!.id)).toHaveAttribute("aria-pressed", "true");
     });
 
+    test("a mouse press toggles on release over the same entry and can be cancelled", async ({ page }) => {
+      await openLegend(page, `case=series&renderer=${renderer}`);
+      const [first, second] = await entryPoints(page);
+      const host = (await page.locator("#host").boundingBox())!;
+
+      await page.mouse.move(first!.x, first!.y);
+      await page.mouse.down();
+      expect(await hiddenIds(page), "the press only arms the entry").toEqual([]);
+      await page.mouse.move(host.x + host.width / 2, host.y + host.height / 2, { steps: 6 });
+      await page.mouse.up();
+      expect(await hiddenIds(page), "dragged off the entry before release: cancelled").toEqual([]);
+
+      await page.mouse.move(first!.x, first!.y);
+      await page.mouse.down();
+      await page.mouse.move(second!.x, second!.y, { steps: 6 });
+      await page.mouse.up();
+      expect(await hiddenIds(page), "released over another entry: neither toggles").toEqual([]);
+
+      await page.mouse.move(first!.x, first!.y);
+      await page.mouse.down();
+      await page.mouse.move(first!.x, host.y + host.height + 150, { steps: 6 });
+      await page.mouse.up();
+      await page.mouse.move(first!.x, host.y + host.height + 150);
+      await page.mouse.down();
+      await page.mouse.move(first!.x, first!.y, { steps: 6 });
+      await page.mouse.up();
+      expect(await hiddenIds(page), "a press that left the chart, and a press from outside it, toggle nothing").toEqual([]);
+
+      await page.mouse.click(first!.x, first!.y, { button: "right" });
+      await page.keyboard.press("Escape");
+      expect(await hiddenIds(page), "a right-click opens the context menu and does not toggle").toEqual([]);
+      await page.mouse.click(first!.x, first!.y, { button: "middle" });
+      expect(await hiddenIds(page), "a middle-click does not toggle").toEqual([]);
+      await expect(toggle(page, first!.id)).toHaveAttribute("aria-pressed", "true");
+
+      await page.mouse.click(first!.x, first!.y);
+      expect(await hiddenIds(page), "a primary click still toggles").toEqual([first!.id]);
+      await expect(toggle(page, first!.id)).toHaveAttribute("aria-pressed", "false");
+      expect(await selections(page), "no legend press or release is also a data selection").toBe(0);
+    });
+
     test("Enter and Space on a focused toggle hide and show its series", async ({ page }) => {
       await openLegend(page, `case=hidden&renderer=${renderer}`);
       const button = page.getByRole("button", { name: "Portfolio 2", exact: true });
@@ -123,6 +189,33 @@ for (const renderer of ["svg", "canvas"] as Renderer[]) {
       await page.touchscreen.tap(slice!.x, slice!.y);
       expect(await hiddenIds(page)).toEqual([slice!.id]);
       await expect(toggle(page, slice!.id)).toHaveAttribute("aria-pressed", "false");
+    });
+
+    test("a touch that moves off the entry before lifting toggles nothing", async ({ page }) => {
+      await openLegend(page, `case=series&renderer=${renderer}`);
+      const [first, second] = await entryPoints(page);
+      const host = (await page.locator("#host").boundingBox())!;
+      // Touch implicitly captures the pointer to the pressed element; the lift
+      // must still be judged by where the finger is.
+      await touchDrag(page, line(first!, { x: host.x + host.width / 2, y: host.y + host.height / 2 }));
+      expect(await hiddenIds(page), "lifted over the plot").toEqual([]);
+      await touchDrag(page, line(first!, second!));
+      expect(await hiddenIds(page), "lifted over another entry").toEqual([]);
+      await touchDrag(page, [first!, { x: first!.x + 1, y: first!.y }]);
+      expect(await hiddenIds(page), "a tap that barely moves on the entry still toggles").toEqual([first!.id]);
+    });
+
+    test("a touch that scrolls the page from the legend toggles nothing", async ({ page }) => {
+      // Without gestures the mount leaves touch panning to the page.
+      await openLegend(page, `case=series&renderer=${renderer}&interaction=off`);
+      await page.evaluate(() => { document.body.style.height = "3000px"; });
+      const [first] = await entryPoints(page);
+      await touchDrag(page, line(first!, { x: first!.x, y: first!.y - 200 }, 12));
+      await expect.poll(() => page.evaluate(() => window.scrollY), { message: "the page scrolled" }).toBeGreaterThan(0);
+      expect(await hiddenIds(page), "the scroll did not toggle the entry it started on").toEqual([]);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.touchscreen.tap(first!.x, first!.y);
+      expect(await hiddenIds(page), "a tap still toggles without gestures").toEqual([first!.id]);
     });
   });
 }

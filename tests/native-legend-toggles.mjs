@@ -3,7 +3,10 @@
 // entry, on both renderers. The toggle buttons over the entries serve the
 // keyboard and screen readers and take no pointer events; pointers hit the
 // painted entry, which shows the pointer cursor and toggles without also
-// selecting a datum. The `+N more` summary goes through t("chart.legend.more").
+// selecting a datum. Like a button, the entry toggles on the release of a
+// primary press over the same entry, so a press can be cancelled by moving
+// off it (WCAG 2.5.2 Pointer Cancellation) and other buttons never toggle.
+// The `+N more` summary goes through t("chart.legend.more").
 // The browser half (real hit-testing, mouse, touch, keyboard) is
 // tests/native-legend-toggle.spec.ts. Bundled from source with esbuild so the
 // compiler and the test share one i18n runtime.
@@ -90,8 +93,11 @@ function mount(definition, options) {
   const handle = mountChart(host, definition, options);
   const wrap = host.firstElementChild;
   const [stage] = wrap.children;
-  const fire = (type, init = {}, target = wrap) => {
-    target.dispatchEvent(new window.MouseEvent(type, { bubbles: true, cancelable: true, ...init }));
+  // jsdom has no PointerEvent: a MouseEvent carries the pointer fields.
+  const fire = (type, { pointerId = 1, isPrimary = true, ...init } = {}, target = wrap) => {
+    const event = new window.MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+    Object.defineProperties(event, { pointerId: { value: pointerId }, isPrimary: { value: isPrimary } });
+    target.dispatchEvent(event);
   };
   const centre = (id) => {
     const box = handle.getScene().legendLayout.rows.find((row) => row.id === id).box;
@@ -118,24 +124,74 @@ for (const renderer of ["svg", "canvas"]) {
     m.cleanup();
   });
 
-  await check(`${renderer}: a legend press toggles once and does not also select a datum`, () => {
+  await check(`${renderer}: a legend click toggles once, on release, and does not also select a datum`, () => {
     const selections = [];
     const m = mount(pair, { width: 480, height: 280, renderer, onSelect: (event) => selections.push(event) });
     const at = m.centre("mark-0");
     m.fire("pointerdown", at);
+    assert.deepEqual(hiddenIds(m.handle), [], "the press only arms the entry");
     m.fire("pointerup", at);
     m.fire("click", at);
-    assert.deepEqual(hiddenIds(m.handle), ["mark-0"], "one press hides the series once");
-    assert.equal(selections.length, 0, "the release after a legend toggle is not an onSelect");
+    assert.deepEqual(hiddenIds(m.handle), ["mark-0"], "the release hides the series once");
+    assert.equal(selections.length, 0, "the release of a legend click is not an onSelect");
     m.fire("pointerdown", at);
-    m.fire("pointercancel", at);
-    assert.deepEqual(hiddenIds(m.handle), [], "a second press shows it again");
+    m.fire("pointerup", at);
+    assert.deepEqual(hiddenIds(m.handle), [], "a second click shows it again");
     // A plot click after the legend still selects.
     const { plot } = m.handle.getScene();
     const inPlot = { clientX: plot.x + plot.w / 2, clientY: plot.y + plot.h / 2 };
     m.fire("pointerdown", inPlot);
     m.fire("pointerup", inPlot);
     assert.equal(selections.length, 1, "plot clicks still select");
+    m.cleanup();
+  });
+
+  await check(`${renderer}: a legend press is cancelled by leaving the entry, and only a primary press toggles`, () => {
+    const selections = [];
+    const m = mount(pair, { width: 480, height: 280, renderer, onSelect: (event) => selections.push(event) });
+    const alpha = m.centre("mark-0");
+    const beta = m.centre("mark-1");
+    const { plot } = m.handle.getScene();
+    const inPlot = { clientX: plot.x + plot.w / 2, clientY: plot.y + plot.h / 2 };
+    const unchanged = (message) => assert.deepEqual(hiddenIds(m.handle), [], message);
+
+    m.fire("pointerdown", alpha);
+    m.fire("pointermove", inPlot);
+    m.fire("pointerup", inPlot);
+    unchanged("released over the plot: cancelled");
+    m.fire("pointerdown", alpha);
+    m.fire("pointerup", beta);
+    unchanged("released over another entry: neither toggles");
+    m.fire("pointerdown", alpha);
+    m.fire("pointercancel", alpha);
+    m.fire("pointerup", alpha);
+    unchanged("a cancelled press (the browser took the touch for scrolling) toggles nothing");
+    m.fire("pointerdown", alpha);
+    m.fire("pointerleave", {});
+    m.fire("pointerup", alpha);
+    unchanged("a press that left the chart is dropped, so a later release over the entry does nothing");
+    m.fire("pointerup", beta);
+    unchanged("a release over an entry that was not pressed (dragged in from outside) toggles nothing");
+    assert.equal(selections.length, 0, "and is not a data selection either");
+    m.fire("pointerdown", { ...alpha, button: 2 });
+    m.fire("pointerup", { ...alpha, button: 2 });
+    unchanged("a right-click (context menu) does not toggle");
+    m.fire("pointerdown", { ...alpha, button: 1 });
+    m.fire("pointerup", { ...alpha, button: 1 });
+    unchanged("a middle-click does not toggle");
+    m.fire("pointerdown", { ...alpha, pointerId: 7, isPrimary: false });
+    m.fire("pointerup", { ...alpha, pointerId: 7, isPrimary: false });
+    unchanged("a second touch does not toggle");
+    m.fire("pointerdown", { ...alpha, pointerId: 3 });
+    m.fire("pointerup", { ...alpha, pointerId: 4 });
+    unchanged("another pointer's release does not complete the press");
+    assert.equal(selections.length, 0, "a release after any legend press is not an onSelect");
+
+    // A cancelled press leaves the entry ready for the next click.
+    m.fire("pointerdown", alpha);
+    m.fire("pointerup", alpha);
+    assert.deepEqual(hiddenIds(m.handle), ["mark-0"], "a primary click still toggles");
+    assert.equal(selections.length, 0);
     m.cleanup();
   });
 
@@ -166,9 +222,17 @@ await check("the +N more summary is translated through chart.legend.more and mea
   const series = defineChart({
     marks: Array.from({ length: 40 }, (_, s) => line([{ x: 0, y: s }, { x: 1, y: s + 1 }], { x: "x", y: "y", name: `Portfolio number ${s + 1}` })),
   });
-  registerMessages("de", { "chart.legend.more": "+{count} weitere Reihen" });
+  const mounted = mount(definition, { ...size, renderer: "svg" });
+  const groupName = () => mounted.wrap.querySelector("button[data-series]").parentElement.getAttribute("aria-label");
+  assert.equal(groupName(), "Series");
+  registerMessages("de", { "chart.legend.more": "+{count} weitere Reihen", "chart.legend.toggles": "Reihen" });
   await setLocale("de");
   try {
+    // A mount translates the summary and the toggle group's name on its next repaint.
+    mounted.handle.update(definition);
+    assert.ok(mounted.stage.innerHTML.includes(`>+${hidden} weitere Reihen</text>`), "a mounted legend repaints in the new locale");
+    assert.equal(groupName(), "Reihen", "and so does the name of its toggle group");
+
     const pieMore = compileChart(definition, size).legendLayout.more;
     assert.equal(pieMore.label, `+${hidden} weitere Reihen`, "the side legend uses the translation");
     const top = compileChart(series, size);
@@ -179,6 +243,7 @@ await check("the +N more summary is translated through chart.legend.more and mea
     assert.ok(more.box.x + more.box.w <= size.width, "and still fits the chart");
     assert.ok(svgFromCompiled(top).includes(`>+${more.names.length} weitere Reihen</text>`), "the renderer paints it");
   } finally {
+    mounted.cleanup();
     await setLocale("en");
   }
   assert.equal(compileChart(definition, size).legendLayout.more.label, `+${hidden} more`, "back to English");

@@ -405,6 +405,7 @@ await check("radar series toggle from the legend", () => {
   const scene = fixture.handle.getScene();
   assert.equal(scene.legendPlacement, "top", "radar legends sit on top");
   fixture.fire("pointerdown", { clientX: scene.plot.x + 12, clientY: 12 });
+  fixture.fire("pointerup", { clientX: scene.plot.x + 12, clientY: 12 });
   assert(!fixture.handle.getScene().samples.some((sample) => sample.series === "Model A"), "the radar layer is hidden");
   fixture.cleanup();
 });

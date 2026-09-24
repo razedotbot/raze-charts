@@ -669,10 +669,15 @@ const pointerScript = (ctx) => {
   ctx.snap("brush commit");
   const legendEntry = ctx.wrap.querySelector("[data-series]");
   if (legendEntry) {
+    // A legend entry toggles on the release of a press on it.
     ctx.fire("pointerdown", { clientX: 20, clientY: 10 }, legendEntry);
+    ctx.fire("pointerup", { clientX: 20, clientY: 10 }, legendEntry);
     ctx.snap("legend toggle");
     const again = ctx.wrap.querySelector("[data-series]");
-    if (again) ctx.fire("pointerdown", { clientX: 20, clientY: 10 }, again);
+    if (again) {
+      ctx.fire("pointerdown", { clientX: 20, clientY: 10 }, again);
+      ctx.fire("pointerup", { clientX: 20, clientY: 10 }, again);
+    }
     ctx.snap("legend restore");
   }
   ctx.fire("selectstart");
@@ -722,6 +727,7 @@ for (const renderer of ["svg", "canvas"]) {
       const target = ctx.wrap.querySelector("[data-series]");
       if (target) {
         ctx.fire("pointerdown", { clientX: 10, clientY: 10 }, target);
+        ctx.fire("pointerup", { clientX: 10, clientY: 10 }, target);
         ctx.snap("legend toggle");
       }
       ctx.fire("pointerdown", { clientX: width / 2, clientY: height / 2 });

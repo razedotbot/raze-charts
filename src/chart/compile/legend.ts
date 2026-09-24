@@ -392,7 +392,10 @@ export function swatchWidth(symbol: LegendSymbol): number {
 
 /**
  * Summary for `count` rows that did not fit. Translated when the layout is
- * measured, so the reserved width fits the label the renderers paint.
+ * measured, so the reserved width fits the label the renderers paint (a
+ * mount picks up a locale change on its next repaint). One form serves every
+ * count, since the label counts no noun (`plural()` would cost the static SVG
+ * bundle more than its budget has left).
  */
 function moreLabel(count: number): string {
   return t("chart.legend.more", "+{count} more", { count });

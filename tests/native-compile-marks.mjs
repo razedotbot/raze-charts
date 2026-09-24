@@ -224,7 +224,8 @@ check("a mounted legend toggles a series off and back on through its row id", ()
     const click = () => {
       const entry = host.querySelector('[data-series="mark-0"]');
       assert.ok(entry, "the A row is always present");
-      entry.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+      // A legend entry toggles on the release of a press on it, like a button.
+      for (const type of ["pointerdown", "pointerup"]) entry.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, cancelable: true }));
     };
     click();
     assert.equal(handle.getScene().legend[0].hidden, true, "first click hides A");
@@ -246,15 +247,19 @@ check("a legend click shows a series hidden by options or spec hiddenSeries; a s
   globalThis.document = dom.window.document;
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   const visible = sceneKey(compile(toggleSpec()));
-  const pointerdown = (host, rowId) => host.querySelector(`[data-series="${rowId}"]`)
-    .dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+  // A click on the row: the press arms it and the release toggles it.
+  const clickRow = (host, rowId) => {
+    for (const type of ["pointerdown", "pointerup"]) {
+      host.querySelector(`[data-series="${rowId}"]`).dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, cancelable: true }));
+    }
+  };
   const run = (label, spec, options, rowId, hiddenAfter) => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const handle = mountChart(host, defineChart(spec), { width: 480, height: 300, ...options });
     const row = () => handle.getScene().legend.find((entry) => entry.id === rowId);
     assert.equal(row().hidden, true, `${label}: starts hidden`);
-    pointerdown(host, rowId);
+    clickRow(host, rowId);
     assert.equal(row().hidden, false, `${label}: the first click shows it`);
     assert.deepEqual(
       handle.getScene().legend.filter((entry) => entry.hidden).map((entry) => entry.id),
@@ -262,9 +267,9 @@ check("a legend click shows a series hidden by options or spec hiddenSeries; a s
       `${label}: other hidden series stay hidden`,
     );
     if (!hiddenAfter.length) assert.equal(sceneKey(handle.getScene()), visible, `${label}: the scene is the fully visible one`);
-    pointerdown(host, rowId);
+    clickRow(host, rowId);
     assert.equal(row().hidden, true, `${label}: the second click hides it again`);
-    pointerdown(host, rowId);
+    clickRow(host, rowId);
     assert.equal(row().hidden, false, `${label}: and the toggle keeps working`);
     handle.destroy();
   };
@@ -288,13 +293,13 @@ check("a legend click shows a series hidden by options or spec hiddenSeries; a s
     document.body.appendChild(host);
     const handle = mountChart(host, defineChart(grouped), { width: 480, height: 300, hiddenSeries: ["A"] });
     assert.equal(handle.getScene().nodes.filter((node) => node.series === "A").length, 0);
-    pointerdown(host, "mark-0");
+    clickRow(host, "mark-0");
     const shown = handle.getScene();
     assert.ok(shown.nodes.some((node) => node.role === "area" && node.series === "A"), "the area is back");
     assert.ok(shown.nodes.some((node) => node.role === "line" && node.series === "A"), "and so is its outline");
-    pointerdown(host, "mark-0");
+    clickRow(host, "mark-0");
     assert.equal(handle.getScene().nodes.filter((node) => node.series === "A").length, 0, "the row hides the whole group");
-    pointerdown(host, "mark-0");
+    clickRow(host, "mark-0");
     handle.update(defineChart(grouped));
     assert.equal(handle.getScene().legend[0].hidden, false, "a legend toggle survives update()");
     handle.update(defineChart(grouped), { hiddenSeries: ["B"] });
