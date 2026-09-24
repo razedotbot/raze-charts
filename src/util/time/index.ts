@@ -42,6 +42,7 @@ export type {
   BarTickOptions,
   CalendarTick,
   CalendarTickOptions,
+  TickFormatInput,
   TickLabelOptions,
   TickLabeler,
   TickLevel,

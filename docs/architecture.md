@@ -67,8 +67,8 @@ calendar or `Intl` formatting code goes here instead of into a runtime:
 | --- | --- |
 | `src/util/intl.ts` | Bounded cache of `Intl.NumberFormat`, `DateTimeFormat` and `PluralRules` per locale and options. Output is byte-identical to `toLocaleString`. |
 | `src/util/time/zone.ts` | IANA zones built on `Intl`. Offsets are memoised per UTC day and each transition is found to the second. Wall-time conversion follows Temporal's `compatible`, `earlier`, `later` and `reject` rules. Results do not depend on the process `TZ`. Instants outside the `Date` range (±8.64e15 ms) give `NaN`. |
-| `src/util/time/calendarTicks.ts` | Weighted calendar ticks from 1 ms to 1000 years. `calendarTicks()` handles continuous ranges (native `/chart`) and `barTicks()` handles logical bar axes. Also provides local `floorToCalendar()` and `addCalendar()`; day steps above 1 count days of the month (2 gives odd days, 14 gives the 1st and 15th). |
-| `src/engine/timeAxis.ts` | `FinancialTimeAxis` caches per-bar weights (appends are incremental) and formats ticks and crosshair labels. Every call takes the resolution kind: intraday bars are read in the display zone, daily, weekly and monthly bars in UTC (`calendarZone(kind)`). |
+| `src/util/time/calendarTicks.ts` | Weighted calendar ticks from 1 ms to 1000 years. `calendarTicks()` handles continuous ranges (native `/chart`) and `barTicks()` handles logical bar axes. An optional `format(tick, defaultLabel)` supplies custom labels ("14 Feb", "Feb 2025"); labels are formatted before `measure` runs, so collision checks see the final text. Also provides local `floorToCalendar()` and `addCalendar()`; day steps above 1 count days of the month (2 gives odd days, 14 gives the 1st and 15th). |
+| `src/engine/timeAxis.ts` | `FinancialTimeAxis` caches per-bar weights and formats ticks and crosshair labels. Every call takes the resolution kind: intraday bars are read in the display zone, daily, weekly and monthly bars in UTC (`calendarZone(kind)`). Pass the same bars array every frame: appends and last-bar updates to it are incremental, a new array recomputes, and `invalidate()` covers other in-place rewrites. |
 
 The tick ladder is 1/2/5/10/20/50/100/200/500 ms, 1/2/5/10/15/30 s and min,
 1/2/3/6/12 h, day, odd days, week, half month, 1/3/6 months and 1/2/5/10…1000
@@ -94,6 +94,31 @@ display zone. A 1 Feb daily bar therefore reads "1 Feb" and carries the
 month label in New York and Tokyo alike. Intraday bars are instants and are
 read in the display zone. Session boundaries and bar flooring use the same
 rule through `FinancialTimeAxis.calendarZone(kind)`.
+
+On a bar axis each bar weighs the heaviest boundary crossed since the
+previous bar. The first bar of the series weighs what a session open on its
+local day would weigh (at least a day), so it carries its date, and loading
+an earlier page does not change that weight. When clocks fall back, two bars in the
+repeated hour have the same wall time (01:00 EDT and 01:00 EST). The second
+one is told apart from a duplicate by its UTC time and is weighted like the
+first, so the hour is labelled twice, as on a continuous axis. It never
+weighs a day, so the date is not repeated.
+
+The core is not wired into either runtime yet, so it costs nothing today.
+Adopting it will. Measured with the `build.mjs` settings and gzip level 9,
+and net of the legacy tick code each runtime removes (about 0.4 KiB):
+
+| Entry | Core it pulls in | As shipped | Fully minified |
+| --- | --- | --- | --- |
+| Native `/chart` (W1B-01) | `calendarTicks` | +7.8 KiB (40.7 to about 48.5 KiB, budget 42) | +5.4 KiB |
+| Root widget (W1B-05) | `FinancialTimeAxis` | +7.8 KiB (51.9 to about 59.6 KiB, budget 55) | +6.3 KiB |
+
+Most of that is the zone math (about 2.7 KiB) and the tick selection. None of
+it is dead weight: unused exports and derived tables tree-shake. Minifying
+whitespace in the native artifact would drop its PURE annotations, which are
+part of its tree-shaking contract. Those budgets therefore have to rise when
+the core is adopted: native to at least 49 KiB and the root widget to at
+least 60 KiB, before any other growth in those packages.
 
 ### Async ownership
 

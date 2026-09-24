@@ -291,18 +291,21 @@ export function addCalendar(
 // Weights
 // ---------------------------------------------------------------------------
 
-const SUB_DAY_LEVELS = TICK_LEVELS.filter((l) => UNIT_MS[l.unit] < DAY_MS).reverse();
-const YEAR_LEVELS = TICK_LEVELS.filter((l) => l.unit === "year").reverse();
-const MONTH_LEVELS = TICK_LEVELS.filter((l) => l.unit === "month").reverse();
+// Derived tables are marked pure so bundles that never call boundaryWeight
+// (native /chart only needs calendarTicks) drop them.
+const SUB_DAY_LEVELS = /* @__PURE__ */ TICK_LEVELS.filter((l) => UNIT_MS[l.unit] < DAY_MS).reverse();
+const YEAR_LEVELS = /* @__PURE__ */ TICK_LEVELS.filter((l) => l.unit === "year").reverse();
+const MONTH_LEVELS = /* @__PURE__ */ TICK_LEVELS.filter((l) => l.unit === "month").reverse();
 /** Day and week rungs, heaviest first (half month, week, 2 days, day). */
-const DAY_LEVELS = TICK_LEVELS.filter((l) => l.unit === "day" || l.unit === "week").reverse();
-const LEVELS_DESC = [...TICK_LEVELS].reverse();
+const DAY_LEVELS = /* @__PURE__ */ TICK_LEVELS.filter((l) => l.unit === "day" || l.unit === "week").reverse();
+const LEVELS_DESC = /* @__PURE__ */ [...TICK_LEVELS].reverse();
 
 /**
- * Weight of the most significant boundary between two consecutive wall
- * times: the highest level whose bucket differs. A wall time that moves
- * backwards (the repeated hour when clocks fall back) still counts, so the
- * second 01:00 is labelled like the first.
+ * Weight of the most significant boundary between two wall times: the
+ * highest level whose bucket differs, or {@link NO_TICK} for equal wall
+ * times. It compares wall times only, so it cannot tell a duplicate bar from
+ * the repeated hour after clocks fall back (01:00 EDT and 01:00 EST read the
+ * same). {@link computeTickWeights} tells them apart by their UTC times.
  */
 export function boundaryWeight(prevWall: number, wall: number, weekStart: WeekStart = DEFAULT_WEEK_START): number {
   if (!Number.isFinite(prevWall) || !Number.isFinite(wall) || prevWall === wall) return NO_TICK;
@@ -350,7 +353,32 @@ export interface TimedPoint {
 }
 
 /**
+ * Weight of a bar at `wall` that follows a bar at `prevWall`.
+ *
+ * Normally this is the heaviest boundary crossed since the previous bar. When
+ * the local clock went back (a later instant with an equal or earlier wall
+ * time: the repeated hour after clocks fall back), the bar starts the repeated
+ * stretch. It then weighs as much as the heaviest sub-day rung it sits on or
+ * crosses, so the second 01:00 is labelled like the first. It never weighs a
+ * day or more, because the date has not changed.
+ */
+function stepWeight(prevTime: number, prevWall: number, time: number, wall: number, weekStart: WeekStart): number {
+  const crossed = boundaryWeight(prevWall, wall, weekStart);
+  if (!(time > prevTime && wall <= prevWall)) return crossed;
+  return Math.min(Math.max(crossed, alignedWeight(wall, weekStart)), TickWeight.Day - 1);
+}
+
+/**
  * Per-bar tick weights for a time-sorted series.
+ *
+ * Each bar carries the heaviest calendar boundary crossed since the previous
+ * bar. The first bar of the series weighs what a session open on its local
+ * day weighs after an overnight gap (the weight of that day's midnight: at
+ * least a day, a month on the 1st), so an intraday series that starts at a
+ * 09:30 open is labelled with its date, and loading an earlier history page
+ * does not change its weight. Bars in a repeated fall-back hour are weighted
+ * like the first pass through it (see {@link stepWeight}), and only a true
+ * duplicate (an equal UTC time) weighs {@link NO_TICK}.
  *
  * `out` is reused when it is large enough, and only indices from `start`
  * are (re)computed, so appending live bars costs O(appended).
@@ -366,10 +394,15 @@ export function computeTickWeights(
   const n = points.length;
   const out = options.out && options.out.length >= n ? options.out : new Uint8Array(n);
   const start = Math.max(0, Math.min(n, options.start ?? 0));
-  let prevWall = start > 0 ? tz.toWall(points[start - 1]!.time) : NaN;
+  let prevTime = start > 0 ? points[start - 1]!.time : NaN;
+  let prevWall = tz.toWall(prevTime);
   for (let i = start; i < n; i++) {
-    const wall = tz.toWall(points[i]!.time);
-    out[i] = i === 0 ? alignedWeight(wall, weekStart) : boundaryWeight(prevWall, wall, weekStart);
+    const time = points[i]!.time;
+    const wall = tz.toWall(time);
+    out[i] = i === 0
+      ? alignedWeight(floorWall(wall, "day"), weekStart)
+      : stepWeight(prevTime, prevWall, time, wall, weekStart);
+    prevTime = time;
     prevWall = wall;
   }
   return out;
@@ -455,6 +488,20 @@ export interface CalendarTick {
   index?: number;
 }
 
+/** What a custom tick {@link TickSelectionOptions.format | format} function receives. */
+export interface TickFormatInput {
+  /** UTC instant of the tick. */
+  time: number;
+  /** Local wall time of the tick (read its fields with `fieldsFromWall`). */
+  wall: number;
+  weight: number;
+  /** Unit and step of the tick's ladder rung (a `day` step of 14 is a half month). */
+  unit: TickUnit;
+  step: number;
+  /** Bar index (bar ticks only). */
+  index?: number;
+}
+
 export interface TickSelectionOptions extends TickLabelOptions {
   /** Minimum distance between tick positions in CSS pixels. Default {@link DEFAULT_TICK_SPACING}. */
   minSpacing?: number;
@@ -464,6 +511,13 @@ export interface TickSelectionOptions extends TickLabelOptions {
    * labels not to overlap: `(wa + wb) / 2 + labelGap`.
    */
   measure?: (label: string) => number;
+  /**
+   * Optional custom label, for example "14 Feb" for day ticks or "Feb 2025"
+   * for month ticks. It receives the tick and the default label, and must
+   * return a string. Labels are formatted before they are measured, so
+   * `measure` and the collision checks see the final text.
+   */
+  format?: (tick: TickFormatInput, defaultLabel: string) => string;
   /** Extra space between measured labels. Default 8. */
   labelGap?: number;
   /** Upper bound on the number of ticks. */
@@ -487,7 +541,8 @@ interface Candidate {
 interface Selector {
   minSpacing: number;
   labelGap: number;
-  measure: ((label: string) => number) | undefined;
+  measure: TickSelectionOptions["measure"];
+  format: TickSelectionOptions["format"];
   maxTicks: number;
   weekStart: WeekStart;
   labeler: TickLabeler;
@@ -500,8 +555,10 @@ function makeSelector(options: TickSelectionOptions): Selector {
   }
   const maxTicks = options.maxTicks ?? Infinity;
   if (!(maxTicks >= 1)) throw new RangeError(`maxTicks must be at least 1; received ${maxTicks}.`);
-  if (options.measure !== undefined && typeof options.measure !== "function") {
-    throw new TypeError("measure must be a function that returns a label width in pixels.");
+  for (const key of ["measure", "format"] as const) {
+    if (options[key] !== undefined && typeof options[key] !== "function") {
+      throw new TypeError(`${key} must be a function; received ${typeof options[key]}.`);
+    }
   }
   const weekStart = options.weekStart ?? DEFAULT_WEEK_START;
   assertWeekStart(weekStart);
@@ -509,6 +566,7 @@ function makeSelector(options: TickSelectionOptions): Selector {
     minSpacing,
     labelGap: options.labelGap ?? 8,
     measure: options.measure,
+    format: options.format,
     maxTicks,
     weekStart,
     labeler: tickLabeler(options),
@@ -517,8 +575,19 @@ function makeSelector(options: TickSelectionOptions): Selector {
 
 function labelOf(s: Selector, c: Candidate): string {
   if (c.label === null) {
-    c.label = s.labeler.label(c.wall, c.weight);
-    c.width = s.measure ? Math.max(0, Number(s.measure(c.label)) || 0) : 0;
+    let label = s.labeler.label(c.wall, c.weight);
+    if (s.format) {
+      const { unit, step } = tickLevel(c.weight)!;
+      const input: TickFormatInput = { time: c.time, wall: c.wall, weight: c.weight, unit, step };
+      if (c.index >= 0) input.index = c.index;
+      const custom: unknown = s.format(input, label);
+      if (typeof custom !== "string") {
+        throw new TypeError(`format must return a string label; received ${typeof custom} for the ${step} ${unit} tick at ${c.time}.`);
+      }
+      label = custom;
+    }
+    c.label = label;
+    c.width = s.measure ? Math.max(0, Number(s.measure(label)) || 0) : 0;
   }
   return c.label;
 }
@@ -578,13 +647,19 @@ const TRACKS: ReadonlyArray<ReadonlySet<number>> = [
 ];
 const TRACK_SPECIFIC = new Set(TRACKS.flatMap((track) => [...track]));
 
-/** Re-derive a candidate's weight on a track: the heaviest rung of the track it crosses. */
+/**
+ * Re-derive a candidate's weight on a track: the heaviest rung of the track
+ * it crosses. A bar where the local clock went back (the repeated fall-back
+ * hour) also counts the rungs it sits on, as in {@link stepWeight}.
+ */
 function onTrack(c: Candidate, excluded: ReadonlySet<number>, weekStart: WeekStart): Candidate {
   if (!excluded.has(c.weight)) return c;
+  const back = c.wall <= c.prevWall;
   for (let w = c.weight - 1; w > NO_TICK; w--) {
     if (excluded.has(w)) continue;
     const { unit, step } = TICK_LEVELS[w - 1]!;
-    if (floorWall(c.prevWall, unit, step, weekStart) !== floorWall(c.wall, unit, step, weekStart)) {
+    const floor = floorWall(c.wall, unit, step, weekStart);
+    if (floorWall(c.prevWall, unit, step, weekStart) !== floor || (back && floor === c.wall)) {
       return { ...c, weight: w, label: null, width: 0 };
     }
   }
@@ -885,9 +960,11 @@ export interface BarTickOptions extends TickSelectionOptions {
  *
  * Spacing is measured in bars × `barSpacing`, never in wall-clock span, so
  * overnight and weekend gaps do not thin the labels. The first bar of each
- * local day (a session open after an overnight gap) carries at least a day
- * weight and is labelled with its date. Bars partially inside `[from, to]`
- * are included, like the legacy tick pass; the painter clips by position.
+ * local day (a session open after an overnight gap, or the first bar of the
+ * series) carries at least a day weight and is labelled with its date. The
+ * repeated hour after clocks fall back is labelled twice, like the
+ * continuous axis. Bars partially inside `[from, to]` are included, like the
+ * legacy tick pass; the painter clips by position.
  */
 export function barTicks(options: BarTickOptions): CalendarTick[] {
   const s = makeSelector(options);
@@ -932,7 +1009,8 @@ export function barTicks(options: BarTickOptions): CalendarTick[] {
     if (weight < floorWeight || weight === NO_TICK) continue;
     const time = bars[i]!.time;
     const wall = zone.toWall(time);
-    const prevWall = i > 0 ? zone.toWall(bars[i - 1]!.time) : wall - 1;
+    // The first bar weighs like a session open after an overnight gap (see computeTickWeights).
+    const prevWall = i > 0 ? zone.toWall(bars[i - 1]!.time) : floorWall(wall, "day") - 1;
     candidates.push({ time, wall, prevWall, x: (i - options.from) * barSpacing, weight, index: i, label: null, width: 0 });
   }
   // The span the bars cover on screen: whitespace before the first bar or

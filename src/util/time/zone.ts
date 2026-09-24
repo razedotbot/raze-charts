@@ -149,10 +149,8 @@ export function fieldsFromWall(wallMs: number): WallParts {
 // Zones
 // ---------------------------------------------------------------------------
 
-const UTC_ALIASES = new Set([
-  "UTC", "ETC/UTC", "ETC/UCT", "UCT", "ETC/UNIVERSAL", "UNIVERSAL", "ETC/ZULU", "ZULU",
-  "GMT", "ETC/GMT", "ETC/GMT0", "ETC/GMT+0", "ETC/GMT-0", "GMT0", "GMT+0", "GMT-0", "ETC/GREENWICH", "GREENWICH",
-]);
+/** UTC, UCT, Universal, Zulu, Greenwich, GMT, GMT0, GMT+0 and GMT-0, with or without "Etc/". */
+const UTC_ALIAS = /^(?:etc\/)?(?:utc|uct|universal|zulu|greenwich|gmt(?:[+-]?0)?)$/i;
 
 /** Cached offsets per UTC day: a constant, or a list of transitions inside that day. */
 type DayOffsets = number | { at: number[]; offsets: number[] };
@@ -330,17 +328,16 @@ class IntlZone implements TimeZone {
   }
 }
 
+/** "2024-03-10 02:30:00" for error messages (wall times read as UTC). */
 function describeWall(wallMs: number): string {
-  const f = fieldsFromWall(wallMs);
-  const pad = (n: number): string => String(n).padStart(2, "0");
-  return `${f.year}-${pad(f.month + 1)}-${pad(f.day)} ${pad(f.hour)}:${pad(f.minute)}:${pad(f.second)}`;
+  return new Date(wallMs).toISOString().slice(0, 19).replace("T", " ");
 }
 
 const FIXED_OFFSET_ID = /^([+-])(\d{2}):?(\d{2})$/;
 const ETC_GMT_ID = /^Etc\/GMT([+-])(\d{1,2})$/i;
 
 function fixedOffsetOf(id: string): number | null {
-  if (UTC_ALIASES.has(id.toUpperCase())) return 0;
+  if (UTC_ALIAS.test(id)) return 0;
   const iso = FIXED_OFFSET_ID.exec(id);
   if (iso && Number(iso[2]) <= 23 && Number(iso[3]) <= 59) {
     const sign = iso[1] === "-" ? -1 : 1;

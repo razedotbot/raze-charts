@@ -36,6 +36,7 @@ import {
   tickLabeler,
   tickLevel,
   type TickLabelOptions,
+  type TickSelectionOptions,
   type TickUnit,
   type TimeZone,
   type TimedPoint,
@@ -85,6 +86,12 @@ export interface TimeAxisTickRequest {
   barSpacing: number;
   /** Optional label width measurement so labels never overlap. */
   measure?: (label: string) => number;
+  /**
+   * Optional custom tick label (for example TradingView's
+   * `custom_formatters.tickMarkFormatter`). The tick's `wall` time is in the
+   * zone the bars are read in. See {@link TickSelectionOptions.format}.
+   */
+  format?: TickSelectionOptions["format"];
   maxTicks?: number;
 }
 
@@ -111,6 +118,8 @@ export function isIntradayKind(kind: TimeAxisResolutionKind): boolean {
 }
 
 interface WeightCache {
+  /** The bars array the weights belong to. */
+  source: ArrayLike<TimedPoint>;
   /** Zone the weights were computed in (the display zone or UTC, by resolution kind). */
   zone: TimeZone;
   weights: Uint8Array;
@@ -190,29 +199,45 @@ export class FinancialTimeAxis {
   }
 
   /**
+   * Drop the cached weights so the next call recomputes them. Call it when
+   * the bars array is changed in place in a way other than appending bars or
+   * replacing the last one (for example a same-length reload after a symbol
+   * or resolution change that reuses the array). Passing a new array instance
+   * recomputes on its own.
+   */
+  invalidate(): void {
+    this.cache = null;
+  }
+
+  /**
    * Per-bar boundary weights for `bars` of resolution `kind`, cached across
-   * frames. Appending bars or replacing the last bar in place only computes
-   * the new tail; a prepend (history page), any other structural change, or
-   * a change of the zone the bars are read in recomputes everything.
+   * frames. Pass the same array instance every frame (the renderer's
+   * `context.bars`; derived series such as Heikin Ashi share its times).
+   *
+   * - Appending bars to that array, or replacing its last bar, only computes
+   *   the new tail (O(appended) per live update).
+   * - A new array instance (setData, a history page, a symbol or resolution
+   *   change), a prepend, a change of the zone the bars are read in, or a new
+   *   week start recomputes everything.
+   * - Any other in-place change needs {@link invalidate}: the cache checks
+   *   the array's length and its first and last times, not every bar.
    */
   weights(bars: ArrayLike<TimedPoint>, kind: TimeAxisResolutionKind): Uint8Array {
     const zone = this.calendarZone(kind);
     const n = bars.length;
-    const cache = this.cache;
+    const cache = this.cache && this.cache.source === bars && this.cache.zone === zone ? this.cache : null;
     let start = 0;
     if (
       cache &&
-      cache.zone === zone &&
       n >= cache.length &&
-      cache.length > 0 &&
       bars[0]!.time === cache.firstTime &&
       bars[cache.length - 1]!.time === cache.lastTime
     ) {
       start = cache.length;
     }
-    if (cache && cache.zone === zone && start === n && n === cache.length) return cache.weights;
+    if (cache && start === n && n === cache.length) return cache.weights;
 
-    let out = cache?.weights;
+    let out = this.cache?.weights;
     if (!out || out.length < n) {
       const grown = new Uint8Array(Math.max(n, Math.ceil(n * 1.5), 64));
       if (out && start > 0) grown.set(out.subarray(0, start));
@@ -220,7 +245,7 @@ export class FinancialTimeAxis {
     }
     computeTickWeights(bars, zone, { weekStart: this.weekStart, out, start });
     this.cache = n > 0
-      ? { zone, weights: out, length: n, firstTime: bars[0]!.time, lastTime: bars[n - 1]!.time }
+      ? { source: bars, zone, weights: out, length: n, firstTime: bars[0]!.time, lastTime: bars[n - 1]!.time }
       : null;
     return out;
   }
@@ -238,6 +263,7 @@ export class FinancialTimeAxis {
       timeZone: zone,
       minSpacing: this.minSpacing,
       measure: request.measure,
+      format: request.format,
       maxTicks: request.maxTicks,
       weekStart: this.weekStart,
       locale: this.locale,
