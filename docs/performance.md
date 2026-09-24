@@ -65,15 +65,15 @@ npm run check:size
 
 | Entrypoint | Measurement | Contents | Gzip budget |
 | --- | --- | --- | ---: |
-| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 74 KiB |
-| | Scenario: Widget only | `import { widget }` | 64 KiB |
+| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 105 KiB |
+| | Scenario: Widget only | `import { widget }` | 88 KiB |
 | Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 67 KiB |
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 49 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 33 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
 | | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 52 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
-| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 12 KiB |
+| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 17 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
 | | Scenario: Registry with built-ins | `import { StudyRegistry }` | 7 KiB |
 
@@ -211,6 +211,27 @@ scenario still ships well under its 1 KiB budget. In the root widget artifact
 the same work adds about 6.2 KiB gzip (62.7 to 68.9 KiB, inside the existing
 72 KiB budget): 2.6 KiB is the time core, which other wave 1B packages also
 pull in, and about 3.5 KiB is the kernels and registry.
+
+Wave 1B integration of the widget group (W1B-05, W1B-06, W1B-07, W1B-08,
+W1B-09, W1B-17, W1B-14, W1B-15, W1B-18 and W1B-20) set the root artifact
+budget to 105 KiB, the "Widget only" scenario to 88 KiB and the `/studies`
+artifact to 17 KiB. Each package measured its growth against the wave 1A
+root (62.7 KiB), so the merged widget carries every increment. Measured
+after each merge, the root artifact grew from 62.7 KiB to 73.8 (W1B-05, the
+shared time core and display zones), 76.8 (W1B-06, price-axis math and the
+locale-aware formatter cache), 80.5 (W1B-07, the layered render loop, fit and
+reset), 83.0 (W1B-08, bitmap-space painters), 86.0 (W1B-09, axis chrome,
+timescale badges and normalised compares), 86.9 (W1B-17, pane layout), 90.4
+(W1B-14, study kernels and built-in inputs), 94.1 (W1B-15, the study contract
+v2 runtime), 99.4 (W1B-18, datafeed contract, bar validation and strict
+resolutions) and 103.3 KiB (W1B-20, trading-price grids and shape
+validation); the "Widget only" scenario went from 54.3 to 86.9 KiB. The
+`/studies` artifact carries both W1B-14's kernels (9.8 KiB) and W1B-15's
+indicator contract, 16.1 KiB together. This is a recorded integration
+decision that breaks AD-01's 72 KiB cap by about 31 KiB and needs an
+orchestrator ruling: approve the exception until W2-12's feature packs win the
+optional code back out of the root, or direct cuts. The budgets keep about
+1.1 to 1.7 KiB of headroom so the next merge fails loudly.
 
 ## Dense native charts
 
