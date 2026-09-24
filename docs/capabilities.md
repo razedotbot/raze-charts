@@ -44,11 +44,11 @@ registry created there is standalone; pass definitions to a widget through
 | Abortable native realtime setup | **Yes** | The native adapter supplies `AbortSignal` and runs cleanup even when async setup finishes after unsubscribe. |
 | Symbol and resolution races | **Yes** | Latest request wins; stale history, marks, and subscription callbacks are ignored. |
 | Async marks | **Yes** | Callback-based asynchronous `getMarks` results are applied only to the active target. |
-| Timescale marks | **Yes** | `getTimescaleMarks` is requested with history and painted on the time axis. |
+| Timescale marks | **Yes** | `getTimescaleMarks` is requested with history and painted as coloured badges (`circle`, `earning`, `earningUp`, `earningDown`; other shapes warn and draw a circle) just above the time axis, stacked per bar with a `+N` overflow badge, so they never overprint tick labels. Each badge records a hit target; the hover and keyboard tooltip with the `tooltip[]` lines is not wired yet. |
 | Gapped market sessions | **Yes** | `TimeIndex` maps actual timestamps onto adjacent logical bar indices; `session_breaks` draws optional gap lines. |
 | Timeframe / go-to-date | **Yes** | Honours `options.timeframe`; header presets and go-to-date call `setVisibleRange`, which pages history when needed. |
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
-| Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
+| Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). The timezone caption sits in the corner cell under the price axis and abbreviates long names to their UTC offset (`UTC-4`). The countdown is a second line of the last-price tag: `m:ss` under an hour, `h:mm:ss` under a day, `Nd hh:mm` above, with calendar months for monthly bars. It follows the datafeed server clock and hides when the last bar is more than one period old. `mainSeriesProperties.showCountdown: false` hides it. |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. |
 | Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` and `lock` are stored on the instance. |
 | Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. |
@@ -58,7 +58,7 @@ registry created there is standalone; pass definitions to a widget through
 | Order and position lines | **Yes** | TradingView-style fluent adapters, styling, quantity/P&L labels, move/modify/cancel callbacks, mouse/touch drag, and one-tick keyboard adjustment. |
 | Stop-loss / take-profit brackets | **Yes** | Linked entry/SL/TP lines, risk/reward shading and ratio, auto-scale participation, group callbacks and cancellation. |
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
-| Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
+| Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series, each normalised to its own close at the first visible bar (TradingView's same-% scale) and included in autoscale, so symbols of any magnitude share the plot; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
 | Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
 | Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |
 | Encapsulated runtime surface | **Yes** | `widget` and `activeChart()` objects expose only the documented `IChartingLibraryWidget` / `IChartWidgetApi` methods. Internal state is `#private` or module-private and cannot be reached or mutated at runtime. |
