@@ -65,8 +65,8 @@ npm run check:size
 
 | Entrypoint | Measurement | Contents | Gzip budget |
 | --- | --- | --- | ---: |
-| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 105 KiB |
-| | Scenario: Widget only | `import { widget }` | 88 KiB |
+| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 147 KiB |
+| | Scenario: Widget only | `import { widget }` | 121 KiB |
 | Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 67 KiB |
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 49 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 33 KiB |
@@ -232,6 +232,25 @@ decision that breaks AD-01's 72 KiB cap by about 31 KiB and needs an
 orchestrator ruling: approve the exception until W2-12's feature packs win the
 optional code back out of the root, or direct cuts. The budgets keep about
 1.1 to 1.7 KiB of headroom so the next merge fails loudly.
+
+The last wave 1B integration group (W1B-11, W1B-10, W1B-12, W1B-13, W1B-19,
+W1B-16, W1B-21, W1B-22 and W1B-23) raised the root artifact budget to 147 KiB
+and the "Widget only" scenario to 121 KiB. Measured after each merge and its
+integration fix, the root artifact grew from 103.3 KiB to 111.7 (W1B-11, the
+drawing tool registry and the nine built-in tools), 116.2 (W1B-10, pan and
+zoom limits, drag sessions, the inline text editor and overlay tooltips),
+119.8 (W1B-12, the widget event, action and createStudy contract), 126.2
+(W1B-13, widget sizing, TradingView timeframes, layout interval sync and the
+go-to-date popover), 129.4 (W1B-19, the compare loader and lifecycle), 136.9
+(W1B-16, the DOM legend and definition-built study labels), 139.6 (W1B-21,
+portalled kit popups), 144.2 (W1B-22, class-styled header controls,
+favourites and the scale bar) and 145.5 KiB (W1B-23, the icon set and sidebar
+tooltips); "Widget only" measures 119.9 KiB. The `/studies` artifact is
+unchanged at 16.1 KiB. Like the earlier group this breaks AD-01's 72 KiB cap,
+now by about 74 KiB, and needs the same orchestrator ruling: approve the
+exception until W2-12's feature packs move optional chrome (legend, drawing
+tools beyond the basics, go-to-date, compare loading, the header interval
+menu) out of the root, or direct cuts.
 
 ## Dense native charts
 

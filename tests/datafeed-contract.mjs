@@ -957,8 +957,11 @@ async function loadFixture(bars, options = {}) {
     new Promise((_resolve, reject) => setTimeout(() => reject(new Error(`Timed out waiting for ${what}`)), 3_000)),
   ]);
   const headerChart = async (interval, favorites) => {
-    // No symbol resolutions, so the header lists the favorites.
+    // No symbol or configuration resolutions, so the header lists the
+    // favorites (W1B-22 filters favorites by the symbol's, then the
+    // configuration's supported_resolutions).
     const { feed } = makeFeed({
+      config: { supported_resolutions: undefined },
       info: { supported_resolutions: undefined },
       history: (_p, _i, onResult) => queueMicrotask(() => onResult(loaded)),
     });

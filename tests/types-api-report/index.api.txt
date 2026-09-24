@@ -51,7 +51,9 @@ interface BracketOrderSnapshot
   side: TradingSide
   stopLossPrice?: number | undefined
   takeProfitPrice?: number | undefined
+type BuiltinDrawingToolId = 'extended_line' | 'fib_retracement' | 'horizontal_line' | 'measure' | 'ray' | 'rectangle' | 'text' | 'trend_line' | 'vertical_line'
 type BuiltinShapeName = 'extended_line' | 'fib_retracement' | 'horizontal_line' | 'measure' | 'ray' | 'rectangle' | 'text' | 'trend_line' | 'vertical_line'
+type ChartActionId = 'chartReset' | 'hideAllDrawingTools' | 'insertIndicator' | 'magnet' | 'objects_tree' | 'paneObjectTree' | 'paneRemoveAllStudiesDrawingTools' | 'redo' | 'stayInDrawingModeAction' | 'stay_in_drawing_mode' | 'symbolSearch' | 'timeScaleReset' | 'undo' | 'volume_pane'
 class ChartApi implements IChartWidgetApi
   new (context: ChartContext, deps: ChartApiDeps): ChartApi
   clearMarks(): void
@@ -61,9 +63,10 @@ class ChartApi implements IChartWidgetApi
   createOrderLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createPositionLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
-  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
-  executeActionById(actionId: string): void
+  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: CreateStudyInputs | Readonly<Record<string, unknown>> | undefined, overrides?: Readonly<Record<string, boolean | number | string>> | undefined, options?: CreateStudyOptions | undefined): Promise<EntityId>
+  executeActionById(actionId: ChartActionId): void
   fitContent(): void
+  getCheckableActionState(actionId: CheckableChartActionId): boolean
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTimezoneApi(): ITimezoneApi
   getTradingLineById(id: string): ITradingLineAdapter | null
@@ -89,10 +92,11 @@ interface ChartApiDeps
   createCompare(symbol: string): Promise<EntityId>
   createMultipointShape(points: ShapePoint[], options: CreateShapeOptions<Record<string, unknown>>): Promise<EntityId>
   createShape(point: ShapePoint, options: CreateShapeOptions<Record<string, unknown>>): Promise<EntityId>
-  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
+  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: CreateStudyInputs | Readonly<Record<string, unknown>> | undefined, overrides?: Readonly<Record<string, boolean | number | string>> | undefined, options?: CreateStudyOptions | undefined): Promise<EntityId>
   createTradingLine(options: TradingLineOptions, kind: 'order' | 'position'): ITradingLineAdapter
-  executeActionById(actionId: string): void
+  executeActionById(actionId: ChartActionId): void
   fitContent(): void
+  getCheckableActionState(actionId: CheckableChartActionId): boolean
   getShapeById(id: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   refreshMarks(): void
@@ -106,6 +110,7 @@ interface ChartApiDeps
   setVisibleRange(range: { from: number; to: number; }): Promise<void>
 interface ChartContext extends ChartContextState, ChartContextSeams
   autoScalePrice: boolean
+  axisCornerTaken?: boolean | undefined
   bars: Bar[]
   chartStyle: ChartStyleName
   readonly chartTypeChanged: Delegate<[ChartTypeChange]>
@@ -116,6 +121,7 @@ interface ChartContext extends ChartContextState, ChartContextSeams
   defaultVisibleBars(): number
   readonly drawingEvent: Delegate<[string, string]>
   drawingTool: SidebarToolId
+  drawingsHidden?: boolean | undefined
   features: Set<string>
   readonly fontFamily: string
   formatPrice: PriceFormatFn
@@ -175,6 +181,7 @@ interface ChartContextSeams
   readonly timezoneChanged: Delegate<[TimezoneSetting, TimezoneSetting]>
 interface ChartContextState
   autoScalePrice: boolean
+  axisCornerTaken?: boolean | undefined
   bars: Bar[]
   chartStyle: ChartStyleName
   compare: { id: string; symbol: string; bars: Bar[]; color: string; resolution?: ResolutionString | undefined; }[]
@@ -183,6 +190,7 @@ interface ChartContextState
   readonly datafeed: IBasicDataFeed
   readonly drawingEvent: Delegate<[string, string]>
   drawingTool: SidebarToolId
+  drawingsHidden?: boolean | undefined
   features: Set<string>
   readonly fontFamily: string
   formatPrice: PriceFormatFn
@@ -238,7 +246,7 @@ interface ChartLayoutSnapshot
   logScale: boolean
   magnet?: boolean | undefined
   percentScale: boolean
-  studies: { id?: string | undefined; name: string; length: number; color: string; lock?: boolean | undefined; forceOverlay?: boolean | undefined; inputs?: Record<string, boolean | number | string> | undefined; }[]
+  studies: { id?: string | undefined; name: string; length: number; color: string; lock?: boolean | undefined; forceOverlay?: boolean | undefined; inputs?: Record<string, boolean | number | string> | undefined; plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined; }[]
   symbol: string
   version: 1
   visibleRange: { from: number; to: number; }
@@ -320,10 +328,12 @@ interface ChartingLibraryWidgetOptions
   studies_overrides?: ChartOverrides | undefined
   symbol: string
   theme?: ThemeName | undefined
-  timeframe?: string | undefined | { value: string; type: 'period-back' | 'time-range'; }
+  time_scale?: TimeScaleOptions | undefined
+  timeframe?: WidgetTimeframe | undefined
   timezone?: string | undefined
   toolbar_bg?: string | undefined
   width?: number | undefined
+type CheckableChartActionId = 'hideAllDrawingTools' | 'magnet' | 'stayInDrawingModeAction' | 'stay_in_drawing_mode'
 interface Command
   redo(): void
   undo(): void
@@ -359,8 +369,8 @@ interface ComputeIndicatorDefinition<S extends StudyInputSchema, P extends strin
   update?: undefined
 type ContextMenuCallback = (unixTime: number, price: number) => ContextMenuItem[] | Promise<ContextMenuItem[]>
 interface ContextMenuItem
-  click: () => void
-  position: 'bottom' | 'top'
+  click?: (() => void) | undefined
+  position?: 'bottom' | 'top' | undefined
   text: string
 interface CreateButtonOptions
   align?: 'left' | 'right' | undefined
@@ -380,6 +390,15 @@ interface CreateShapeOptions<TOverrides extends object = Record<string, unknown>
   showInObjectsTree?: boolean | undefined
   text?: string | undefined
   zOrder?: 'bottom' | 'top' | undefined
+type CreateStudyInputValue = boolean | number | string
+type CreateStudyInputs = Readonly<Record<string, CreateStudyInputValue | undefined>> | readonly CreateStudyInputValue[]
+interface CreateStudyOptions
+  allowChangeCurrency?: boolean | undefined
+  allowChangeUnit?: boolean | undefined
+  checkLimit?: boolean | undefined
+  disableUndo?: boolean | undefined
+  priceScale?: string | undefined
+type CreateStudyOverrides = { readonly [x: string]: boolean | number | string; }
 interface Crosshair
   active: boolean
   x: number
@@ -437,19 +456,102 @@ interface DefineDataSourceOptions
   exchanges?: Exchange[] | undefined
   supportedResolutions?: ResolutionString[] | undefined
   symbolTypes?: DatafeedSymbolType[] | undefined
+interface DefineDrawingToolOptions
+  readonly replace?: boolean | undefined
 class Delegate<TArgs extends unknown[] = unknown[]>
-  new <TArgs extends unknown[] = unknown[]>(): Delegate<TArgs>
+  new <TArgs extends unknown[] = unknown[]>(label?: string | undefined): Delegate<TArgs>
+  consumerView<TFunc extends (...args: never[]) => void = (...args: never[]) => void>(label?: string | undefined): ISubscription<TFunc>
   destroy(): void
   fire(...args: TArgs): void
   hasListeners(): boolean
+  reportErrorsTo(handler: ((error: unknown, label: string) => void) | null, label?: string | undefined): void
   subscribe(obj: null | object, fn: (...args: never[]) => void, once?: boolean | undefined): void
   unsubscribe(obj: null | object, fn: (...args: never[]) => void): void
   unsubscribeAll(obj: null | object): void
 interface DraftShape
   points: ShapePoint[]
   tool: SidebarToolId
+type DrawingAnchorSpec = number | { readonly min: number; readonly max?: number | undefined; readonly finish: 'double-click' | 'either' | 'enter'; }
+interface DrawingConstrainInput
+  readonly index: number
+  readonly point: ShapePoint
+  readonly points: readonly ShapePoint[]
+  readonly shiftKey: boolean
+type DrawingCursor = 'crosshair' | 'ew-resize' | 'grab' | 'move' | 'nesw-resize' | 'ns-resize' | 'nwse-resize' | 'pointer' | 'text'
+interface DrawingEnv
+  readonly barMs: number
+  readonly barSpacing: number
+  readonly dpr: number
+  readonly fontFamily: string
+  readonly formatDuration: (bars: number, seconds: number) => string
+  readonly formatPrice: (price: number) => string
+  readonly plot: Rect
+  priceToY(price: number): number
+  readonly state: DrawingInteractionState
+  readonly theme: DrawingThemeTokens
+  timeToX(unixSeconds: number): null | number
+  xToTime(x: number): number
+  yToPrice(y: number): number
 type DrawingEventType = 'click' | 'create' | 'hide' | 'move' | 'points_changed' | 'properties_changed' | 'remove' | 'show'
+interface DrawingGeometry
+  readonly anchors: readonly (ScreenPoint | null)[]
+  readonly plot: Rect
+type DrawingHit = { readonly kind: 'anchor'; readonly index: number; readonly cursor?: DrawingCursor | undefined; } | { readonly kind: 'body'; readonly cursor?: DrawingCursor | undefined; } | { readonly kind: 'label'; readonly cursor?: DrawingCursor | undefined; }
+interface DrawingInteractionState
+  readonly draft: boolean
+  readonly hovered: boolean
+  readonly selected: boolean
+interface DrawingLevel
+  readonly color?: string | undefined
+  readonly value: number
+  readonly visible?: boolean | undefined
+type DrawingLineStyle = 0 | 1 | 2 | 3 | 4
+interface DrawingPaintEnv extends DrawingEnv
+  readonly barMs: number
+  readonly barSpacing: number
+  readonly dpr: number
+  readonly fontFamily: string
+  readonly formatDuration: (bars: number, seconds: number) => string
+  readonly formatPrice: (price: number) => string
+  readonly plot: Rect
+  priceToY(price: number): number
+  pushAxisTag(tag: Omit<AxisTag, 'source'>): void
+  readonly state: DrawingInteractionState
+  readonly theme: DrawingThemeTokens
+  timeToX(unixSeconds: number): null | number
+  xToTime(x: number): number
+  yToPrice(y: number): number
+type DrawingPropField = DrawingBooleanField | DrawingColorField<string> | DrawingLevelsField | DrawingLineStyleField | DrawingLineWidthField | DrawingNumberField | DrawingSelectField<string> | DrawingTextField<string>
+type DrawingPropSchema<TProps extends object> = { readonly [K in keyof TProps]-?: DrawingPropFieldFor<TProps[K]>; }
+interface DrawingState<TProps extends object = Record<string, unknown>>
+  readonly hidden: boolean
+  readonly id: string
+  readonly locked: boolean
+  readonly points: readonly ShapePoint[]
+  readonly props: Readonly<TProps>
+  readonly text: string
+  readonly toolId: string
+  readonly z: number
+interface DrawingThemeTokens
+  readonly drawingDefault: string
+  readonly handleFill: string
+  readonly handleStroke: string
+  readonly labelBackground: string
+  readonly labelText: string
+  readonly paneBackground: string
 type DrawingTool = 'cursor' | 'extended_line' | 'fib_retracement' | 'horizontal_line' | 'measure' | 'ray' | 'rectangle' | 'text' | 'trend_line' | 'vertical_line'
+interface DrawingToolDefinition<TProps extends object = Record<string, unknown>>
+  readonly aliases?: readonly string[] | undefined
+  readonly anchors: DrawingAnchorSpec
+  readonly group?: DrawingToolGroup | undefined
+  hitTest(point: ScreenPoint, drawing: DrawingState<TProps>, geometry: DrawingGeometry, env: DrawingEnv, tolerancePx: number): DrawingHit | null
+  readonly icon: string
+  readonly id: string
+  paint(ctx: CanvasRenderingContext2D, drawing: DrawingState<TProps>, geometry: DrawingGeometry, env: DrawingPaintEnv): void
+  readonly props: DrawingPropSchema<TProps>
+  readonly text?: boolean | undefined
+  readonly title: string
+type DrawingToolGroup = 'annotation' | 'custom' | 'fibonacci' | 'lines' | 'measure' | 'patterns' | 'projection' | 'shapes'
 interface EngineResize
   readonly dpr: number
   readonly height: number
@@ -513,6 +615,7 @@ interface GestureHost
   fitContent(): void
   hoverMark: Mark | null
   hoverShapeId: null | string
+  hoverTimescaleMark: TimescaleMark | null
   hoverTradingHit: 'body' | 'cancel' | null
   hoverTradingLineId: null | string
   lastPointerType: string
@@ -530,6 +633,7 @@ interface GestureHost
   shapeScreen: ShapeHit[]
   readonly shapes: ShapeStore
   subPanes: SubPaneGeom[]
+  timescaleMarkScreen: TimescaleMarkHit[]
   readonly trading: TradingStore
   tradingScreen: TradingHit[]
   volumePane: null | { top: number; h: number; }
@@ -564,11 +668,14 @@ interface IBracketOrderAdapter
 interface IChartWidgetApi
   clearMarks(): void
   createBracketOrder(options: BracketOrderOptions): Promise<IBracketOrderAdapter>
+  createCompare(symbol: string): Promise<EntityId>
   createMultipointShape<TOverrides extends object>(points: ShapePoint[], options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createOrderLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createPositionLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
-  createStudy<N extends string>(name: N, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: StudyCreateInputs<N> | undefined): Promise<EntityId>
+  createStudy<N extends string>(name: N, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: StudyCreateInputs<N> | readonly CreateStudyInputValue[] | undefined, overrides?: Readonly<Record<string, boolean | number | string>> | undefined, options?: CreateStudyOptions | undefined): Promise<EntityId>
+  executeActionById(actionId: ChartActionId): void
+  getCheckableActionState(actionId: CheckableChartActionId): boolean
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTimezoneApi(): ITimezoneApi
   getTradingLineById(id: string): ITradingLineAdapter | null
@@ -599,8 +706,8 @@ interface IChartingLibraryWidget
   save(callback?: ((state: ChartLayoutSnapshot) => void) | undefined): ChartLayoutSnapshot
   setCSSCustomProperty(customPropertyName: string, value: string): void
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
-  subscribe(event: string, callback: (...args: never[]) => void): void
-  unsubscribe(event: string, callback: (...args: never[]) => void): void
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
 interface IDatafeedChartApi
   getBars(symbolInfo: LibrarySymbolInfo, resolution: ResolutionString, periodParams: PeriodParams, onResult: HistoryCallback, onError: DatafeedErrorCallback): void
   resolveSymbol(symbolName: string, onResolve: ResolveCallback, onError: DatafeedErrorCallback, extension?: unknown): void
@@ -734,6 +841,10 @@ interface LayerPaintStats
   main: number
   overlay: number
   resize: number
+interface LayoutSyncOptions
+  crosshair?: boolean | undefined
+  interval?: boolean | undefined
+  time?: boolean | undefined
 class LeftSidebar
   new (context: ChartContext, cbs: LeftSidebarCallbacks, items?: SidebarItem[] | undefined, chartTypes?: ChartStyleName[] | undefined): LeftSidebar
   destroy(): void
@@ -748,6 +859,9 @@ interface LeftSidebarCallbacks
   onIndicatorsClick(anchor: HTMLElement): void
   onScreenshot(): void
   onTool(tool: SidebarToolId): void
+interface LegacyTimeFrameRange
+  type: 'time-range'
+  value: string
 interface LibrarySymbolInfo
   [key: string]: unknown
   daily_multipliers?: string[] | undefined
@@ -882,8 +996,11 @@ interface RazeChartsOptions
   layout?: '1' | '2x1' | '2x2' | undefined
   layout_child?: boolean | undefined
   layout_symbols?: string[] | undefined
+  layout_sync?: LayoutSyncOptions | undefined
   magnet?: boolean | undefined
   sidebar?: SidebarItem[] | undefined
+  snap_drawings_to_bars?: boolean | undefined
+  style_nonce?: string | undefined
   undo_limit?: number | undefined
   volume_mode?: VolumeMode | undefined
 interface RazeDataSource
@@ -904,6 +1021,21 @@ interface Rect
   w: number
   x: number
   y: number
+interface RegisteredDrawingTool extends Omit<DrawingToolDefinition<Record<string, unknown>>, 'props'>
+  readonly aliases?: readonly string[] | undefined
+  readonly anchors: DrawingAnchorSpec
+  constrain?: ((input: DrawingConstrainInput) => ShapePoint) | undefined
+  describe?: ((drawing: DrawingState<Record<string, unknown>>, env: DrawingEnv) => string) | undefined
+  readonly group?: DrawingToolGroup | undefined
+  handles?: ((drawing: DrawingState<Record<string, unknown>>, geometry: DrawingGeometry, env: DrawingEnv) => readonly ScreenPoint[]) | undefined
+  hitTest: (point: ScreenPoint, drawing: DrawingState<Record<string, unknown>>, geometry: DrawingGeometry, env: DrawingEnv, tolerancePx: number) => DrawingHit | null
+  readonly icon: string
+  readonly id: string
+  paint: (ctx: CanvasRenderingContext2D, drawing: DrawingState<Record<string, unknown>>, geometry: DrawingGeometry, env: DrawingPaintEnv) => void
+  readonly props: Readonly<Record<string, DrawingPropField>>
+  readonly text?: boolean | undefined
+  readonly title: string
+  validateProps?: ((props: Record<string, unknown>) => readonly { path: string; message: string; }[]) | undefined
 type ResolutionString = string & { [Symbol.species]?: 'ResolutionString' | undefined; }
 type ResolveCallback = (symbolInfo: LibrarySymbolInfo) => void
 interface ResolvedIndicatorPreset
@@ -1085,7 +1217,7 @@ interface StudyComputeContext
   readonly timezone: string
   readonly visibleRange: Readonly<{ from: number; to: number; }> | null
 type StudyComputeResult = (null | number)[] | { series: StudySeries[]; }
-type StudyCreateInputs<N extends string> = N extends never ? { readonly [K in keyof StudyInputsRegistry[N]]?: StudyInputsRegistry[N][K] | undefined; } : Record<string, unknown>
+type StudyCreateInputs<N extends string> = N extends never ? { readonly [K in keyof StudyInputsRegistry[N]]?: StudyInputsRegistry[N][K] | undefined; } : Readonly<Record<string, StudyInputPrimitive | undefined>>
 interface StudyDefinition
   aliases?: string[] | undefined
   compute: (bars: Bar[], inputs: StudyInputs, ctx: StudyComputeContext) => StudyComputeResult
@@ -1158,6 +1290,7 @@ interface StudyInstance
   lock: boolean
   name: string
   outputs?: Readonly<Record<string, (null | number)[]>> | undefined
+  plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined
   plots?: Readonly<Record<string, StudyPlotOverride>> | undefined
   series: StudySeries[]
   values: (null | number)[]
@@ -1206,6 +1339,11 @@ interface StudyPlotOverride
   lineWidth?: number | undefined
   visible?: boolean | undefined
 type StudyPlotStyle = 'area' | 'circles' | 'columns' | 'cross' | 'histogram' | 'line' | 'shapes' | 'step'
+interface StudyPlotStyleOverride
+  color?: string | undefined
+  lineWidth?: number | undefined
+  visible?: boolean | undefined
+type StudyPlotStyles = { readonly [x: string]: Readonly<StudyPlotStyleOverride>; }
 type StudyPointValues<P extends string> = { readonly [K in P]: null | number; }
 interface StudyPriceInput extends StudyInputBase<number>
   readonly default: number
@@ -1271,6 +1409,7 @@ interface StudySnapshot
   length: number
   lock: boolean
   name: string
+  plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined
   plots?: Readonly<Record<string, StudyPlotOverride>> | undefined
 type StudySource = 'close' | 'high' | 'hl2' | 'hlc3' | 'hlcc4' | 'low' | 'ohlc4' | 'open' | 'volume'
 interface StudySourceInput extends StudyInputBase<StudySource>
@@ -1291,6 +1430,7 @@ interface StudySpec
   length?: number | undefined
   lock?: boolean | undefined
   name: string
+  plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined
   plots?: Readonly<Record<string, StudyPlotOverride>> | undefined
 class StudyStore
   new (context: ChartContext, registry?: StudyRegistry | undefined, commands?: CommandStack | undefined): StudyStore
@@ -1402,6 +1542,10 @@ class TimeIndex
   timeAt(index: number): null | number
 interface TimePoint
   readonly time: number
+interface TimeScaleOptions
+  fix_left_edge?: boolean | undefined
+  fix_right_edge?: boolean | undefined
+  min_bar_spacing?: number | undefined
 class TimeframeBar
   new (context: ChartContext, el: HTMLElement, onPreset: (preset: '1D' | '1M' | '1W' | '3M' | 'ALL' | 'YTD') => void, onGoToDate: () => void): TimeframeBar
   destroy(): void
@@ -1436,6 +1580,7 @@ class Toolbar
   readonly searchSlot: HTMLDivElement
 type TradingCallbackBinding = { readonly form: 'adapter'; readonly callback: TradingLineCallback; } | { readonly form: 'data'; readonly data: unknown; readonly callback: (this: unknown, data: unknown) => void; }
 type TradingCallbackSlot = 'cancel' | 'modify' | 'move' | 'moving'
+type TradingEventType = 'cancelled' | 'create' | 'modified' | 'moved' | 'moving' | 'removed'
 interface TradingHit
   hit: 'body' | 'cancel'
   line: StoredTradingLine
@@ -1527,8 +1672,21 @@ class Widget implements IChartingLibraryWidget
   save(callback?: ((state: ChartLayoutSnapshot) => void) | undefined): ChartLayoutSnapshot
   setCSSCustomProperty(name: string, value: string): void
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
-  subscribe(event: string, callback: (...args: never[]) => void): void
-  unsubscribe(event: string, callback: (...args: never[]) => void): void
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+interface WidgetEventMap
+  drawing_event: (id: EntityId, type: DrawingEventType) => void
+  drawing_selection_changed: (ids: string[]) => void
+  drawing_tool_changed: (tool: string) => void
+  error: (error: WidgetListenerError) => void
+  trading_event: (line: TradingLineSnapshot, type: TradingEventType) => void
+type WidgetEventName = keyof WidgetEventMap
+interface WidgetListenerError
+  readonly cause: unknown
+  readonly code: 'listener_threw'
+  readonly event: string
+type WidgetTimeframe = LegacyTimeFrameRange | TimeFrameValue | string | { from: number; to: number; }
+function anchorsComplete(spec: DrawingAnchorSpec, count: number): boolean
 function bollinger(closes: number[], length: number, multiplier?: number | undefined): { mid: (null | number)[]; upper: (null | number)[]; lower: (null | number)[]; }
 function buildTheme(opts: ChartingLibraryWidgetOptions): ThemeColors
 const builtinShapeCatalog: ShapeKindCatalog
@@ -1541,25 +1699,34 @@ function createShapeKindCatalog(tools: () => Iterable<ShapeToolDescriptor>): Sha
 function decimalsFromPricescale(pricescale: number): number
 const default: { widget: typeof Widget; version: string; }
 function defineDataSource<T extends RazeDataSource>(source: T): T
+function defineDrawingTool<TProps extends object>(definition: DrawingToolDefinition<TProps>, options?: DefineDrawingToolOptions | undefined): DrawingToolDefinition<TProps>
+function drawingToolDefaults(idOrAlias: string): Record<string, unknown>
 function ema(closes: number[], length: number): (null | number)[]
 function ensureBaseStyles(target?: Node | undefined, options?: StyleOptions | undefined): void
 function floorToBar(timeMs: number, res: string, options?: FloorToBarOptions | undefined): number
 function formatCompact(value: number): string
 function formatPrice(value: number, pricescale: number): string
 function formatVolume(value: number): string
+function getDrawingTool(idOrAlias: string): RegisteredDrawingTool | undefined
 function heikinAshi(bars: Bar[]): Bar[]
 function isCoarsePointer(): boolean
 function isLightColor(color: string): boolean
 function isValidResolution(res: unknown): boolean
+function listDrawingTools(): RegisteredDrawingTool[]
 function macd(closes: number[], fast?: number | undefined, slow?: number | undefined, signal?: number | undefined): { macd: (null | number)[]; signal: (null | number)[]; hist: (null | number)[]; }
+function minAnchors(spec: DrawingAnchorSpec): number
 function normalizeResolution(res: string): ResolutionString
+function onDrawingToolsChanged(listener: () => void): () => void
 function openPopup(opts: PopupOptions): PopupHandle
 function parseResolution(res: string): ParsedResolution
 function popupRow(content: string, onClick: (e: MouseEvent) => void, options?: undefined | { role?: 'menuitem' | 'menuitemcheckbox' | 'menuitemradio' | undefined; checked?: boolean | undefined; label?: string | undefined; trustedHtml?: boolean | undefined; }): HTMLButtonElement
+function popupSeparator(): HTMLDivElement
+const registryShapeCatalog: ShapeKindCatalog
+function removeDrawingTool(id: string): boolean
 function resolutionLabel(res: string): string
 function resolutionToMs(res: string): number
 function resolveIndicatorPresets(raze: RazeChartsOptions | undefined, registry: StudyRegistry): ResolvedIndicatorPreset[]
-function resolveTimeframe(timeframe: string | undefined | { value: string; type: 'period-back' | 'time-range'; }, nowSec?: number | undefined): ResolvedTimeframe | null
+function resolveTimeframe(timeframe: WidgetTimeframe | null | undefined, nowSec?: number | undefined): ResolvedTimeframe | null
 function rsi(closes: number[], length: number): (null | number)[]
 function showContextMenu(x: number, y: number, items: ContextMenuItem[], fontFamily: string, themeRoot?: HTMLElement | undefined): void
 function sma(closes: number[], length: number): (null | number)[]
@@ -1580,14 +1747,71 @@ class widget implements IChartingLibraryWidget
   save(callback?: ((state: ChartLayoutSnapshot) => void) | undefined): ChartLayoutSnapshot
   setCSSCustomProperty(name: string, value: string): void
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
-  subscribe(event: string, callback: (...args: never[]) => void): void
-  unsubscribe(event: string, callback: (...args: never[]) => void): void
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
 function withAlpha(color: string, alpha: number): string
 # referenced, not exported
 const CHART_TYPE_CHANGE_REASONS: readonly ['initial', 'sidebar', 'header', 'api', 'load', 'override', 'context-menu']
-type DrawingAnchorSpec = number | { readonly min: number; readonly max?: number | undefined; readonly finish: 'double-click' | 'either' | 'enter'; }
-type DrawingCursor = 'crosshair' | 'ew-resize' | 'grab' | 'move' | 'nesw-resize' | 'ns-resize' | 'nwse-resize' | 'pointer' | 'text'
-type DrawingHit = { readonly kind: 'anchor'; readonly index: number; readonly cursor?: DrawingCursor | undefined; } | { readonly kind: 'body'; readonly cursor?: DrawingCursor | undefined; } | { readonly kind: 'label'; readonly cursor?: DrawingCursor | undefined; }
+interface DrawingBooleanField extends DrawingPropFieldBase<boolean>
+  readonly default: boolean
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'boolean'
+interface DrawingColorField<V extends string = string> extends DrawingPropFieldBase<V>
+  readonly default: V
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'color'
+interface DrawingLevelsField extends DrawingPropFieldBase<readonly DrawingLevel[]>
+  readonly default: readonly DrawingLevel[]
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'levels'
+interface DrawingLineStyleField extends DrawingPropFieldBase<DrawingLineStyle>
+  readonly default: DrawingLineStyle
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'lineStyle'
+interface DrawingLineWidthField extends DrawingPropFieldBase<number>
+  readonly default: number
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'lineWidth'
+interface DrawingNumberField extends DrawingPropFieldBase<number>
+  readonly default: number
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly max?: number | undefined
+  readonly min?: number | undefined
+  readonly step?: number | undefined
+  readonly title: string
+  readonly type: 'number'
+interface DrawingPropFieldBase<V>
+  readonly default: V
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+type DrawingPropFieldFor<V> = [V] extends [boolean] ? DrawingBooleanField : [V] extends [DrawingLineStyle] ? DrawingLineStyleField | DrawingNumberField : [V] extends [number] ? DrawingLineWidthField | DrawingNumberField : [V] extends [readonly DrawingLevel[]] ? DrawingLevelsField : [V] extends [string] ? DrawingColorField<V> | DrawingSelectField<V> | DrawingTextField<V> : never
+interface DrawingSelectField<V extends string = string> extends DrawingPropFieldBase<V>
+  readonly default: V
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly options: readonly { readonly value: V; readonly title: string; }[]
+  readonly title: string
+  readonly type: 'select'
+interface DrawingTextField<V extends string = string> extends DrawingPropFieldBase<V>
+  readonly default: V
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly maxLength?: number | undefined
+  readonly multiline?: boolean | undefined
+  readonly title: string
+  readonly type: 'text'
 interface PriceRange
   max: number
   min: number

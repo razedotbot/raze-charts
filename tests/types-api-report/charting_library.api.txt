@@ -40,6 +40,7 @@ interface BracketOrderSnapshot
   stopLossPrice?: number | undefined
   takeProfitPrice?: number | undefined
 type BuiltinShapeName = 'extended_line' | 'fib_retracement' | 'horizontal_line' | 'measure' | 'ray' | 'rectangle' | 'text' | 'trend_line' | 'vertical_line'
+type ChartActionId = 'chartReset' | 'hideAllDrawingTools' | 'insertIndicator' | 'magnet' | 'objects_tree' | 'paneObjectTree' | 'paneRemoveAllStudiesDrawingTools' | 'redo' | 'stayInDrawingModeAction' | 'stay_in_drawing_mode' | 'symbolSearch' | 'timeScaleReset' | 'undo' | 'volume_pane'
 interface ChartLayoutSnapshot
   chartStyle: ChartStyleName
   compare?: string[] | undefined
@@ -48,7 +49,7 @@ interface ChartLayoutSnapshot
   logScale: boolean
   magnet?: boolean | undefined
   percentScale: boolean
-  studies: { id?: string | undefined; name: string; length: number; color: string; lock?: boolean | undefined; forceOverlay?: boolean | undefined; inputs?: Record<string, boolean | number | string> | undefined; }[]
+  studies: { id?: string | undefined; name: string; length: number; color: string; lock?: boolean | undefined; forceOverlay?: boolean | undefined; inputs?: Record<string, boolean | number | string> | undefined; plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined; }[]
   symbol: string
   version: 1
   visibleRange: { from: number; to: number; }
@@ -78,10 +79,12 @@ interface ChartingLibraryWidgetOptions
   studies_overrides?: ChartOverrides | undefined
   symbol: string
   theme?: ThemeName | undefined
-  timeframe?: string | undefined | { value: string; type: 'period-back' | 'time-range'; }
+  time_scale?: TimeScaleOptions | undefined
+  timeframe?: WidgetTimeframe | undefined
   timezone?: string | undefined
   toolbar_bg?: string | undefined
   width?: number | undefined
+type CheckableChartActionId = 'hideAllDrawingTools' | 'magnet' | 'stayInDrawingModeAction' | 'stay_in_drawing_mode'
 interface ComputeIndicatorDefinition<S extends StudyInputSchema, P extends string> extends IndicatorDefinitionBase<S, P>
   readonly aliases?: readonly string[] | undefined
   compute(bars: readonly Bar[], inputs: StudyInputValues<S>, ctx: StudyComputeContext): StudyOutputs<P>
@@ -101,8 +104,8 @@ interface ComputeIndicatorDefinition<S extends StudyInputSchema, P extends strin
   update?: undefined
 type ContextMenuCallback = (unixTime: number, price: number) => ContextMenuItem[] | Promise<ContextMenuItem[]>
 interface ContextMenuItem
-  click: () => void
-  position: 'bottom' | 'top'
+  click?: (() => void) | undefined
+  position?: 'bottom' | 'top' | undefined
   text: string
 interface CreateButtonOptions
   align?: 'left' | 'right' | undefined
@@ -119,6 +122,15 @@ interface CreateShapeOptions<TOverrides extends object = Record<string, unknown>
   showInObjectsTree?: boolean | undefined
   text?: string | undefined
   zOrder?: 'bottom' | 'top' | undefined
+type CreateStudyInputValue = boolean | number | string
+type CreateStudyInputs = Readonly<Record<string, CreateStudyInputValue | undefined>> | readonly CreateStudyInputValue[]
+interface CreateStudyOptions
+  allowChangeCurrency?: boolean | undefined
+  allowChangeUnit?: boolean | undefined
+  checkLimit?: boolean | undefined
+  disableUndo?: boolean | undefined
+  priceScale?: string | undefined
+type CreateStudyOverrides = { readonly [x: string]: boolean | number | string; }
 interface CustomAliasedTimezone
   alias: string
   id: string
@@ -172,11 +184,14 @@ interface IBracketOrderAdapter
 interface IChartWidgetApi
   clearMarks(): void
   createBracketOrder(options: BracketOrderOptions): Promise<IBracketOrderAdapter>
+  createCompare(symbol: string): Promise<EntityId>
   createMultipointShape<TOverrides extends object>(points: ShapePoint[], options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createOrderLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createPositionLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
-  createStudy<N extends string>(name: N, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: StudyCreateInputs<N> | undefined): Promise<EntityId>
+  createStudy<N extends string>(name: N, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: StudyCreateInputs<N> | readonly CreateStudyInputValue[] | undefined, overrides?: Readonly<Record<string, boolean | number | string>> | undefined, options?: CreateStudyOptions | undefined): Promise<EntityId>
+  executeActionById(actionId: ChartActionId): void
+  getCheckableActionState(actionId: CheckableChartActionId): boolean
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTimezoneApi(): ITimezoneApi
   getTradingLineById(id: string): ITradingLineAdapter | null
@@ -207,8 +222,8 @@ interface IChartingLibraryWidget
   save(callback?: ((state: ChartLayoutSnapshot) => void) | undefined): ChartLayoutSnapshot
   setCSSCustomProperty(customPropertyName: string, value: string): void
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
-  subscribe(event: string, callback: (...args: never[]) => void): void
-  unsubscribe(event: string, callback: (...args: never[]) => void): void
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
 interface IDatafeedChartApi
   getBars(symbolInfo: LibrarySymbolInfo, resolution: ResolutionString, periodParams: PeriodParams, onResult: HistoryCallback, onError: DatafeedErrorCallback): void
   resolveSymbol(symbolName: string, onResolve: ResolveCallback, onError: DatafeedErrorCallback, extension?: unknown): void
@@ -307,6 +322,13 @@ interface IndicatorPreset
   name: string
 interface IntervalChangedParameters
   timeframe: TimeFrameValue
+interface LayoutSyncOptions
+  crosshair?: boolean | undefined
+  interval?: boolean | undefined
+  time?: boolean | undefined
+interface LegacyTimeFrameRange
+  type: 'time-range'
+  value: string
 interface LibrarySymbolInfo
   [key: string]: unknown
   daily_multipliers?: string[] | undefined
@@ -370,8 +392,11 @@ interface RazeChartsOptions
   layout?: '1' | '2x1' | '2x2' | undefined
   layout_child?: boolean | undefined
   layout_symbols?: string[] | undefined
+  layout_sync?: LayoutSyncOptions | undefined
   magnet?: boolean | undefined
   sidebar?: SidebarItem[] | undefined
+  snap_drawings_to_bars?: boolean | undefined
+  style_nonce?: string | undefined
   undo_limit?: number | undefined
   volume_mode?: VolumeMode | undefined
 type ResolutionString = string & { [Symbol.species]?: 'ResolutionString' | undefined; }
@@ -430,7 +455,7 @@ interface StudyComputeContext
   readonly timezone: string
   readonly visibleRange: Readonly<{ from: number; to: number; }> | null
 type StudyComputeResult = (null | number)[] | { series: StudySeries[]; }
-type StudyCreateInputs<N extends string> = N extends never ? { readonly [K in keyof StudyInputsRegistry[N]]?: StudyInputsRegistry[N][K] | undefined; } : Record<string, unknown>
+type StudyCreateInputs<N extends string> = N extends never ? { readonly [K in keyof StudyInputsRegistry[N]]?: StudyInputsRegistry[N][K] | undefined; } : Readonly<Record<string, StudyInputPrimitive | undefined>>
 interface StudyDefinition
   aliases?: string[] | undefined
   compute: (bars: Bar[], inputs: StudyInputs, ctx: StudyComputeContext) => StudyComputeResult
@@ -516,6 +541,11 @@ interface StudyPlotDescriptor<P extends string = string>
   readonly trackPrice?: boolean | undefined
   readonly visible?: boolean | undefined
 type StudyPlotStyle = 'area' | 'circles' | 'columns' | 'cross' | 'histogram' | 'line' | 'shapes' | 'step'
+interface StudyPlotStyleOverride
+  color?: string | undefined
+  lineWidth?: number | undefined
+  visible?: boolean | undefined
+type StudyPlotStyles = { readonly [x: string]: Readonly<StudyPlotStyleOverride>; }
 type StudyPointValues<P extends string> = { readonly [K in P]: null | number; }
 interface StudyPriceInput extends StudyInputBase<number>
   readonly default: number
@@ -620,6 +650,10 @@ interface TimeFrameTimeRange
   to: number
   type: 'time-range'
 type TimeFrameValue = TimeFramePeriodBack | TimeFrameTimeRange
+interface TimeScaleOptions
+  fix_left_edge?: boolean | undefined
+  fix_right_edge?: boolean | undefined
+  min_bar_spacing?: number | undefined
 interface TimescaleMark
   [key: string]: unknown
   color: string
@@ -632,6 +666,7 @@ interface TimezoneInfo
   id: string
   offset?: number | undefined
   title: string
+type TradingEventType = 'cancelled' | 'create' | 'modified' | 'moved' | 'moving' | 'removed'
 type TradingLineCallback = (this: ITradingLineAdapter, line: ITradingLineAdapter) => void
 type TradingLineDataCallback<TData> = (this: TData, data: TData) => void
 interface TradingLineEvent
@@ -677,6 +712,18 @@ type TradingLineStatus = 'cancelled' | 'filled' | 'working'
 type TradingLineStyle = 0 | 1 | 2
 type TradingSide = 'buy' | 'sell'
 type VolumeMode = 'hidden' | 'overlay' | 'pane'
+interface WidgetEventMap
+  drawing_event: (id: EntityId, type: DrawingEventType) => void
+  drawing_selection_changed: (ids: string[]) => void
+  drawing_tool_changed: (tool: string) => void
+  error: (error: WidgetListenerError) => void
+  trading_event: (line: TradingLineSnapshot, type: TradingEventType) => void
+type WidgetEventName = keyof WidgetEventMap
+interface WidgetListenerError
+  readonly cause: unknown
+  readonly code: 'listener_threw'
+  readonly event: string
+type WidgetTimeframe = LegacyTimeFrameRange | TimeFrameValue | string | { from: number; to: number; }
 const version: string
 class widget implements IChartingLibraryWidget
   new (options: ChartingLibraryWidgetOptions): widget
@@ -691,5 +738,5 @@ class widget implements IChartingLibraryWidget
   save(callback?: ((state: ChartLayoutSnapshot) => void) | undefined): ChartLayoutSnapshot
   setCSSCustomProperty(customPropertyName: string, value: string): void
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
-  subscribe(event: string, callback: (...args: never[]) => void): void
-  unsubscribe(event: string, callback: (...args: never[]) => void): void
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void

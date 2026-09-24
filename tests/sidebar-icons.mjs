@@ -200,7 +200,8 @@ try {
   const studies = [];
   const store = {
     list: () => studies,
-    add: (study) => studies.push({ id: `s${studies.length}`, ...study }),
+    // A real StudyInstance carries its definition; the objects tree labels rows from it.
+    add: (study) => studies.push({ id: `s${studies.length}`, def: { name: study.name, defaults: { length: study.length } }, ...study }),
     remove: (id) => studies.splice(studies.findIndex((study) => study.id === id), 1),
     clear: () => studies.splice(0),
   };
