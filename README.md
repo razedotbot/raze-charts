@@ -428,7 +428,10 @@ and teardown ownership.
 
 Dark and light themes ship with cohesive pane, grid, axis, tooltip, status,
 and series colors. Every native chart also accepts a partial theme, so a
-product can own its visual language without replacing the renderer.
+product can own its visual language without replacing the renderer. Default
+series palettes stay distinguishable under colour-vision deficiencies, and
+`COLORBLIND_CHART_THEME` / `COLORBLIND_LIGHT_CHART_THEME` switch up/down
+and heatmap colours from green/red to blue/orange.
 
 Good visual defaults do not make every integration accessible automatically.
 Supply a specific `ariaLabel`, add `ariaDescription` when the trend needs

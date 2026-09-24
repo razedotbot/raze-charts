@@ -115,3 +115,5 @@ export {
   viewportFromPreset,
 } from "./viewport";
 export type { RangePreset, ViewportGroup, ViewportHandle } from "./viewport";
+// Colour-vision-deficiency-safe theme presets (blue/orange up-down and heatmaps).
+export { COLORBLIND_CHART_THEME, COLORBLIND_LIGHT_CHART_THEME } from "./theme";
