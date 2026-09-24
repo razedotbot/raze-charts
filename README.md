@@ -95,6 +95,11 @@ chart.update(definition, { height: 360 });
 chart.destroy();
 ```
 
+Wheel zoom, pan, and brush stay within `interaction.zoom: { minSpan, maxSpan }`
+and `interaction.panBounds` (`"data"` by default); `onTooltip`/`onSelect`
+payloads carry data-space `x`/`y`, `datum`, and `index`. See the
+[capability matrix](./docs/capabilities.md) for the defaults.
+
 Built-in marks are `line`, `area`, `bar`, `point`, `ruleY`, `pie`, `radar`,
 and `heatmap`. Scales are `linear`, `band`, `time`, and `log`. The compiler
 produces a renderer-neutral scene that can be inspected with `getScene()` or

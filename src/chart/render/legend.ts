@@ -3,14 +3,86 @@
 // renderers paint the same boxes, so SVG and Canvas stay aligned and every
 // row's box is its toggle hit area. Hidden series stay listed, dimmed with a
 // hollow swatch, so a second click brings them back.
+//
+// The same boxes drive pointer hit-testing and the mount's keyboard toggle
+// buttons (layoutLegend / legendEntryAt below), so the SVG markup, the Canvas
+// painter, hit-testing and the toggles agree on where each entry is.
 
-import { SIDE_LEGEND, TOP_LEGEND, estimateTextWidth, sceneLegendLayout, swatchWidth } from "../compile/legend";
+import { SIDE_LEGEND, TOP_LEGEND, estimateTextWidth, sceneLegendLayout, swatchWidth, toggleHiddenSeries } from "../compile/legend";
 import type { CompiledChart } from "../compile/types";
 import type { SceneLegendLayout, SceneLegendRow } from "../sceneTypes";
 import { esc, round } from "./primitives";
 
 /** Opacity of a hidden series' legend row. */
 const HIDDEN_OPACITY = 0.42;
+
+export interface LegendBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** A legend entry as the mount's toggles and hit-testing see it. */
+export interface LegendEntryLayout {
+  /** Toggle key: the row id (series id, or `<seriesId>/<label>` for a pie slice). */
+  key: string;
+  name: string;
+  color: string;
+  detail?: string;
+  hidden: boolean;
+  /** Pointer target in scene space. */
+  box: LegendBox;
+}
+
+export interface LegendLayout {
+  entries: LegendEntryLayout[];
+  /** `+N more` summary for rows that did not fit. */
+  more: { x: number; y: number; label: string } | null;
+  /** True when entries toggle series (every visible legend: series, radar layers and pie slices). */
+  toggleable: boolean;
+}
+
+/** Legend geometry for a scene: the compiled `legendLayout` boxes (derived for hand-built scenes). */
+export function layoutLegend(c: CompiledChart): LegendLayout {
+  const layout = sceneLegendLayout(c);
+  if (layout.placement === "hidden") return { entries: [], more: null, toggleable: false };
+  const entries: LegendEntryLayout[] = [];
+  for (const row of layout.rows) {
+    if (!row.box) continue;
+    entries.push({
+      key: row.id,
+      name: row.name,
+      color: row.color,
+      ...(row.detail !== undefined ? { detail: row.detail } : {}),
+      hidden: row.hidden,
+      box: { ...row.box },
+    });
+  }
+  const more = layout.more ? { x: layout.more.box.x, y: layout.more.box.y + layout.more.box.h / 2, label: layout.more.label } : null;
+  return { entries, more, toggleable: true };
+}
+
+/**
+ * The hidden-series set after a click on legend entry `key`, through the
+ * compiler's {@link toggleHiddenSeries}: hiding adds the row id; showing
+ * removes every key that hides the row (its id and name, the marks it groups,
+ * a pie slice's label), so a series hidden by name comes back from its
+ * id-keyed row. Without a scene the key itself toggles.
+ */
+export function toggledHiddenSeries(c: CompiledChart | null, hidden: ReadonlySet<string>, key: string): Set<string> {
+  if (c) return new Set(toggleHiddenSeries(c, hidden, key));
+  const next = new Set(hidden);
+  if (!next.delete(key)) next.add(key);
+  return next;
+}
+
+/** Legend entry under a scene-space point, if it toggles. */
+export function legendEntryAt(c: CompiledChart, x: number, y: number): LegendEntryLayout | null {
+  const layout = layoutLegend(c);
+  if (!layout.toggleable) return null;
+  return layout.entries.find(({ box }) => x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) ?? null;
+}
 
 function rowText(row: SceneLegendRow): string {
   return row.label ?? row.name;
@@ -37,7 +109,8 @@ function rowSvg(layout: SceneLegendLayout, row: SceneLegendRow, c: CompiledChart
   if (!box) return "";
   const { theme } = c;
   const state = row.hidden ? ` data-hidden="true" opacity="${HIDDEN_OPACITY}"` : "";
-  const open = `<g data-series="${esc(row.id)}"${state} style="cursor:pointer" transform="translate(${round(box.x)},${round(box.y)})">`;
+  // The markup is static: a mount's toggle buttons carry the pointer cursor.
+  const open = `<g data-series="${esc(row.id)}"${state} transform="translate(${round(box.x)},${round(box.y)})">`;
   const full = row.label !== undefined && row.label !== row.name ? `<title>${esc(row.name)}</title>` : "";
   if (layout.rowStyle === "stacked") {
     return `${open}${full}${swatchSvg(row, 6)}<text x="${SIDE_LEGEND.textX}" y="6" dominant-baseline="middle" font-size="${SIDE_LEGEND.nameFont}" fill="${esc(theme.text)}">${esc(rowText(row))}</text>${row.detail ? `<text x="${SIDE_LEGEND.textX}" y="22" dominant-baseline="middle" font-size="${SIDE_LEGEND.detailFont}" fill="${esc(theme.muted)}">${esc(row.detail)}</text>` : ""}</g>`;

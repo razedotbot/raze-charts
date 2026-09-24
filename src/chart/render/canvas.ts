@@ -4,6 +4,7 @@ import type { CompiledChart, SceneNode } from "../compile/types";
 import { chartColorWithOpacity, heatFill, type DashboardTheme } from "../theme";
 import { paintLastValuesCanvas, valueAxisWidth } from "./chips";
 import { paintLegendCanvas } from "./legend";
+import { X_TICK_FONT_SIZE, placeXTickLabels } from "./ticks";
 import {
   AREA_GRADIENT_STOPS,
   TAU,
@@ -220,25 +221,20 @@ function paintAxesCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void 
   ctx.lineTo(c.heatmap ? plot.x + plot.w : width, hair(plot.y + plot.h));
   ctx.strokeStyle = theme.axis;
   ctx.stroke();
-  ctx.font = `9px ${theme.font}`;
+  ctx.font = `${X_TICK_FONT_SIZE}px ${theme.font}`;
   ctx.fillStyle = theme.muted;
-  // Scene v2 ticks carry the compiler's measured anchor and rotation.
-  for (const tick of c.axes?.x.ticks ?? c.xTicks) {
-    const rotation = "rotation" in tick ? tick.rotation : 0;
-    if (rotation) {
+  for (const tick of placeXTickLabels(c)) {
+    ctx.textAlign = tick.anchor === "start" ? "left" : tick.anchor === "end" ? "right" : "center";
+    ctx.textBaseline = tick.baseline;
+    if (tick.rotation) {
       ctx.save();
-      ctx.translate(tick.px, plot.y + plot.h + 8);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.textAlign = "end";
-      ctx.textBaseline = "middle";
+      ctx.translate(tick.x, tick.y);
+      ctx.rotate((tick.rotation * Math.PI) / 180);
       ctx.fillText(tick.label, 0, 0);
       ctx.restore();
-      continue;
+    } else {
+      ctx.fillText(tick.label, tick.x, tick.y);
     }
-    const anchor = "anchor" in tick ? tick.anchor : "middle";
-    ctx.textAlign = anchor === "middle" ? "center" : anchor;
-    ctx.textBaseline = "alphabetic";
-    ctx.fillText(tick.label, tick.px, plot.y + plot.h + 14);
   }
 }
 

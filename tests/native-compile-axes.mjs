@@ -27,6 +27,7 @@ try {
         'export * from "./src/chart/compile/format.ts";',
         'export { measureText, ellipsize, TIME_TICK_SPACING } from "./src/chart/compile/axes.ts";',
         'export { crosshairCategoryLabel, crosshairValueLabel } from "./src/chart/render/chips.ts";',
+        'export { resolvePointer } from "./src/chart/render/pointer.ts";',
         'export { calendarTicks, TickWeight, tickLevel } from "./src/util/time/calendarTicks.ts";',
       ].join("\n"),
       resolveDir: root,
@@ -45,7 +46,7 @@ try {
 }
 const {
   decimalsOf, formatFixed, formatNum, heatmapValueFormatter, numericTickLabels, timeValueFormatter, valueFormatter,
-  measureText, ellipsize, TIME_TICK_SPACING, crosshairCategoryLabel, crosshairValueLabel,
+  measureText, ellipsize, TIME_TICK_SPACING, crosshairCategoryLabel, crosshairValueLabel, resolvePointer,
   calendarTicks, TickWeight, tickLevel,
 } = internals;
 
@@ -181,11 +182,12 @@ check("FX, 0.10-0.12 and 1.0-1.2 axes get unique, uniformly formatted labels", (
   assertUniformTicks(fx, "FX");
   assert.ok(fx.yTicks.every((tick) => decimals(tick.label) >= 4), `FX ticks read 1.0850…: ${fx.yTicks.map((t) => t.label)}`);
   // Chips and tooltips format through scene.formatters.y (W1B-02 routes the
-  // mark compilers through it); until then a chip keeps its own value's precision.
+  // mark compilers through it), so a last-value chip reads like the series.
   assert.equal(fx.formatters.y(1.087), "1.0870", "value formatter uses the series' data precision");
-  assert.equal(Number(fx.lastValues[0].label), 1.087);
+  assert.equal(fx.lastValues[0].label, "1.0870", "the last-value chip uses the series' data precision");
   const sample = fx.samples[fx.samples.length - 1];
-  const hover = { hit: null, sample, isBar: false, isLine: true, isPoint: false, scanX: sample.x, scanY: sample.y, y: sample.y };
+  const hover = resolvePointer(fx, sample.x, sample.y);
+  assert.equal(hover.sample, sample);
   assert.equal(crosshairValueLabel(fx, hover), "1.0870", "the hover chip uses data precision, not toFixed(1)");
   for (const [lo, hi] of [[0.1, 0.12], [1.0, 1.2], [1.0834, 1.0871], [98_000, 104_000]]) {
     const rows = Array.from({ length: 12 }, (_, i) => ({ x: i, y: lo + ((hi - lo) * i) / 11 }));
@@ -518,7 +520,8 @@ check("heatmap crosshair chips name the hovered cell on thinned axes", () => {
   const hovered = scene.nodes.filter((n) => n.role === "heat" && (n.datum.h === 1 || n.datum.h === 23));
   assert.equal(hovered.length, 2 * tokens.length);
   for (const node of hovered) {
-    const target = { hit: node, sample: null, isBar: false, isLine: false, isPoint: false, scanX: node.x + node.w / 2, scanY: node.y + node.h / 2, y: node.y };
+    const target = resolvePointer(scene, node.x + node.w / 2, node.y + node.h / 2);
+    assert.equal(target.hit, node);
     assert.equal(crosshairCategoryLabel(scene, target), String(node.datum.h));
     assert.equal(crosshairValueLabel(scene, target), node.datum.token);
   }
@@ -526,13 +529,13 @@ check("heatmap crosshair chips name the hovered cell on thinned axes", () => {
   const narrow = compile([bar(regions.map((k, v) => ({ k, v: v + 1 })), { x: "k", y: "v" })], { scales: { x: { type: "band", labels: { rotate: false } } } }, { width: 240, height: 200 });
   const target = narrow.nodes.find((node) => node.role === "bar" && node.datum.k === "Middle East & Africa");
   assert.equal(
-    crosshairCategoryLabel(narrow, { hit: target, sample: null, isBar: true, isLine: false, isPoint: false, scanX: target.x + target.w / 2, scanY: target.y, y: target.y }),
+    crosshairCategoryLabel(narrow, resolvePointer(narrow, target.x + target.w / 2, target.y + target.h / 2)),
     "Middle East & Africa",
     "the chip shows the full category, never a thinned neighbour or an ellipsized label",
   );
   const numericRows = compile([heatmap([{ x: "a", y: 1.5, v: 1 }, { x: "a", y: 2.5, v: 2 }], { x: "x", y: "y", valueKey: "v" })]);
   const row = numericRows.nodes.find((node) => node.role === "heat" && node.datum.y === 1.5);
-  assert.equal(crosshairValueLabel(numericRows, { hit: row, sample: null, isBar: false, isLine: false, isPoint: false, scanX: row.x, scanY: row.y + row.h / 2, y: row.y }), "1.5");
+  assert.equal(crosshairValueLabel(numericRows, resolvePointer(numericRows, row.x + row.w / 2, row.y + row.h / 2)), "1.5");
 });
 
 check("the colour bar paints the heatmap's value format", () => {

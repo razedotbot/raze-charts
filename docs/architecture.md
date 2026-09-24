@@ -264,7 +264,9 @@ backend.
 
 Native `viewport` windows source rows in `compileChart` before geometry and
 decimation. `mountChart` can brush (Shift-drag), wheel-zoom, and pan that
-window; `createViewportGroup()` keeps several mounts on the same X range.
+window within the zoom limits and data bounds (`interaction.zoom`,
+`interaction.panBounds`); `createViewportGroup()` keeps several mounts on the
+same X range.
 React `<Brush>` maps `startIndex`/`endIndex` onto that viewport. Coordinated
 panes stay host-owned: the compiler does not layout multiple plots.
 
@@ -343,14 +345,18 @@ src/chart/compile/
 src/chart/render/
   svg.ts        SVG nodes, grid, axes, colour bar, document assembly
   canvas.ts     Canvas painter for the same scene
-  legend.ts     paints the compiled legend layout for both renderers
-  chips.ts      last-value chip layout and crosshair chip labels
+  legend.ts     paints the compiled legend layout for both renderers; its row boxes drive hit tests and toggle buttons
+  chips.ts      bounded last-value chip stacking and crosshair chip labels
+  ticks.ts      x tick label placement (edge anchoring, v2 anchor/rotation)
   hit.ts        hit testing, hover-sample index, tooltip text
+  pointer.ts    pointer targets with data-space values; onTooltip/onSelect payloads
+  frame.ts      stage frame: where the scene sits on screen, for pointer mapping
+  zoom.ts       interaction option validation, zoom limits in axis space (decades on log axes), shared window maths
   primitives.ts shared paths, arcs, rounded bars, shading, escaping
-  mount.ts      mountChart() lifecycle, compile/paint, resize, handle
-  overlay.ts    mount DOM, hover crosshair/tooltip overlay
-  gestures.ts   select, wheel zoom, pan preview, brush, legend toggles
-  chrome.ts     range presets and navigator
+  mount.ts      mountChart() lifecycle, compile/paint, rAF resize, cached full scene, handle
+  overlay.ts    mount DOM, hover crosshair/tooltip overlay, legend toggle buttons
+  gestures.ts   select, rAF-coalesced wheel zoom/pan, pan preview, brush, legend toggles
+  chrome.ts     themed range presets and navigator
   types.ts      mount options/handle/event types and shared runtime state
 ```
 

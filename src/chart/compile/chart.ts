@@ -45,7 +45,7 @@ import type { MarkCompileContext } from "./context";
 import { compilePluginMark, resolvePluginDomains } from "./plugin";
 import { compilePie, compileRadar, createRadarState, pieLegendRows } from "./polar";
 import { asNumber, isRecord, isRuntimeArray, readChannel } from "./shared";
-import type { ChartDefinition, CompiledChart, HoverSample } from "./types";
+import type { ChartDefinition, CompiledChart, HoverSample, SceneNode } from "./types";
 import { validateChartSpec } from "./validate";
 
 export function compileChart(definition: ChartDefinition, size: { width: number; height: number }): CompiledChart {
@@ -177,6 +177,7 @@ function compilePass(
     }
     const row = seriesLegendRow(ms);
     if (row) ctx.legend.push(row);
+    const firstNode = ctx.nodes.length;
     if (m.kind === "line" || m.kind === "area") compileLineArea(ctx, m, ms);
     else if (m.kind === "point") compilePoint(ctx, m, ms);
     else if (m.kind === "ruleY") compileRuleY(ctx, m, ms);
@@ -185,6 +186,9 @@ function compilePass(
     else if (m.kind === "heatmap") compileHeatmap(ctx, m, heat!);
     else if (m.kind === "pie") compilePie(ctx, m, ms, seriesTable.isHidden);
     else if (m.kind === "radar") compileRadar(ctx, m, ms, radarState);
+    // Samples carry their identity from the mark compilers; the nodes that
+    // answer pointer events without a sample get it here.
+    stampNodeIdentity(ctx.nodes, firstNode, series.mark.data, ms.id, series.markIndex);
   }
 
   const { nodes, samples } = ctx;
@@ -312,4 +316,38 @@ function pluginHoverSample(ctx: MarkCompileContext, sample: HoverSample, s: Seri
     xValue: pluginXValue(ctx, sample.x),
     yValue: ctx.yScale.kind === "linear" ? ctx.yScale.invert(sample.y) : null,
   };
+}
+
+/**
+ * Give the nodes that answer pointer events without a hover sample (bars,
+ * heatmap cells, pie slices) their series identity and source row index, so
+ * onTooltip/onSelect payloads agree across marks.
+ *
+ * Nodes are emitted in row order and the viewport window keeps row order, so
+ * one forward identity walk over the source rows resolves every index.
+ *
+ * TODO(W2-13, perf-native-viewport-index): the walk starts at row 0, so a
+ * narrow window at the end of a large mark costs O(rows before the window).
+ * That is below the O(n) windowing today; once windowing binary-searches,
+ * have windowChartSpec report each window's source offset and start there.
+ */
+function stampNodeIdentity(
+  nodes: SceneNode[], from: number, rows: readonly unknown[], seriesId: string, markIndex: number,
+): void {
+  let cursor = 0;
+  for (let i = from; i < nodes.length; i++) {
+    const node = nodes[i]!;
+    if (node.role !== "bar" && node.role !== "heat" && node.role !== "slice") continue;
+    node.seriesId = seriesId;
+    node.markIndex = markIndex;
+    if (cursor < 0 || !("datum" in node)) continue;
+    let at = cursor;
+    while (at < rows.length && rows[at] !== node.datum) at++;
+    if (at === rows.length) {
+      cursor = -1;
+      continue;
+    }
+    node.index = at;
+    cursor = at;
+  }
 }

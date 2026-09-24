@@ -1,34 +1,82 @@
 // Axis chips: last-value chips on the value axis (SVG and Canvas share one
 // placement pass) and the crosshair chip labels shown by mounted charts.
 
-import type { HoverSample, CompiledChart, SceneNode } from "../compile/types";
-import type { AnyScale, BandScale, LinearScale } from "../scales";
-import type { SceneHoverSample } from "../sceneTypes";
+import type { CompiledChart } from "../compile/types";
 import { chartColorWithOpacity, readableTextColor } from "../theme";
+import type { PointerTarget } from "./pointer";
+import { formatSceneX, formatSceneY } from "./pointer";
 import { esc, hair, traceRoundRect } from "./primitives";
 
-const CHIP_HEIGHT = 15;
+export const CHIP_HEIGHT = 15;
+/** Vertical distance between stacked chips: the chip plus a 1px gap. */
+const CHIP_PITCH = CHIP_HEIGHT + 1;
 
 /** Width of the value-axis gutter right of the plot. */
 export function valueAxisWidth(c: CompiledChart): number {
   return Math.max(44, c.width - c.plot.x - c.plot.w);
 }
 
+/** Summary chip standing in for last-value chips that do not fit. */
+export interface ChipOverflow {
+  top: number;
+  /** Number of series whose chips were dropped. */
+  count: number;
+  label: string;
+}
+
+export interface LastValueChipLayout {
+  /** Top edge of each chip in `c.lastValues` order; null when the chip was dropped. */
+  tops: (number | null)[];
+  overflow: ChipOverflow | null;
+}
+
 /**
- * Top edge of each last-value chip, in c.lastValues order. Chips start
- * centred on their value, clamp to the plot, and step down past earlier chips.
+ * Place last-value chips on the value axis without overlaps. Chips start
+ * centred on their value and clamped to the plot, then a forward pass pushes
+ * colliding chips down and a backward pass bumps the stack up from the plot
+ * bottom. When more chips exist than fit, the first series keep theirs and
+ * the rest collapse into one `…+N` chip placed near the dropped values; when
+ * only one chip fits, that chip is the summary. O(n log n), and it always
+ * terminates.
  */
-export function layoutLastValueChips(c: CompiledChart): number[] {
+export function layoutLastValueChips(c: CompiledChart): LastValueChipLayout {
   const { plot } = c;
-  const placed: number[] = [];
-  for (const value of c.lastValues) {
-    let top = Math.max(plot.y, Math.min(plot.y + plot.h - CHIP_HEIGHT, value.y - 7.5));
-    while (placed.some((position) => Math.abs(position - top) < 16)) {
-      top = Math.min(plot.y + plot.h - CHIP_HEIGHT, top + 16);
-    }
-    placed.push(top);
+  const count = c.lastValues.length;
+  const tops: (number | null)[] = new Array<number | null>(count).fill(null);
+  if (!count) return { tops, overflow: null };
+  const minTop = plot.y;
+  const maxTop = Math.max(minTop, plot.y + plot.h - CHIP_HEIGHT);
+  const capacity = Math.max(1, Math.floor((maxTop - minTop) / CHIP_PITCH) + 1);
+  const wanted = c.lastValues.map((value) => {
+    const top = value.y - CHIP_HEIGHT / 2;
+    return Number.isFinite(top) ? Math.max(minTop, Math.min(maxTop, top)) : maxTop;
+  });
+
+  // Keep every chip when they fit; otherwise the leading series plus a summary.
+  const keep = count <= capacity ? count : capacity - 1;
+  const dropped = count - keep;
+  const items: { key: number; want: number }[] = [];
+  for (let i = 0; i < keep; i++) items.push({ key: i, want: wanted[i]! });
+  if (dropped > 0) {
+    let sum = 0;
+    for (let i = keep; i < count; i++) sum += wanted[i]!;
+    items.push({ key: -1, want: sum / dropped });
   }
-  return placed;
+  items.sort((a, b) => a.want - b.want || a.key - b.key);
+
+  const placed = items.map((item) => item.want);
+  for (let i = 1; i < placed.length; i++) placed[i] = Math.max(placed[i]!, placed[i - 1]! + CHIP_PITCH);
+  placed[placed.length - 1] = Math.min(placed[placed.length - 1]!, maxTop);
+  for (let i = placed.length - 2; i >= 0; i--) placed[i] = Math.min(placed[i]!, placed[i + 1]! - CHIP_PITCH);
+  placed[0] = Math.max(placed[0]!, minTop);
+  for (let i = 1; i < placed.length; i++) placed[i] = Math.max(placed[i]!, placed[i - 1]! + CHIP_PITCH);
+
+  let overflow: ChipOverflow | null = null;
+  items.forEach((item, index) => {
+    if (item.key >= 0) tops[item.key] = placed[index]!;
+    else overflow = { top: placed[index]!, count: dropped, label: `…+${dropped}` };
+  });
+  return { tops, overflow };
 }
 
 function chipSvg(
@@ -44,18 +92,22 @@ export function lastValuesSvg(c: CompiledChart): string {
   if (c.polar || c.heatmap) return "";
   const { plot, theme } = c;
   const axisW = valueAxisWidth(c);
-  const tops = layoutLastValueChips(c);
-  return c.lastValues.map((lv, index) => {
+  const { tops, overflow } = layoutLastValueChips(c);
+  const parts = c.lastValues.map((lv, index) => {
     const yy = hair(lv.y);
-    const top = tops[index]!;
+    const top = tops[index];
     const dash = lv.dash === false
       ? ""
       : `<line x1="${plot.x}" x2="${plot.x + plot.w}" y1="${yy}" y2="${yy}" stroke="${esc(lv.color)}" stroke-dasharray="3.5 3" stroke-opacity="0.8" />`;
-    return [
-      dash,
-      chipSvg(plot.x + plot.w + 3, top, axisW - 6, CHIP_HEIGHT, lv.color, readableTextColor(lv.color, theme), lv.label, "end"),
-    ].join("");
-  }).join("");
+    const chip = top == null
+      ? ""
+      : chipSvg(plot.x + plot.w + 3, top, axisW - 6, CHIP_HEIGHT, lv.color, readableTextColor(lv.color, theme), lv.label, "end");
+    return `${dash}${chip}`;
+  });
+  if (overflow) {
+    parts.push(chipSvg(plot.x + plot.w + 3, overflow.top, axisW - 6, CHIP_HEIGHT, theme.chipBg, readableTextColor(theme.chipBg, theme), overflow.label, "end"));
+  }
+  return parts.join("");
 }
 
 function paintChipCanvas(
@@ -84,7 +136,7 @@ export function paintLastValuesCanvas(ctx: CanvasRenderingContext2D, c: Compiled
   if (c.polar || c.heatmap) return;
   const { plot, theme } = c;
   const axisWidth = valueAxisWidth(c);
-  const tops = layoutLastValueChips(c);
+  const { tops, overflow } = layoutLastValueChips(c);
   c.lastValues.forEach((value, index) => {
     if (value.dash !== false) {
       ctx.beginPath();
@@ -96,84 +148,22 @@ export function paintLastValuesCanvas(ctx: CanvasRenderingContext2D, c: Compiled
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    paintChipCanvas(ctx, plot.x + plot.w + 3, tops[index]!, axisWidth - 6, CHIP_HEIGHT, value.color, readableTextColor(value.color, theme), value.label, theme.font);
+    const top = tops[index];
+    if (top == null) return;
+    paintChipCanvas(ctx, plot.x + plot.w + 3, top, axisWidth - 6, CHIP_HEIGHT, value.color, readableTextColor(value.color, theme), value.label, theme.font);
   });
+  if (overflow) {
+    paintChipCanvas(ctx, plot.x + plot.w + 3, overflow.top, axisWidth - 6, CHIP_HEIGHT, theme.chipBg, readableTextColor(theme.chipBg, theme), overflow.label, theme.font);
+  }
 }
 
-function nearestLabel(ticks: { px: number; label: string }[], px: number): string {
-  if (!ticks.length) return "";
-  let best = ticks[0]!;
-  for (const t of ticks) {
-    if (Math.abs(t.px - px) < Math.abs(best.px - px)) best = t;
-  }
-  return best.label;
+/** Value-axis crosshair chip text, from the target's structured value. */
+export function crosshairValueLabel(c: CompiledChart, target: PointerTarget): string {
+  if (c.yScale.kind === "band") return target.yCategory === undefined ? "" : formatSceneY(c, target.yCategory);
+  return target.yValue === undefined ? "" : formatSceneY(c, target.yValue);
 }
 
-/**
- * The band category nearest `px`, formatted like the axis (full text): band
- * ticks may be thinned or ellipsized, so they cannot name the hovered row or
- * column.
- */
-function bandLabel(scale: AnyScale, px: number, format: ((value: unknown) => string) | undefined): string {
-  let best: unknown;
-  let gap = Infinity;
-  for (const value of (scale as BandScale<string | number>).domain) {
-    const distance = Math.abs(scale.map(value as never) - px);
-    if (distance < gap) {
-      gap = distance;
-      best = value;
-    }
-  }
-  return best === undefined ? "" : format ? format(best) : String(best);
-}
-
-/** What the crosshair is anchored to while hovering. */
-export interface CrosshairTarget {
-  hit: SceneNode | null;
-  sample: HoverSample | null;
-  isBar: boolean;
-  isLine: boolean;
-  isPoint: boolean;
-  /** Scene-space crosshair position after snapping to the target. */
-  scanX: number;
-  scanY: number;
-  /** Raw scene-space pointer Y. */
-  y: number;
-}
-
-/**
- * Value-axis crosshair chip text, through the scene's Y formatter: the
- * hovered datum's own value on a line or point, never a pixel read back.
- */
-export function crosshairValueLabel(c: CompiledChart, target: CrosshairTarget): string {
-  const { hit, sample, isBar, isLine, isPoint, scanY, y } = target;
-  if (c.yScale.kind === "band") return bandLabel(c.yScale, scanY, c.formatters?.y);
-  if (isBar && hit?.tip) {
-    const bits = hit.tip.split("\n")[1]?.trim().split(/\s{2,}/) ?? [];
-    return bits[1] ?? bits[0] ?? "";
-  }
-  // Scene v2 value formatter: data precision (or scales.y.tickFormat).
-  const format = c.formatters?.y ?? ((value: number): string => (
-    Number.isInteger(value) ? String(value) : value.toFixed(Math.abs(value) < 1 ? 2 : 1)
-  ));
-  // The hovered datum's own value on a line or point, never a pixel read back.
-  if ((isLine || isPoint) && sample) {
-    const value = (sample as Partial<SceneHoverSample>).yValue;
-    return format(typeof value === "number" ? value : (c.yScale as LinearScale).invert(sample.y));
-  }
-  return format((c.yScale as LinearScale).invert(y));
-}
-
-/** Category/time-axis crosshair chip text. */
-export function crosshairCategoryLabel(c: CompiledChart, target: CrosshairTarget): string {
-  const { sample, isLine, isPoint, scanX } = target;
-  if (isLine && sample) {
-    const first = sample.tip.split("\n")[1];
-    return first ? (first.trim().split(/\s{2,}/)[0] ?? nearestLabel(c.xTicks, sample.x)) : nearestLabel(c.xTicks, sample.x);
-  }
-  if (isPoint && sample) {
-    const first = sample.tip.split("\n")[1];
-    return first ? (first.trim().split("·")[0]!.trim() || nearestLabel(c.xTicks, sample.x)) : nearestLabel(c.xTicks, scanX);
-  }
-  return c.xScale.kind === "band" ? bandLabel(c.xScale, scanX, c.formatters?.x) : nearestLabel(c.xTicks, scanX);
+/** Category/time-axis crosshair chip text: the hovered datum's x, never the nearest tick. */
+export function crosshairCategoryLabel(c: CompiledChart, target: PointerTarget): string {
+  return target.xValue === undefined ? "" : formatSceneX(c, target.xValue);
 }

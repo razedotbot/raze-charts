@@ -204,7 +204,10 @@ check("toggling A off keeps its row and B's colour; toggling back restores the o
 
   const svg = svgFromCompiled(hidden, { idPrefix: "t" });
   assert.match(svg, /<g data-series="mark-0" data-hidden="true" opacity="0\.42"/, "hidden rows render dimmed and keyed by id");
-  assert.match(svg, /<g data-series="mark-1" style="cursor:pointer"/);
+  // Visible rows are keyed by id too; the static markup carries no pointer
+  // cursor (a mount's toggle buttons do, W1B-03).
+  assert.match(svg, /<g data-series="mark-1" transform=/);
+  assert.doesNotMatch(svg, /cursor:\s*pointer/);
 });
 
 check("a mounted legend toggles a series off and back on through its row id", () => {
