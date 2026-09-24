@@ -140,6 +140,12 @@ export interface RazeChartsOptions {
   layout_child?: boolean;
   volume_mode?: VolumeMode;
   magnet?: boolean;
+  /**
+   * Undo steps kept per widget (default 100). The oldest step is dropped
+   * beyond it; `Infinity` keeps every step. Other values below 1 and
+   * fractions throw.
+   */
+  undo_limit?: number;
 }
 
 export interface ChartingLibraryWidgetOptions {

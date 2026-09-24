@@ -64,7 +64,7 @@ export function createWidgetContext(options: ChartingLibraryWidgetOptions): Char
 export class WidgetRuntime implements WidgetHost {
   readonly container: HTMLElement;
   readonly context: ChartContext;
-  readonly commands = new CommandStack();
+  readonly commands: CommandStack;
   readonly lifecycle: LifecycleController;
   readonly controllers = {} as WidgetControllerMap;
   readonly data: DataManager;
@@ -84,6 +84,7 @@ export class WidgetRuntime implements WidgetHost {
       : options.container;
     if (!container) throw new Error("[raze-charts] widget container not found");
     this.container = container;
+    this.commands = new CommandStack({ limit: options.raze?.undo_limit });
     this.context = createWidgetContext(options);
     this.lifecycle = new LifecycleController(this);
 

@@ -1,6 +1,6 @@
 {
   "entry": "studies",
-  "artifact": { "gzipBytes": 10240 },
+  "artifact": { "gzipBytes": 12288 },
   "scenarios": [
     { "name": "Single kernel", "imports": ["ema"], "gzipBytes": 1024 },
     { "name": "Registry with built-ins", "imports": ["StudyRegistry"], "gzipBytes": 7168 }

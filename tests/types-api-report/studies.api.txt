@@ -8,25 +8,180 @@ interface Bar
   open: number
   time: number
   volume?: number | undefined
-type StudyComputeResult = (null | number)[] | { series: StudySeries[]; }
-interface StudyDefinition
+interface ComputeIndicatorDefinition<S extends StudyInputSchema, P extends string> extends IndicatorDefinitionBase<S, P>
+  readonly aliases?: readonly string[] | undefined
+  compute(bars: readonly Bar[], inputs: StudyInputValues<S>, ctx: StudyComputeContext): StudyOutputs<P>
+  readonly dependsOn?: readonly StudyDependency[] | undefined
+  readonly description?: string | undefined
+  readonly fills?: readonly StudyFillDescriptor<P>[] | undefined
+  init?: undefined
+  readonly inputs: S
+  readonly keywords?: readonly string[] | undefined
+  readonly levels?: readonly StudyLevelDescriptor[] | undefined
+  readonly name: string
+  readonly pane: 'overlay' | 'pane'
+  readonly plots: readonly StudyPlotDescriptor<P>[]
+  readonly precision?: 'price' | number | undefined
+  readonly range?: undefined | { readonly min: number; readonly max: number; }
+  readonly shortTitle?: string | undefined
+  update?: undefined
+interface IncrementalIndicatorDefinition<S extends StudyInputSchema, P extends string, TState> extends IndicatorDefinitionBase<S, P>
+  readonly aliases?: readonly string[] | undefined
+  readonly dependsOn?: readonly StudyDependency[] | undefined
+  readonly description?: string | undefined
+  readonly fills?: readonly StudyFillDescriptor<P>[] | undefined
+  init(inputs: StudyInputValues<S>, ctx: StudyComputeContext): TState
+  readonly inputs: S
+  readonly keywords?: readonly string[] | undefined
+  readonly levels?: readonly StudyLevelDescriptor[] | undefined
+  readonly name: string
+  readonly pane: 'overlay' | 'pane'
+  readonly plots: readonly StudyPlotDescriptor<P>[]
+  readonly precision?: 'price' | number | undefined
+  readonly range?: undefined | { readonly min: number; readonly max: number; }
+  readonly shortTitle?: string | undefined
+  update: StudyUpdateFn<S, P, TState>
+type IndicatorDefinition<S extends StudyInputSchema = StudyInputSchema, P extends string = string, TState = unknown> = ComputeIndicatorDefinition<S, P> | IncrementalIndicatorDefinition<S, P, TState>
+interface IndicatorHandle<S extends StudyInputSchema = any, P extends string = string, TState = any> extends StudyDefinition
   aliases?: string[] | undefined
-  compute: (bars: Bar[], inputs: StudyInputs) => StudyComputeResult
-  defaults?: undefined | { [key: string]: number | string | undefined; length?: number | undefined; color?: string | undefined; }
+  compute: (bars: Bar[], inputs: StudyInputs, ctx: StudyComputeContext) => StudyComputeResult
+  createRunner(inputs: StudyInputValues<StudyInputSchema>, ctx: StudyComputeContext, style: IndicatorSeriesStyle): IndicatorRunner
+  defaults?: undefined | { [key: string]: StudyInputPrimitive | undefined; length?: number | undefined; color?: string | undefined; }
+  dependsOn?: readonly StudyDependency[] | undefined
+  formatLabel?: ((inputs: StudyInputs) => string) | undefined
   formatValue?: ((value: number) => string) | undefined
+  readonly indicator: IndicatorDefinition<S, P, TState>
+  readonly inputs: S
   keywords?: string[] | undefined
   label?: string | undefined
   levels?: StudyPaneLevel[] | undefined
   name: string
   pane: 'overlay' | 'pane'
   range?: undefined | { min: number; max: number; }
+  shortTitle?: string | undefined
+interface ResolveInputsOptions
+const STUDY_INPUT_TYPES: readonly ('bool' | 'color' | 'float' | 'int' | 'price' | 'resolution' | 'select' | 'session' | 'source' | 'symbol' | 'text' | 'time')[]
+const STUDY_SOURCES: readonly StudySource[]
+interface StudyChange
+  readonly error?: string | undefined
+  readonly id: string
+  readonly kind: StudyChangeKind
+type StudyChangeKind = 'add' | 'error' | 'inputs' | 'order' | 'remove' | 'style' | 'values' | 'visibility'
+interface StudyComputeContext
+  readonly formatPrice: (price: number) => string
+  readonly now: () => number
+  requestRecompute(): void
+  readonly resolution: ResolutionString
+  readonly symbol: string
+  readonly symbolInfo: Readonly<LibrarySymbolInfo> | null
+  readonly timezone: string
+  readonly visibleRange: Readonly<{ from: number; to: number; }> | null
+type StudyComputeResult = (null | number)[] | { series: StudySeries[]; }
+interface StudyDefinition
+  aliases?: string[] | undefined
+  compute: (bars: Bar[], inputs: StudyInputs, ctx: StudyComputeContext) => StudyComputeResult
+  defaults?: undefined | { [key: string]: StudyInputPrimitive | undefined; length?: number | undefined; color?: string | undefined; }
+  dependsOn?: readonly StudyDependency[] | undefined
+  formatLabel?: ((inputs: StudyInputs) => string) | undefined
+  formatValue?: ((value: number) => string) | undefined
+  readonly indicator?: IndicatorDefinition<any, any, any> | undefined
+  inputs?: StudyInputSchema | undefined
+  keywords?: string[] | undefined
+  label?: string | undefined
+  levels?: StudyPaneLevel[] | undefined
+  name: string
+  pane: 'overlay' | 'pane'
+  range?: undefined | { min: number; max: number; }
+  shortTitle?: string | undefined
+type StudyDependency = 'resolution' | 'symbol' | 'timezone' | 'visibleRange'
+interface StudyFillDescriptor<P extends string = string>
+  readonly between: readonly [P, P] | { readonly levels: readonly [number, number]; }
+  readonly color: string
+  readonly id: string
+  readonly title?: string | undefined
+type StudyInput = StudyBoolInput | StudyColorInput | StudyFloatInput | StudyIntInput | StudyPriceInput | StudyResolutionInput | StudySelectInput<string> | StudySessionInput | StudySourceInput | StudySymbolInput | StudyTextInput | StudyTimeInput
+interface StudyInputClamp
+  readonly clamped: number
+  readonly id: string
+  readonly value: number
+type StudyInputControl = 'checkbox' | 'color' | 'datetime' | 'number' | 'select' | 'text'
+class StudyInputError extends TypeError
+  new (code: StudyInputErrorCode, study: string, input: null | string, message: string): StudyInputError
+  readonly code: StudyInputErrorCode
+  readonly input: null | string
+  message: string
+  readonly name: 'StudyInputError'
+  stack?: string | undefined
+  readonly study: string
+type StudyInputErrorCode = 'invalid-schema' | 'invalid-value' | 'unknown-input'
+interface StudyInputField
+  readonly control: StudyInputControl
+  readonly default: StudyInputPrimitive
+  readonly group?: string | undefined
+  readonly id: string
+  readonly inline?: string | undefined
+  readonly max?: number | undefined
+  readonly min?: number | undefined
+  readonly options?: readonly { readonly value: string; readonly title: string; }[] | undefined
+  readonly precision?: number | undefined
+  readonly step?: number | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'bool' | 'color' | 'float' | 'int' | 'price' | 'resolution' | 'select' | 'session' | 'source' | 'symbol' | 'text' | 'time'
+  readonly value: StudyInputPrimitive
+interface StudyInputOptions
+  group?: string | undefined
+  inLabel?: boolean | undefined
+  inline?: string | undefined
+  title?: string | undefined
+  tooltip?: string | undefined
+type StudyInputPrimitive = boolean | number | string
+type StudyInputSchema = { readonly [id: string]: StudyInput; }
+type StudyInputType = 'bool' | 'color' | 'float' | 'int' | 'price' | 'resolution' | 'select' | 'session' | 'source' | 'symbol' | 'text' | 'time'
+type StudyInputValue<I extends StudyInput> = I extends StudyBoolInput ? boolean : I extends StudySourceInput ? StudySource : I extends StudySelectInput<infer V extends string> ? V : I extends StudyFloatInput | StudyIntInput | StudyPriceInput | StudyTimeInput ? number : string
+type StudyInputValues<S extends StudyInputSchema> = { readonly [K in keyof S]: StudyInputValue<S[K]>; }
 interface StudyInputs
-  [key: string]: number | string
+  [key: string]: StudyInputPrimitive
   length: number
+type StudyInputsOf<D> = D extends { readonly inputs?: infer S | undefined; } ? S extends StudyInputSchema ? StudyInputValues<S> : never : never
+interface StudyLevelDescriptor
+  readonly axisLabel?: boolean | undefined
+  readonly color?: string | undefined
+  readonly dashed?: boolean | undefined
+  readonly title?: string | undefined
+  readonly value: number
+interface StudyNumberInputOptions extends StudyInputOptions
+  group?: string | undefined
+  inLabel?: boolean | undefined
+  inline?: string | undefined
+  max?: number | undefined
+  min?: number | undefined
+  step?: number | undefined
+  title?: string | undefined
+  tooltip?: string | undefined
+type StudyOutputs<P extends string> = { readonly [K in P]: StudyValues; }
 interface StudyPaneLevel
   axisLabel?: boolean | undefined
   dashed?: boolean | undefined
   value: number
+interface StudyPlotDescriptor<P extends string = string>
+  readonly base?: number | undefined
+  readonly color?: string | undefined
+  readonly id: P
+  readonly inLegend?: boolean | undefined
+  readonly lineStyle?: 0 | 1 | 2 | undefined
+  readonly lineWidth?: number | undefined
+  readonly style: StudyPlotStyle
+  readonly title: string
+  readonly trackPrice?: boolean | undefined
+  readonly visible?: boolean | undefined
+interface StudyPlotOverride
+  color?: string | undefined
+  lineStyle?: 0 | 1 | 2 | undefined
+  lineWidth?: number | undefined
+  visible?: boolean | undefined
+type StudyPlotStyle = 'area' | 'circles' | 'columns' | 'cross' | 'histogram' | 'line' | 'shapes' | 'step'
+type StudyPointValues<P extends string> = { readonly [K in P]: null | number; }
 class StudyRegistry
   new (defs?: StudyDefinition[] | undefined): StudyRegistry
   list(): StudyDefinition[]
@@ -34,12 +189,28 @@ class StudyRegistry
   resolve(name: string): StudyDefinition | null
   unknownStudyMessage(name: string): string
 interface StudySeries
+  base?: number | undefined
   color?: string | undefined
+  fill?: string | undefined
+  id?: string | undefined
+  inLegend?: boolean | undefined
+  lineStyle?: 0 | 1 | 2 | undefined
+  lineWidth?: number | undefined
   name?: string | undefined
+  plotStyle?: StudyPlotStyle | undefined
   style?: StudySeriesStyle | undefined
   values: (null | number)[]
+  visible?: boolean | undefined
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
 type StudySource = 'close' | 'high' | 'hl2' | 'hlc3' | 'hlcc4' | 'low' | 'ohlc4' | 'open' | 'volume'
+type StudyUpdateFn<S extends StudyInputSchema, P extends string, TState> = (input: StudyUpdateInput, state: TState, inputs: StudyInputValues<S>, ctx: StudyComputeContext) => { readonly state: TState; readonly values: StudyPointValues<P>; }
+interface StudyUpdateInput
+  readonly bar: Bar
+  readonly bars: readonly Bar[]
+  readonly index: number
+  readonly mode: StudyUpdateMode
+type StudyUpdateMode = 'append' | 'replace-last'
+type StudyValues = (null | number)[] | Float64Array<ArrayBufferLike>
 type VwapAnchor = 'month' | 'quarter' | 'session' | 'week' | 'year'
 interface VwapOptions
   anchor?: VwapAnchor | undefined
@@ -47,12 +218,205 @@ interface VwapOptions
   source?: StudySource | undefined
   timezone?: string | undefined
 function bollinger(closes: number[], length: number, multiplier?: number | undefined): { mid: (null | number)[]; upper: (null | number)[]; lower: (null | number)[]; }
+function bool(value?: boolean | undefined, options?: StudyInputOptions | undefined): StudyBoolInput
 function closesFromBars(bars: Bar[]): number[]
+function color(value: string, options?: StudyInputOptions | undefined): StudyColorInput
+function createStudyContext(fields?: (Partial<Omit<StudyComputeContext, 'requestRecompute'>> & { requestRecompute?: (() => void) | undefined; }) | undefined): StudyComputeContext
+function defineIndicator<const S extends StudyInputSchema, P extends string, TState = unknown>(definition: IndicatorDefinition<S, P, TState>): IndicatorHandle<S, P, TState>
 function ema(closes: number[], length: number): (null | number)[]
+function float(value: WithDefault<StudyNumberInputOptions, number> | number, options?: StudyNumberInputOptions | undefined): StudyFloatInput
+function humanizeInputId(id: string): string
+function int(value: WithDefault<StudyNumberInputOptions, number> | number, options?: StudyNumberInputOptions | undefined): StudyIntInput
 function macd(closes: number[], fast?: number | undefined, slow?: number | undefined, signal?: number | undefined): { macd: (null | number)[]; signal: (null | number)[]; hist: (null | number)[]; }
+function normalizeInputSchema(schema: StudyInputSchema, study: string): StudyInputSchema
+function positionalStudyInputs(schema: StudyInputSchema, values: readonly unknown[], study: string): Record<string, unknown>
+function price(value: WithDefault<StudyNumberInputOptions, number> | number, options?: StudyNumberInputOptions | undefined): StudyPriceInput
+function resolution(value?: string | undefined, options?: StudyInputOptions | undefined): StudyResolutionInput
+function resolveStudyInputs<S extends StudyInputSchema>(schema: S, values: Readonly<Record<string, unknown>> | null | undefined, study: string, options?: ResolveInputsOptions | undefined): StudyInputValues<S>
 function rsi(closes: number[], length: number): (null | number)[]
+function runIndicator<S extends StudyInputSchema, P extends string, TState>(definition: IndicatorDefinition<S, P, TState> | IndicatorHandle<S, P, TState>, bars: readonly Bar[], inputs?: Readonly<Record<string, unknown>> | undefined, ctx?: StudyComputeContext | undefined): { [K in P]: (null | number)[]; }
 function searchStudies(defs: readonly StudyDefinition[], query: string): StudyDefinition[]
+function select<const V extends string>(options: readonly V[] | readonly { readonly value: V; readonly title: string; }[], value?: NoInfer<V> | undefined, presentation?: StudyInputOptions | undefined): StudySelectInput<V>
+function session(value?: string | undefined, options?: StudyInputOptions | undefined): StudySessionInput
 function sma(closes: number[], length: number): (null | number)[]
+function source(value?: StudySource | undefined, options?: StudyInputOptions | undefined): StudySourceInput
+function sourceValue(bar: Bar, source?: StudySource | undefined): number
 function sourceValues(bars: readonly Bar[], source?: StudySource | undefined): number[]
 function stdev(closes: number[], length: number): (null | number)[]
+function studyInputFields(schema: StudyInputSchema, values?: Readonly<Record<string, unknown>> | undefined, study?: string | undefined): StudyInputField[]
+function symbol(value?: string | undefined, options?: StudyInputOptions | undefined): StudySymbolInput
+function text(value?: string | undefined, options?: StudyInputOptions | undefined): StudyTextInput
+function time(value: number, options?: StudyInputOptions | undefined): StudyTimeInput
 function vwap(bars: Bar[], options?: VwapOptions | undefined): (null | number)[]
+# referenced, not exported
+interface IndicatorDefinitionBase<S extends StudyInputSchema, P extends string>
+  readonly aliases?: readonly string[] | undefined
+  readonly dependsOn?: readonly StudyDependency[] | undefined
+  readonly description?: string | undefined
+  readonly fills?: readonly StudyFillDescriptor<P>[] | undefined
+  readonly inputs: S
+  readonly keywords?: readonly string[] | undefined
+  readonly levels?: readonly StudyLevelDescriptor[] | undefined
+  readonly name: string
+  readonly pane: 'overlay' | 'pane'
+  readonly plots: readonly StudyPlotDescriptor<P>[]
+  readonly precision?: 'price' | number | undefined
+  readonly range?: undefined | { readonly min: number; readonly max: number; }
+  readonly shortTitle?: string | undefined
+type IndicatorOutputArrays = { [x: string]: (null | number)[]; }
+interface IndicatorRun
+  readonly outputs: IndicatorOutputArrays
+  readonly series: StudySeries[]
+  readonly values: (null | number)[]
+interface IndicatorRunner
+  full(bars: readonly Bar[]): IndicatorRun
+  tick(bars: readonly Bar[], mode: StudyUpdateMode): boolean
+interface IndicatorSeriesStyle
+  color: string
+  overrides?: Readonly<Record<string, StudyPlotOverride>> | undefined
+  palette?: readonly string[] | undefined
+  paletteOffset?: number | undefined
+interface LibrarySymbolInfo
+  [key: string]: unknown
+  daily_multipliers?: string[] | undefined
+  data_status?: 'delayed_streaming' | 'endofday' | 'streaming' | undefined
+  description?: string | undefined
+  exchange: string
+  format?: SeriesFormat | undefined
+  fractional?: boolean | undefined
+  full_name?: string | undefined
+  has_daily?: boolean | undefined
+  has_intraday?: boolean | undefined
+  has_seconds?: boolean | undefined
+  has_weekly_and_monthly?: boolean | undefined
+  intraday_multipliers?: string[] | undefined
+  listed_exchange?: string | undefined
+  minmov: number
+  minmove2?: number | undefined
+  name: string
+  pricescale: number
+  seconds_multipliers?: string[] | undefined
+  session: string
+  supported_resolutions?: ResolutionString[] | undefined
+  ticker?: string | undefined
+  timezone: string
+  type?: string | undefined
+  volume_precision?: number | undefined
+type Nominal<T, Name extends string> = T & { [Symbol.species]?: Name | undefined; }
+type ResolutionString = string & { [Symbol.species]?: 'ResolutionString' | undefined; }
+type SeriesFormat = 'price' | 'volume'
+interface StudyBoolInput extends StudyInputBase<boolean>
+  readonly default: boolean
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'bool'
+interface StudyColorInput extends StudyInputBase<string>
+  readonly default: string
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'color'
+interface StudyFloatInput extends StudyInputBase<number>
+  readonly default: number
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly max?: number | undefined
+  readonly min?: number | undefined
+  readonly step?: number | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'float'
+interface StudyInputBase<V>
+  readonly default: V
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+interface StudyIntInput extends StudyInputBase<number>
+  readonly default: number
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly max?: number | undefined
+  readonly min?: number | undefined
+  readonly step?: number | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'int'
+interface StudyPriceInput extends StudyInputBase<number>
+  readonly default: number
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly max?: number | undefined
+  readonly min?: number | undefined
+  readonly step?: number | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'price'
+interface StudyResolutionInput extends StudyInputBase<string>
+  readonly default: string
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'resolution'
+interface StudySelectInput<V extends string = string> extends StudyInputBase<V>
+  readonly default: V
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly options: readonly V[] | readonly { readonly value: V; readonly title: string; }[]
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'select'
+interface StudySessionInput extends StudyInputBase<string>
+  readonly default: string
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'session'
+interface StudySourceInput extends StudyInputBase<StudySource>
+  readonly default: StudySource
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'source'
+interface StudySymbolInput extends StudyInputBase<string>
+  readonly default: string
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'symbol'
+interface StudyTextInput extends StudyInputBase<string>
+  readonly default: string
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'text'
+interface StudyTimeInput extends StudyInputBase<number>
+  readonly default: number
+  readonly group?: string | undefined
+  readonly inLabel?: boolean | undefined
+  readonly inline?: string | undefined
+  readonly title: string
+  readonly tooltip?: string | undefined
+  readonly type: 'time'
+type Timezone = string
+type WithDefault<O, V> = O & { default: V; }

@@ -342,6 +342,13 @@ SMA, and RSI update incrementally for an appended or replaced live bar;
 backfills and custom studies recompute. This distinction matters for high-rate
 feeds and is intentionally documented rather than hidden.
 
+For typed plugins, `defineIndicator()` from `@razedotbot/charts/studies` adds a
+validated input schema (`int`, `source`, `select`, …), plot/fill/level
+descriptors, a read-only compute context (symbol info, resolution, timezone,
+visible range) and incremental `init()`/`update()` steps that run once per live
+tick. Invalid inputs reject `createStudy()` with a `StudyInputError`. See
+[docs/indicators.md](docs/indicators.md).
+
 ### Price formatting
 
 One formatter controls the price axis, last-price tag, OHLC legend, crosshair,

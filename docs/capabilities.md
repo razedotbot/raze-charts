@@ -27,10 +27,12 @@ Legend:
 Indicator math also ships on its own: `@razedotbot/charts/studies` exports the
 pure kernels (`sma`, `ema`, `rsi`, `stdev`, `bollinger`, `macd`, `vwap`,
 `closesFromBars`, `sourceValues`), `StudyRegistry`, `BUILTIN_STUDIES`,
-`searchStudies`, and the `StudyDefinition` contract types, with no DOM or
-widget code (**Yes** — ESM, CommonJS, and NodeNext types are covered by the
-packed package contract). A registry created there is standalone; pass
-definitions to a widget through `raze.custom_studies`.
+`searchStudies`, the `StudyDefinition` contract types, and the typed indicator
+contract (`defineIndicator`, the input helpers `int`/`float`/`source`/`select`/…,
+`runIndicator`, `createStudyContext`, `StudyInputError`), with no DOM or widget
+code (**Yes** — ESM, CommonJS, and NodeNext types are covered by the packed
+package contract). A registry created there is standalone; pass definitions to
+a widget through `raze.custom_studies`.
 
 ## Financial domain
 
@@ -61,8 +63,11 @@ definitions to a widget through `raze.custom_studies`.
 | Built-in study inputs | **Yes** | By id, TradingView input title (`Fast Length`, `fastLength`, `StdDev`), the aliases `src`, `len`, `period` and `multiplier`, or TradingView `in_N` position (`createStudy('MACD', false, false, { in_0: 14, in_1: 30, in_3: 'close', in_2: 9 })`). EMA/SMA: `length`, `source`, `offset`; RSI: `length`, `source`; Bollinger Bands: `length`, `mult`, `source`, `offset`; MACD: `fast`, `slow`, `signal`, `source` (`length` sets `slow`; a `fast` that is not below `slow` warns); VWAP: `anchor` (`session`/`week`/`month`/`quarter`/`year`), `source` (default `hlc3`), `offset`. Sources: `open`, `high`, `low`, `close`, `hl2`, `hlc3`, `ohlc4`, `hlcc4`, `volume`. An unknown key or invalid value warns once with the supported list; out-of-range numbers are clamped. Legend labels still show the store's `length`. |
 | VWAP sessions | **Yes** | Resets at the start of each trading day of `symbolInfo.session` in `symbolInfo.timezone` (DST-aware), so sessions crossing UTC midnight (ASX, CME Globex `1700-1600`) stay continuous; `24x7` symbols reset at midnight as before. A zero-volume bar carries the running VWAP; a feed with no volume at all warns. An unknown zone or session string warns and falls back to UTC days. |
 | Study names | **Yes** | `createStudy()` and `load()` match a definition's name or alias exactly (case-insensitive; a TradingView `@tv-basicstudies` suffix is ignored). Names Raze lacks, such as `Double Exponential Moving Average`, `Bollinger Bands %B` or `Anchored VWAP`, reject with the list of available studies instead of resolving to a similar built-in. `keywords` only feed `searchStudies(registry.list(), query)` (exported by `@razedotbot/charts/studies`) for pickers. |
-| Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` paints a pane study on the price pane with its own scale (`range`, or its visible values; unlabeled, like TradingView's "No scale"); `lock` is stored on the instance. |
-| Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. The main plot always keeps max(120px, 40% of the height above the time axis); extra panes shrink evenly to 24px, then collapse to titled strips, and never pass the time axis. |
+| Custom studies | **Yes** | Overlay or pane. v1 `StudyDefinition`s recompute the full array after a data mutation and receive every declared default. `defineIndicator()` (v2) adds typed inputs, plot/fill/level descriptors and incremental `init()`/`update()`: one `update()` call per appended or replaced bar, never a full recompute on ticks. See [indicators.md](./indicators.md). `forceOverlay` paints a pane study on the price pane with its own scale (`range`, or its visible values; unlabeled, like TradingView's "No scale"); `lock` is stored on the instance. |
+| Typed, validated study inputs | **Yes** | `int`, `float`, `price`, `time`, `bool`, `source`, `select`, `color`, `session`, `symbol`, `resolution`, `text`. Missing inputs take defaults, numbers clamp to `min`/`max` (with a warning), and unknown ids or wrongly typed values (objects and arrays included) reject `createStudy()` with a `StudyInputError` (`unknown-input`, `invalid-value`; malformed schemas throw `invalid-schema`). TradingView's positional array maps onto a declared schema in order; studies without a schema (the built-ins) do not map it yet. `StudyInputsRegistry` types `createStudy()` inputs per study name. Boolean inputs round-trip through `save()`/`load()`. `load()` restores saved inputs that no longer validate with their defaults and warns per study instead of failing the layout. |
+| Study compute context | **Yes** | `compute`/`init`/`update` receive a frozen `ctx`: `symbol`, `symbolInfo`, `resolution`, resolved `timezone`, `formatPrice`, `now`, `requestRecompute()`, and `visibleRange` for `dependsOn: ["visibleRange"]` studies, which recompute on pan/zoom: drag, wheel, pinch, keyboard and axis gestures, presets and `setVisibleRange()` (throttled to one pass per 100 ms). The F-key/double-click fit does not trigger it yet. |
+| Study plot styles | **Subset** | `line`, `histogram` and `columns` paint as declared; `step`, `area`, `circles`, `cross` and `shapes` paint as lines and carry `plotStyle` for the plot painter. The first fill (between two plots or two levels) is painted; additional fills warn once. Hidden plots compute into `StudyInstance.outputs`. |
+| Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. The main plot always keeps max(120px, 40% of the height above the time axis); extra panes shrink proportionally to their preferred heights, down to 24px, then collapse to titled strips, and never pass the time axis. |
 | Drawing tools | **Yes** | Horizontal/vertical line, trend, ray, extended line, measure (ephemeral), Fibonacci, rectangle, and text. |
 | Magnet / stay-in-mode / objects tree | **Yes** | OHLC magnet, stay-in-drawing-mode, and an objects tree over shapes and studies. |
 | Shape editing | **Yes** | Create, drag, read/update points, remove, and remove all shapes. |
@@ -71,7 +76,7 @@ definitions to a widget through `raze.custom_studies`.
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
 | Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series, each normalised to its own close at the first visible bar (TradingView's same-% scale) and included in autoscale, so symbols of any magnitude share the plot; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. The synced crosshair's time line and time label show in every pane. Its price line shows for the same symbol; until the layout relay reports the source symbol, it also shows in any pane whose price range contains the source price. |
 | Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
-| Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |
+| Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. Study steps store specs, not value arrays, and the history keeps the newest `raze.undo_limit` steps (default 100). |
 | Encapsulated runtime surface | **Yes** | `widget` and `activeChart()` objects expose only the documented `IChartingLibraryWidget` / `IChartWidgetApi` methods. Internal state is `#private` or module-private and cannot be reached or mutated at runtime. |
 | Full TradingView study/drawing catalog | **No** | Compatibility is a documented subset, not feature parity. |
 | WebGL, LOD, or worker renderer | **No** | Canvas 2D is the current financial renderer. |

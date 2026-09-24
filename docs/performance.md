@@ -73,7 +73,7 @@ npm run check:size
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
 | | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 52 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
-| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 10 KiB |
+| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 12 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
 | | Scenario: Registry with built-ins | `import { StudyRegistry }` | 7 KiB |
 
@@ -350,10 +350,16 @@ Built-in EMA, SMA, and RSI recognize two hot-path mutations:
 - replace the current forming bar.
 
 Only the newest indicator value is updated in those cases. Backfill, historical
-correction, array replacement, and custom study definitions use full-array
-recomputation. If a high-rate custom indicator is expensive, coalesce forming
-bar updates in the feed or precompute it upstream; its public contract is not
-incremental today.
+correction, array replacement, and v1 custom study definitions use full-array
+recomputation. A high-rate custom indicator should use `defineIndicator()` with
+`init()`/`update()`: each appended or replaced bar then costs exactly one
+`update()` call. Studies that read `ctx.visibleRange` recompute at most once per
+100 ms while the chart pans.
+
+Undo history stores study specs, not value arrays, and keeps the newest 100
+steps by default (`raze.undo_limit`). Adding and removing six studies on 500k
+bars used to retain about 118 MB through undo snapshots; it now retains under
+2 MB (`tests/study-contract.mjs` measures it after GC).
 
 ## Review checklist
 
@@ -537,3 +543,14 @@ option or launch flag turns that off, so scene text (axis labels) is subpixel
 while overlay text (crosshair pills, legend) stays greyscale. Screenshots
 repaint both layers into an alpha canvas (`ChartRenderer.snapshot()`), so
 exported PNGs carry greyscale text rather than colour fringes.
+
+Study contract v2 budget (W1B-15). The `/studies` artifact budget rises from
+5 KiB to 12 KiB gzip (about 9 KiB used, leaving room for the kernel fixes of
+the same wave) because the subpath now carries the typed indicator contract: `defineIndicator()` validation, the incremental runner, input
+builders and resolution, and the settings-form model. The "Single kernel" and
+"Registry with built-ins" scenarios are unchanged, so consumers that import
+only kernels do not pay for it. The root artifact stays inside its 72 KiB cap
+and grows by about 4 KiB: input resolution with documented errors, the compute
+context, spec-only undo, the change stream and the handle runner protocol.
+The v2 execution code itself lives in `/studies` and travels with each
+`defineIndicator()` handle, so the root never bundles it.

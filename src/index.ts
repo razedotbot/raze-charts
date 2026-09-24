@@ -32,7 +32,7 @@ export { TradingStore } from "./core/TradingStore";
 export type { StoredTradingLine } from "./core/TradingStore";
 export { buildTheme, isLightColor, withAlpha } from "./core/theme";
 export { CommandStack } from "./core/CommandStack";
-export type { Command } from "./core/CommandStack";
+export type { Command, CommandStackOptions } from "./core/CommandStack";
 export { resolveTimeframe, TIMEFRAME_PRESETS } from "./core/timeframe";
 export type { ResolvedTimeframe, TimeframePreset } from "./core/timeframe";
 export type {
@@ -107,6 +107,10 @@ export type { StudySource } from "./studies/types";
 export { BUILTIN_STUDIES, StudyRegistry } from "./studies/registry";
 export { StudyStore } from "./studies/StudyStore";
 export type { StudyInstance, StudyKind, StudySpec } from "./studies/StudyStore";
+export { StudyInputError } from "./studies/inputs";
+export type { StudyInputErrorCode } from "./studies/inputs";
+export type { StudyPatch, StudyPlotOverride, StudySnapshot } from "./studies/StudyStore";
+export type { StudyChange, StudyChangeKind } from "./studies/types";
 
 // ── UI chrome ───────────────────────────────────────────────────────────────
 export { Toolbar, TOOLBAR_HEIGHT } from "./ui/Toolbar";

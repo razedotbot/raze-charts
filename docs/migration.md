@@ -136,6 +136,28 @@ change event and requests one repaint. The widget's own code is still moving
 from direct field writes to these setters. [Shared seams](./seams.md) lists
 every field.
 
+### Custom studies: study contract v2
+
+Existing `raze.custom_studies` definitions keep working. Some public types
+changed, and TypeScript code that relies on the old shapes needs small edits:
+
+- `StudyDefinition.compute` now takes a third argument,
+  `ctx: StudyComputeContext`. Implementations that ignore it compile
+  unchanged. Code that calls `definition.compute(bars, inputs)` itself must
+  pass a context, for example `createStudyContext({ symbolInfo, resolution })`
+  from `@razedotbot/charts/studies`.
+- The `StudyInputs` index signature, `StudyDefinition.defaults` and the
+  `inputs` of `ChartLayoutSnapshot` studies widened from `number | string` to
+  `number | string | boolean`. Code that reads these values as
+  `number | string` needs a `typeof` check.
+- `createStudy()` now validates inputs against a declared schema and rejects
+  with a `StudyInputError` (`code`: `unknown-input` or `invalid-value`)
+  instead of dropping or ignoring bad values. Boolean inputs are kept.
+  `load()` stays lenient and resets stale saved inputs to their defaults with
+  a warning.
+
+[Custom indicators](./indicators.md) documents the full contract.
+
 ## Recharts-shaped JSX
 
 The React entrypoint is a focused translation layer over the native chart

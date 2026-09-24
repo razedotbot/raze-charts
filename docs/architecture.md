@@ -278,9 +278,15 @@ symbol's session, measured in the symbol's time zone through the shared time
 core (UTC days for `24x7` symbols). Every kernel treats a non-finite sample as
 a gap: it emits `null` and is skipped by windows and recurrences, and the
 incremental path falls back to a full recompute around such a bar. A new array
-reference, a backfill, a historical correction, or a custom study uses the
-public full-array `compute` contract. Custom code must not assume incremental
-calls.
+reference, a backfill, a historical correction, or a v1 custom study uses the
+public full-array `compute` contract; v1 code must not assume incremental
+calls. Indicators registered through `defineIndicator()` with `init()`/`update()`
+advance by one pure `update()` call per appended or replaced bar: the store
+keeps the state committed before the forming bar and replays from `init()` only
+after structural changes. The executing code travels with the handle, so the
+root bundle carries only the protocol. Every contract receives a frozen compute
+context (symbol, symbol info, resolution, timezone, formatter, clock and, on
+request, the visible range). See [indicators.md](./indicators.md).
 
 `widget.save()` / `widget.load()` serialize a versioned JSON snapshot: symbol,
 interval, visible range, style/scale flags, drawings with stable IDs and behavior
@@ -288,7 +294,8 @@ flags, study specs (not derived values), and compare symbols. The host owns
 storage. A drawing with `disableSave` remains live but is omitted from the
 snapshot. `executeActionById("undo"|"redo")`
 walks a command stack for drawings and studies. `disableUndo` on a shape skips
-that create. There is no cloud layout.
+that create. Study commands keep specs, never computed arrays, and the stack
+keeps the newest `raze.undo_limit` steps (default 100). There is no cloud layout.
 
 Trading overlays use a separate `TradingStore` because broker state has a
 different lifecycle from drawings. `ChartApi` creates fluent line adapters;
