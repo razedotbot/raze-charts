@@ -5,7 +5,12 @@
 
 import type {
   BracketOrderOptions,
+  ChartActionId,
+  CheckableChartActionId,
   CreateShapeOptions,
+  CreateStudyInputs,
+  CreateStudyOptions,
+  CreateStudyOverrides,
   EntityId,
   IBracketOrderAdapter,
   IChartWidgetApi,
@@ -47,11 +52,15 @@ export interface ChartApiDeps {
     name: string,
     forceOverlay?: boolean,
     lock?: boolean,
-    inputs?: Record<string, unknown>,
+    // Registered study names narrow this further on IChartWidgetApi.
+    inputs?: CreateStudyInputs | Readonly<Record<string, unknown>>,
+    overrides?: CreateStudyOverrides,
+    options?: CreateStudyOptions,
   ): Promise<EntityId>;
   setVisibleRange(range: { from: number; to: number }): Promise<void>;
   createCompare(symbol: string): Promise<EntityId>;
-  executeActionById(actionId: string): void;
+  executeActionById(actionId: ChartActionId): void;
+  getCheckableActionState(actionId: CheckableChartActionId): boolean;
   /** Fit every loaded bar in view with price autoscale. */
   fitContent(): void;
   /** Reset to the default bar spacing anchored to the latest bar, with price autoscale. */
@@ -73,7 +82,8 @@ export interface ChartApi {
   getVisibleRange(): { from: number; to: number };
   setVisibleRange(range: { from: number; to: number }): Promise<void>;
   createCompare(symbol: string): Promise<EntityId>;
-  executeActionById(actionId: string): void;
+  executeActionById(actionId: ChartActionId): void;
+  getCheckableActionState(actionId: CheckableChartActionId): boolean;
   createShape<TOverrides extends object>(
     point: ShapePoint,
     options: CreateShapeOptions<TOverrides>,
@@ -94,7 +104,10 @@ export interface ChartApi {
     name: string,
     forceOverlay?: boolean,
     lock?: boolean,
-    inputs?: Record<string, unknown>,
+    // Registered study names narrow this further on IChartWidgetApi.
+    inputs?: CreateStudyInputs | Readonly<Record<string, unknown>>,
+    overrides?: CreateStudyOverrides,
+    options?: CreateStudyOptions,
   ): Promise<EntityId>;
   refreshMarks(): void;
   clearMarks(): void;

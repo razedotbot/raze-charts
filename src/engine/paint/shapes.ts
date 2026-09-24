@@ -237,6 +237,8 @@ function labelSlots(env: Env, shapes: readonly StoredShape[]): Map<string, numbe
 /** Paint every visible drawing in store z order and publish their hit targets. */
 export function drawShapes(ctx: CanvasRenderingContext2D, v: FinanceView): void {
   v.shapeScreen.length = 0;
+  // hideAllDrawingTools: nothing painted also means nothing to hit-test.
+  if (v.context.drawingsHidden) return;
   const shapes = v.shapes.list();
   if (!shapes.length) return;
   const base = envOf(v);

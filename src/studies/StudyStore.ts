@@ -22,6 +22,7 @@ import type {
   StudyInputSchema,
   StudyInputs,
   StudyInputValues,
+  StudyPlotStyles,
   StudySeries,
 } from "../types/charting_library";
 import { resolveTimezone, type ChartContext } from "../core/context";
@@ -70,6 +71,12 @@ export interface StudySpec {
   invalidInputs?: "throw" | "default";
   /** Per-plot style overrides for v2 indicators, keyed by plot id. */
   plots?: Readonly<Record<string, StudyPlotOverride>>;
+  /**
+   * Per-plot colour / width / visibility overrides from createStudy
+   * `overrides` or `studies_overrides`, keyed by plot reference (see
+   * StudyPlotStyles). Applied onto the computed series of any study.
+   */
+  plotStyles?: StudyPlotStyles;
   /** Add without an undo step (TradingView `options.disableUndo`). */
   disableUndo?: boolean;
 }
@@ -84,6 +91,7 @@ export interface StudySnapshot {
   forceOverlay: boolean;
   inputs: Readonly<Record<string, StudyInputPrimitive>>;
   plots?: Readonly<Record<string, StudyPlotOverride>>;
+  plotStyles?: StudyPlotStyles;
 }
 
 /** Editable study properties for update(). */
@@ -116,6 +124,8 @@ export interface StudyInstance {
   inputs: Record<string, StudyInputPrimitive>;
   /** Per-plot overrides (v2 indicators). */
   plots?: Readonly<Record<string, StudyPlotOverride>>;
+  /** Per-plot styles by plot reference, applied onto `series` after every compute. */
+  plotStyles?: StudyPlotStyles;
   /** Every plot's values by plot id, including hidden plots (v2 indicators). */
   outputs?: Readonly<Record<string, (number | null)[]>>;
   /** Why the last compute/update failed, or null. */
@@ -398,6 +408,7 @@ export class StudyStore {
     };
     const plots = copyPlots(study.plots);
     if (plots) out.plots = plots;
+    if (study.plotStyles) out.plotStyles = clonePlotStyles(study.plotStyles);
     return out;
   }
 
@@ -501,6 +512,7 @@ export class StudyStore {
     };
     const plots = copyPlots(spec.plots);
     if (plots) study.plots = plots;
+    Object.assign(study, copyPlotStyles(def.name, spec.plotStyles));
     if (issues.length) {
       study.inputWarning = issues.join("; ");
       console.warn(
@@ -521,6 +533,8 @@ export class StudyStore {
     study.inputs = resolved.inputs;
     if (resolved.plots) study.plots = resolved.plots;
     else delete study.plots;
+    if (resolved.plotStyles) study.plotStyles = resolved.plotStyles;
+    else delete study.plotStyles;
     if (resolved.inputWarning) study.inputWarning = resolved.inputWarning;
     else delete study.inputWarning;
     this.initialiseRuntime(study);
@@ -600,6 +614,7 @@ export class StudyStore {
       if (mutation === "append" || mutation === "replace-last") {
         if (this.updateBuiltinLastValue(study, mutation)) {
           study.series = [{ values: study.values, style: "line", color: study.color }];
+          applyPlotStyles(study);
           this.emit("values", study.id);
           continue;
         }
@@ -649,6 +664,7 @@ export class StudyStore {
         }
         if (runtime) runtime.rsi = runtime.kind === "rsi" ? this.buildRsiRuntime(study.length) : null;
       }
+      applyPlotStyles(study);
       study.error = null;
       this.emit("values", study.id);
     } catch (e) {
@@ -862,3 +878,55 @@ export class StudyStore {
   }
 }
 
+/**
+ * Whether plot reference `ref` names the series at `index`: an index ref
+ * ("0") matches by position, a name ref by the case-insensitive series name or
+ * its last word (`upper` matches `BB upper`).
+ */
+export function plotRefMatches(ref: string, index: number, name: string | undefined): boolean {
+  if (/^\d+$/.test(ref)) return Number(ref) === index;
+  const lower = name?.toLowerCase();
+  return !!lower && (lower === ref || lower.endsWith(` ${ref}`));
+}
+
+/** Paint the per-plot overrides onto freshly computed series. */
+function applyPlotStyles(study: StudyInstance): void {
+  const styles = study.plotStyles;
+  if (!styles) return;
+  study.series.forEach((series, index) => {
+    for (const [ref, style] of Object.entries(styles)) {
+      if (plotRefMatches(ref, index, series.name)) Object.assign(series, style);
+    }
+  });
+}
+
+function clonePlotStyles(styles: StudyPlotStyles): StudyPlotStyles {
+  return Object.fromEntries(Object.entries(styles).map(([ref, style]) => [ref, { ...style }])) as StudyPlotStyles;
+}
+
+/** A validated copy of `plotStyles` (refs lower-cased); invalid entries warn and are dropped. */
+function copyPlotStyles(study: string, styles: unknown): { plotStyles?: StudyPlotStyles } {
+  if (styles == null) return {};
+  const out = new Map<string, Record<string, unknown>>();
+  const invalid: string[] = [];
+  for (const [ref, style] of Object.entries(typeof styles === "object" ? styles : { plotStyles: styles })) {
+    if (typeof style !== "object" || !style) {
+      invalid.push(ref);
+      continue;
+    }
+    for (const [key, value] of Object.entries(style)) {
+      if (!validPlotStyle(key, value)) invalid.push(`${ref}.${key}`);
+      else out.set(ref.toLowerCase(), { ...out.get(ref.toLowerCase()), [key]: value });
+    }
+  }
+  if (invalid.length) {
+    console.warn(`[raze-charts] study "${study}": ignored invalid plotStyles entries: ${invalid.join(", ")}`);
+  }
+  return out.size ? { plotStyles: Object.fromEntries(out) as StudyPlotStyles } : {};
+}
+
+function validPlotStyle(key: string, value: unknown): boolean {
+  return key === "color" ? typeof value === "string" && value !== ""
+    : key === "lineWidth" ? typeof value === "number" && Number.isFinite(value) && value > 0
+      : key === "visible" && typeof value === "boolean";
+}

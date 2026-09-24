@@ -95,8 +95,9 @@ function invoke<T>(operation: () => MaybePromise<T>): Promise<T> {
 function safely(operation: () => void): void {
   try {
     operation();
-  } catch {
-    // Consumer callbacks and provider cleanup must not corrupt adapter state.
+  } catch (error) {
+    // Consumer callbacks must not corrupt adapter state, but their errors are reported.
+    console.error("[raze-charts] datafeed callback threw", error);
   }
 }
 

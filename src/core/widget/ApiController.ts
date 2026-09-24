@@ -1,11 +1,10 @@
 // The widget's IChartWidgetApi: wires ChartApi to the kernel and controllers.
 
 import type { EntityId } from "../../types/charting_library";
-import { describeInputValue, positionalStudyInputs, StudyInputError } from "../../studies/inputs";
-import type { StudySpec } from "../../studies/StudyStore";
+import { plotRefMatches } from "../../studies/StudyStore";
 import { ChartApi, type ChartApiDeps } from "../ChartApi";
-import type { WidgetHost } from "./host";
-import { studySpecFromArgs } from "./StudyArgs";
+import type { WidgetController, WidgetHost } from "./host";
+import { overrideFor, parseCreateStudyArgs, type StudyArgsEnv } from "./StudyArgs";
 
 declare module "./host" {
   interface WidgetControllerMap {
@@ -13,17 +12,48 @@ declare module "./host" {
   }
 }
 
-/** Owns the widget's ChartApi. Needs no lifecycle hooks. */
-export class ApiController {
+/** Owns the widget's ChartApi. */
+export class ApiController implements WidgetController {
   readonly api: ChartApi;
+  private readonly warn = warnOnce();
 
-  constructor(host: WidgetHost) {
-    this.api = new ChartApi(host.context, createApiDeps(host));
+  constructor(private readonly host: WidgetHost) {
+    this.api = new ChartApi(host.context, createApiDeps(host, this.warn));
+  }
+
+  /**
+   * The registry (built-ins + custom studies) exists: flag studies_overrides
+   * keys that do nothing. These are defaults, so this warns and never throws.
+   */
+  attach(): void {
+    const definitions = this.host.studies.registry.list();
+    for (const [key, value] of Object.entries(this.host.options.studies_overrides ?? {})) {
+      const definition = definitions.find((item) => overrideFor(item, key) !== null);
+      if (!definition) {
+        this.warn(`studies_overrides:${key}`, `studies_overrides["${key}"] matches no study name or alias`);
+        continue;
+      }
+      try {
+        parseCreateStudyArgs({ definition, studiesOverrides: { [key]: value }, warn: this.warn }, definition.name);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.warn(`studies_overrides:${key}`, `studies_overrides["${key}"] was ignored: ${reason}`);
+      }
+    }
   }
 }
 
+/** A `[raze-charts]` console warning that fires once per key. */
+function warnOnce(): StudyArgsEnv["warn"] {
+  const seen = new Set<string>();
+  return (key, message) => {
+    if (!seen.has(key)) console.warn(`[raze-charts] ${message}`);
+    seen.add(key);
+  };
+}
+
 /** Kernel members are read lazily: the API exists before the kernel does. */
-export function createApiDeps(host: WidgetHost): ChartApiDeps {
+export function createApiDeps(host: WidgetHost, warn: StudyArgsEnv["warn"] = warnOnce()): ChartApiDeps {
   const { lifecycle } = host;
   return {
     refreshMarks: () => host.data.refreshMarks(),
@@ -40,74 +70,47 @@ export function createApiDeps(host: WidgetHost): ChartApiDeps {
     createBracketOrder: (options) => host.trading.createBracket(options),
     getTradingLineById: (id) => host.trading.adapter(id),
     removeAllTradingLines: () => host.trading.removeAll(),
-    createStudy: (name, forceOverlay, lock, inputs) => {
-      let id: EntityId | null;
-      try {
-        id = host.studies.add(createStudySpec(host, name, forceOverlay, lock, inputs));
-      } catch (error) {
-        // Invalid inputs (StudyInputError) reject the promise instead of throwing synchronously.
-        return Promise.reject(error);
-      }
-      if (!id) return Promise.reject(new Error(host.studies.registry.unknownStudyMessage(name)));
-      return Promise.resolve(id);
-    },
+    // async: argument errors become rejections, as TradingView reports them.
+    createStudy: async (...args) => createStudy(host, warn, ...args),
     setVisibleRange: (range) => host.data.revealTimeRange(range.from, range.to),
     createCompare: (symbol) => host.controllers.compare.create(symbol),
     executeActionById: (actionId) => host.controllers.actions.executeActionById(actionId),
+    getCheckableActionState: (actionId) => host.controllers.actions.getCheckableActionState(actionId),
     fitContent: () => { host.renderer.fitContent(); },
     resetView: () => { host.renderer.resetView(); },
   };
 }
 
-const LENGTH_KEYS = ["length", "Length", "periods"] as const;
-const SHORTHAND_KEYS: ReadonlySet<string> = new Set([...LENGTH_KEYS, "color"]);
-
 /**
- * The store spec for createStudy() arguments: StudyArgs' translation plus
- * every caller value it does not forward, so the store validates each value
- * instead of dropping it silently.
- * - TradingView's legacy positional array (`[20, "hl2"]`) maps onto a
- *   declared input schema in declaration order; a longer array rejects.
- * - Booleans reach the store as booleans; objects, arrays and functions reach
- *   it too and reject with a StudyInputError (`invalid-value`).
- * - A numeric-string length is used as the length; any other non-numeric
- *   length or non-string colour rejects instead of falling back to the default.
+ * createStudy: throws an Error for an unknown study, a StudyInputError for
+ * invalid inputs and a TypeError for malformed overrides or options.
  */
-function createStudySpec(
+function createStudy(
   host: WidgetHost,
+  warn: StudyArgsEnv["warn"],
   name: string,
-  forceOverlay: boolean | undefined,
-  lock: boolean | undefined,
-  inputs: Record<string, unknown> | undefined,
-): StudySpec {
-  let raw: unknown = inputs;
-  if (Array.isArray(raw)) {
-    const def = host.studies.registry.resolve(name);
-    if (def?.inputs) raw = positionalStudyInputs(def.inputs, raw, def.name);
-  }
-  const record = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined;
-  const spec = studySpecFromArgs(name, forceOverlay, lock, raw as Record<string, unknown> | undefined);
-  if (!record) return spec;
-  const extra: Record<string, unknown> = { ...spec.inputs };
-  for (const [key, value] of Object.entries(record)) {
-    if (value === undefined || SHORTHAND_KEYS.has(key) || Object.prototype.hasOwnProperty.call(extra, key)) continue;
-    extra[key] = value;
-  }
-  const next: StudySpec = { ...spec, inputs: extra };
-  const lengthKey = LENGTH_KEYS.find((key) => record[key] !== undefined && record[key] !== null);
-  const lengthValue = lengthKey ? record[lengthKey] : undefined;
-  if (lengthKey && !next.length && !(typeof lengthValue === "number" && Number.isFinite(lengthValue))) {
-    const parsed = typeof lengthValue === "string" && lengthValue.trim() !== "" ? Number(lengthValue) : Number.NaN;
-    if (!Number.isFinite(parsed)) {
-      throw new StudyInputError("invalid-value", name, lengthKey, `expected a finite number, got ${describeInputValue(lengthValue)}`);
+  ...args: [forceOverlay?: boolean, lock?: boolean, inputs?: unknown, overrides?: unknown, options?: unknown]
+): EntityId {
+  const { studies } = host;
+  const definition = studies.registry.resolve(String(name));
+  const parsed = definition && parseCreateStudyArgs(
+    { definition, studiesOverrides: host.options.studies_overrides, warn },
+    name,
+    ...args,
+  );
+  // Invalid inputs throw a StudyInputError from the store (a rejection, via async).
+  const id = parsed ? studies.add(parsed.spec) : null;
+  if (!definition || !parsed || !id) throw new Error(studies.registry.unknownStudyMessage(String(name)));
+  // Plot names are known once the study has computed: flag styles for plots it lacks.
+  const study = parsed.plotKeys.size ? studies.list().find((item) => item.id === id) : undefined;
+  if (study?.series.length) {
+    const plots = study.series.map((series, index) => series.name ?? `plot_${index}`).join(", ");
+    for (const [ref, label] of parsed.plotKeys) {
+      if (study.series.some((series, index) => plotRefMatches(ref, index, series.name))) continue;
+      warn(`plot:${definition.name}:${label}`, `${label} has no effect: ${definition.name} has no such plot; plots: ${plots}`);
     }
-    next.length = parsed;
   }
-  const colorValue = record.color;
-  if (colorValue !== undefined && colorValue !== null && !next.color && typeof colorValue !== "string") {
-    throw new StudyInputError("invalid-value", name, "color", `expected a CSS colour string, got ${describeInputValue(colorValue)}`);
-  }
-  return next;
+  return id;
 }
 
 /** Remove a study, compare series, trading line or drawing by id. */

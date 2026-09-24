@@ -261,6 +261,11 @@ export interface ChartContextState {
   magnet: boolean;
   stayInDrawingMode: boolean;
   /**
+   * View toggle of the `hideAllDrawingTools` action: when true no drawing is
+   * painted or hit-tested. Each drawing's own `hidden` flag is untouched.
+   */
+  drawingsHidden?: boolean;
+  /**
    * Compare overlays. `resolution` is a seam for W1B-19: the resolution the
    * bars were loaded at, so a stale series can be detected and reloaded.
    */

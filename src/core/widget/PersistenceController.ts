@@ -83,6 +83,9 @@ export class PersistenceController implements WidgetController {
         lock: study.lock,
         forceOverlay: study.forceOverlay,
         inputs: { ...study.inputs },
+        ...(study.plotStyles && {
+          plotStyles: Object.fromEntries(Object.entries(study.plotStyles).map(([ref, style]) => [ref, { ...style }])),
+        }),
       })),
       compare: context.compare.map((item) => item.symbol),
     };

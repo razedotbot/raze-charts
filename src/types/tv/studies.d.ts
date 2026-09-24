@@ -150,11 +150,12 @@ export interface StudyInputsRegistry {}
 /**
  * The `inputs` argument accepted by createStudy() for a study name. Registered
  * names take a partial, exactly typed input object (missing inputs use their
- * defaults); any other name takes an open map.
+ * defaults); any other name takes an open map of numbers, strings and
+ * booleans (objects and arrays reject at runtime).
  */
 export type StudyCreateInputs<N extends string> = N extends keyof StudyInputsRegistry
   ? { readonly [K in keyof StudyInputsRegistry[N]]?: StudyInputsRegistry[N][K] }
-  : Record<string, unknown>;
+  : Readonly<Record<string, StudyInputPrimitive | undefined>>;
 
 // ── Execution context ───────────────────────────────────────────────────────
 
