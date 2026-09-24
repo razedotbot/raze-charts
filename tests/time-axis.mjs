@@ -425,10 +425,15 @@ if (fingerprintOnly) {
   assert.equal(formatCrosshairTimeLabel(ctx, Date.UTC(2024, 0, 15, 12)), "15 Jan '24 13:00");
 }
 
-/** The corner caption drawAxisChrome paints (the zone, then the countdown when it is on). */
+/**
+ * The zone name the corner caption paints. The corner cell is widened so the
+ * full IANA name fits; a narrow cell abbreviates it to the UTC offset
+ * (covered by tests/axis-chrome.mjs).
+ */
 function caption(ctx) {
   const rec = recorder();
-  drawAxisChrome(rec.ctx, makeView(ctx));
+  const v = makeView(ctx);
+  drawAxisChrome(rec.ctx, { ...v, axisChromeRect: { ...v.axisChromeRect, w: 200 } });
   return rec.texts()[0]?.split("  ")[0];
 }
 

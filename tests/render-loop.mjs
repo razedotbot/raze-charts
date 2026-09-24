@@ -484,16 +484,18 @@ const spacingOf = (runtime) => runtime.renderer.plotW / (runtime.context.visible
   assert(overlay.calls("stroke") >= 100, "the overlay draws the crosshair on every frame");
 
   // Main-layer state changed by a gesture without markDirty() is still painted.
-  main.reset();
+  // Bitmap-space painters (paint/pixel.ts) set the transform inside a paint,
+  // so main-layer paints are counted with the engine's paint stats.
+  let mainBefore = stats.main;
   context.visibleRange = { from: context.visibleRange.from - 1, to: context.visibleRange.to - 1 };
   renderer.requestPaint();
   flushFrames();
-  assert(main.calls("setTransform") === 1, "a viewport change behind an overlay request repaints the main layer");
-  main.reset();
+  assert(stats.main - mainBefore === 1, "a viewport change behind an overlay request repaints the main layer");
+  mainBefore = stats.main;
   renderer.hoverShapeId = "shape_1";
   renderer.requestPaint();
   flushFrames();
-  assert(main.calls("setTransform") === 1, "a hover-target change repaints the main layer (drawing handles)");
+  assert(stats.main - mainBefore === 1, "a hover-target change repaints the main layer (drawing handles)");
   renderer.hoverShapeId = null;
   renderer.requestPaint();
   flushFrames();
@@ -697,17 +699,17 @@ for (const width of [390, 480, 1280]) {
   const beforeTo = context.visibleRange.to;
   const resizeEvents = viewport.seen.length;
   const resizeRanges = ranges.seen.length;
-  const mainCtx = ctxOf(runtime.engine.mainCanvas);
-  mainCtx.reset();
+  // Counted with the paint stats: bitmap-space painters also set the transform.
+  const mainPaintsBefore = runtime.engine.paintStats.main;
   hostWidth = 700;
   triggerResize();
-  assert(mainCtx.calls("setTransform") === 1, "a live resize paints the main layer synchronously");
+  assert(runtime.engine.paintStats.main - mainPaintsBefore === 1, "a live resize paints the main layer synchronously");
   flushFrames();
   const afterSpacing = spacingOf(runtime);
   assert(Math.abs(afterSpacing - beforeSpacing) < 0.05 && context.visibleRange.to === beforeTo, `resize keeps ${beforeSpacing.toFixed(2)} px per bar anchored right (got ${afterSpacing.toFixed(2)})`);
   assert(ranges.seen.length === resizeRanges + 1 && ranges.seen.at(-1)[0].reason === "resize", "the resize adjustment goes through setViewport (reason resize) once");
   assert(viewport.seen.length === resizeEvents, "the resize adjustment stays local: no viewportChanged, so layout sync never relays it to a pane that rescales itself");
-  assert(mainCtx.calls("setTransform") === 1, "the resize frame is not painted a second time by the next animation frame");
+  assert(runtime.engine.paintStats.main - mainPaintsBefore === 1, "the resize frame is not painted a second time by the next animation frame");
   runtime.remove();
 }
 
