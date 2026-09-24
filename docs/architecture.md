@@ -58,6 +58,25 @@ between adjacent real bars. Whitespace beyond either edge uses the expected
 resolution. Drawings, marks, hit tests, and context-menu coordinates therefore
 share one reversible mapping.
 
+### Shared time and locale core
+
+Both runtimes use one internal time and locale core. New time-axis, timezone,
+calendar or `Intl` formatting code goes here instead of into a runtime:
+
+| Module | Responsibility |
+| --- | --- |
+| `src/util/intl.ts` | Bounded cache of `Intl.NumberFormat`, `DateTimeFormat` and `PluralRules` per locale and options. Output is byte-identical to `toLocaleString`. |
+| `src/util/time/zone.ts` | IANA zones built on `Intl`. Offsets are memoised per UTC day and each transition is found to the second. Wall-time conversion follows Temporal's `compatible`, `earlier`, `later` and `reject` rules. Results do not depend on the process `TZ`. |
+| `src/util/time/calendarTicks.ts` | Weighted calendar ticks from 1 ms to 1000 years. `calendarTicks()` handles continuous ranges (native `/chart`) and `barTicks()` handles logical bar axes. Also provides local `floorToCalendar()` and `addCalendar()`. |
+| `src/engine/timeAxis.ts` | `FinancialTimeAxis` caches per-bar weights (appends are incremental) and formats ticks and crosshair labels in the display zone. |
+
+Ticks are selected one whole level at a time, starting from the heaviest.
+When a level's own calendar rhythm no longer fits the minimum spacing
+(40 px by default, or the measured label widths), the core refuses that level
+and every finer one. Labels therefore stay regular ("2025 Apr Jul Oct 2026").
+A collision caused by the data rather than the calendar drops only the finer
+tick, for example a 09:30 session open next to 10:00.
+
 ### Async ownership
 
 A symbol/resolution change starts a new data generation. History, marks,
@@ -255,7 +274,8 @@ src/
   engine/      financial layout, interactions, renderer, Canvas paint layers
   studies/     built-in calculations, registry, active study state
   ui/          optional financial chrome and popup primitives
-  util/        formatting, resolution, delegates, Heikin Ashi
+  util/        formatting, Intl cache, time zones and calendar ticks,
+               resolution, delegates, Heikin Ashi
 tests/         unit, lifecycle, package contract, and visual regressions
 scripts/       packaging helpers and dependency-free quality tooling
 docs/          capability, migration, architecture, a11y, and performance guides
