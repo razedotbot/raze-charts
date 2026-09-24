@@ -4,6 +4,14 @@
 // tall, so the toggles use compact glyphs (% · L · A) on an opaque axis
 // background, with full accessible names and tooltips.
 //
+// Touch: the corner is 22px tall and its top pixels belong to the lowest price
+// label, so three 24x24 targets do not fit without covering the time axis.
+// Under `@media (pointer: coarse)` the whole bar becomes one target
+// (`.raze-chart-scale-hit`: the bar's width, 24px tall, reaching up into the
+// label clearance but never into the plot) that opens a "Price scale" menu,
+// shown as a bottom sheet with full-size checkable rows. Keyboard and
+// assistive-technology users keep the three toggles.
+//
 // State: every writer changes the scale through `context.setScaleMode()`, and
 // the toggles follow `context.scaleChanged`, so aria-pressed tells the truth
 // after clicks, `load()`, axis drags, double-click resets and API calls. Until
@@ -16,27 +24,47 @@ import { readScaleState } from "../core/context";
 import { PRICE_AXIS_W_MIN, TIME_AXIS_H } from "../engine/layout";
 import { t } from "../i18n";
 import { attachTooltip, type TooltipHandle } from "./kit/Tooltip";
-import { enableToolbarKeyboardNavigation } from "./popup";
-import { adoptStylesOnConnect, defineStyles, TOKEN_STYLES, type StyleChunk } from "./styles";
+import { enableToolbarKeyboardNavigation, openPopup, popupRow, type PopupHandle } from "./popup";
+import { adoptStyles, adoptStylesOnConnect, defineStyles, TOKEN_STYLES, type StyleChunk } from "./styles";
 
 /**
  * Clearance kept above the toggles so the lowest price label (painted down to
  * a few pixels below the plot) never touches them.
  */
 const LABEL_CLEARANCE = 4;
+const BAR_HEIGHT = TIME_AXIS_H - LABEL_CLEARANCE;
+/** Minimum touch target edge (WCAG 2.2 2.5.8). */
+const TOUCH_TARGET = 24;
 
+/**
+ * Selectors are `element.class` like the header's, so page-wide `button{…}`
+ * resets leave the toggles alone. The axis colours arrive as private custom
+ * properties (`--_raze-axis-*`, set from the theme); the public tokens
+ * `--raze-scale-bar-background` / `--raze-scale-bar-text` are never set by
+ * the library, so a host rule anywhere above the bar wins.
+ */
 export const SCALE_BAR_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "scale-bar",
-  `.raze-chart-scale-bar{position:absolute;right:0;bottom:0;z-index:4;box-sizing:border-box;display:flex;align-items:center;justify-content:flex-end;gap:1px;` +
-  `height:${TIME_AXIS_H - LABEL_CLEARANCE}px;max-width:${PRICE_AXIS_W_MIN - 1}px;padding:1px 2px 2px;` +
-  "background:var(--raze-scale-bar-background,var(--tv-color-pane-background,#131722));color:var(--raze-scale-bar-text,var(--raze-toolbar-text));" +
+  `.raze-chart-scale-bar{position:absolute;right:0;bottom:0;z-index:4;box-sizing:border-box;display:flex;align-items:stretch;justify-content:flex-end;gap:1px;` +
+  `height:${BAR_HEIGHT}px;max-width:${PRICE_AXIS_W_MIN - 1}px;padding:0 2px;` +
+  "background:var(--raze-scale-bar-background,var(--_raze-axis-background,var(--tv-color-pane-background,#131722)));" +
+  "color:var(--raze-scale-bar-text,var(--_raze-axis-text,var(--raze-toolbar-text)));" +
   "font-size:var(--raze-font-size-sm);line-height:1;user-select:none;-webkit-user-select:none;pointer-events:auto}" +
-  ":where(.raze-chart-scale-btn){appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:0 1 auto;box-sizing:border-box;" +
-  "min-width:15px;height:100%;margin:0;padding:0 3px;border:0;border-radius:var(--raze-radius-sm);background:transparent;color:inherit;font:inherit;cursor:pointer;touch-action:manipulation}" +
-  "@media (hover:hover){:where(.raze-chart-scale-btn):hover{background:var(--raze-toolbar-hover)}}" +
-  ":where(.raze-chart-scale-btn)[aria-pressed=\"true\"]{background:var(--raze-active);color:var(--raze-accent);font-weight:600}" +
-  ".raze-chart-scale-btn.raze-chart-focusable:focus-visible{outline-offset:-1px}",
+  "button.raze-chart-scale-btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:0 1 auto;box-sizing:border-box;" +
+  "min-width:16px;height:auto;margin:0;padding:0 3px;border:0;border-radius:var(--raze-radius-sm);background:transparent;box-shadow:none;" +
+  "color:inherit;font:inherit;text-transform:none;cursor:pointer;touch-action:manipulation}" +
+  "@media (hover:hover){button.raze-chart-scale-btn:hover{background:var(--raze-toolbar-hover)}}" +
+  "button.raze-chart-scale-btn[aria-pressed=\"true\"]{background:var(--raze-active);color:var(--raze-accent);font-weight:600}" +
+  ".raze-chart-scale-btn.raze-chart-focusable:focus-visible{outline-offset:-1px}" +
+  ".raze-chart-scale-hit{display:none}" +
+  `@media (pointer:coarse){.raze-chart-scale-hit{display:block;position:absolute;left:0;right:0;bottom:0;top:${BAR_HEIGHT - TOUCH_TARGET}px;` +
+  "cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}}" +
+  // The touch menu's checked rows (rows carry inline popup styles, hence ::before).
+  ".raze-chart-scale-menu [role=menuitemcheckbox]::before{content:\"\";width:12px;flex:none}" +
+  ".raze-chart-scale-menu [aria-checked=true]::before{content:\"✓\";color:var(--raze-accent,var(--tv-color-toolbar-button-text-hover,#2962ff))}",
 );
+
+const SCALE_BAR_CHUNKS: readonly StyleChunk[] = [TOKEN_STYLES, SCALE_BAR_STYLES];
 
 type ToggleId = "percent" | "log" | "auto";
 
@@ -48,6 +76,9 @@ export class ScaleBar {
   private pctBtn: HTMLButtonElement;
   private logBtn: HTMLButtonElement;
   private autoBtn: HTMLButtonElement;
+  /** Coarse-pointer target (see the file comment) and the menu it opens. */
+  private hit: HTMLDivElement;
+  private menu: PopupHandle | null = null;
   private removeKeyboardNavigation: () => void;
   private stopStyles: () => void;
   private tooltips: TooltipHandle[] = [];
@@ -81,8 +112,18 @@ export class ScaleBar {
     this.bind(this.logBtn, "log");
     this.bind(this.autoBtn, "auto");
 
-    this.el.append(this.pctBtn, this.logBtn, this.autoBtn);
-    this.stopStyles = adoptStylesOnConnect(this.el, [TOKEN_STYLES, SCALE_BAR_STYLES]);
+    // Pointer-only (hidden from assistive technology, never focused): the
+    // toggles stay the keyboard and screen-reader controls.
+    this.hit = document.createElement("div");
+    this.hit.className = "raze-chart-scale-hit";
+    this.hit.setAttribute("aria-hidden", "true");
+    this.hit.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.toggleMenu();
+    });
+
+    this.el.append(this.pctBtn, this.logBtn, this.autoBtn, this.hit);
+    this.stopStyles = adoptStylesOnConnect(this.el, SCALE_BAR_CHUNKS);
     this.removeKeyboardNavigation = enableToolbarKeyboardNavigation(this.el, "horizontal");
     this.subscribe();
     this.sync();
@@ -121,6 +162,39 @@ export class ScaleBar {
     this.onChange();
   }
 
+  /** Touch: the three toggles as checkable rows (a bottom sheet on phones). */
+  private toggleMenu(): void {
+    if (this.menu) {
+      this.menu.close({ restoreFocus: false });
+      return;
+    }
+    const state = readScaleState(this.context);
+    const menu = openPopup({
+      fontFamily: this.context.fontFamily,
+      className: "raze-chart-scale-menu",
+      anchor: this.hit,
+      place: "right-start",
+      label: t("scaleBar.label", "Price scale"),
+      onClose: () => {
+        if (this.menu === menu) this.menu = null;
+      },
+    });
+    this.menu = menu;
+    adoptStyles(menu.el, SCALE_BAR_CHUNKS);
+    const rows: [ToggleId, string, boolean][] = [
+      ["percent", t("scaleBar.percent", "Percent scale"), state.mode === "percent"],
+      ["log", t("scaleBar.log", "Logarithmic scale"), state.mode === "log"],
+      ["auto", t("scaleBar.auto.item", "Auto-scale price"), state.autoScale && !state.priceRange],
+    ];
+    for (const [id, label, checked] of rows) {
+      menu.el.appendChild(popupRow(label, () => {
+        menu.close({ restoreFocus: false });
+        this.toggle(id);
+      }, { role: "menuitemcheckbox", checked }));
+    }
+    menu.reposition();
+  }
+
   private subscribe(): void {
     const sync = this.scheduleSync as (...args: never[]) => void;
     this.context.scaleChanged?.subscribe(this.owner, (() => this.sync()) as (...args: never[]) => void);
@@ -145,8 +219,8 @@ export class ScaleBar {
   sync(): void {
     const theme = this.context.theme;
     if (theme) {
-      setVar(this.el, "--raze-scale-bar-background", theme.scaleBackground);
-      setVar(this.el, "--raze-scale-bar-text", theme.scaleText);
+      setVar(this.el, "--_raze-axis-background", theme.scaleBackground);
+      setVar(this.el, "--_raze-axis-text", theme.scaleText);
     }
     const state = readScaleState(this.context);
     setPressed(this.pctBtn, state.mode === "percent");
@@ -157,6 +231,8 @@ export class ScaleBar {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.menu?.close({ restoreFocus: false });
+    this.menu = null;
     this.context.scaleChanged?.unsubscribeAll(this.owner);
     this.context.dataChanged?.unsubscribeAll(this.owner);
     this.context.viewportChanged?.unsubscribeAll(this.owner);

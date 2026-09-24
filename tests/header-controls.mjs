@@ -1,9 +1,10 @@
 // Header controls & class-based styling (W1B-22): interval list precedence
 // (symbol → onReady configuration → favorites) with has_* filtering and the
-// overflow menu, ScaleBar state from the scaleChanged seam, reduced-motion
-// header scrolling, per-root stylesheet adoption (LoadingScreen keyframes in
-// every shadow root and after a remount), and a ratchet that keeps inline
-// presentation and JS hover out of the header modules.
+// overflow menu, ScaleBar state from the scaleChanged seam and its touch menu,
+// element.class selectors and the context font, reduced-motion header
+// scrolling, per-root stylesheet adoption (LoadingScreen keyframes in shadow
+// roots and after a remount), and a ratchet that keeps inline presentation and
+// JS hover out of the header modules.
 //
 // The style helpers are internal, so this test bundles the modules from
 // source with esbuild (no build step needed): node tests/header-controls.mjs
@@ -240,6 +241,7 @@ console.warn = originalWarn;
   const presets = [];
   let dates = 0;
   const bar = new TimeframeBar({ fontFamily: "sans-serif" }, mount, (preset) => presets.push(preset), () => { dates += 1; });
+  assert(mount.style.getPropertyValue("--raze-font") === "sans-serif", "a standalone TimeframeBar keeps the context font");
   const buttons = [...mount.querySelectorAll("button")];
   const date = buttons.at(-1);
   assert(date.getAttribute("aria-label") === "Go to date" && !date.hasAttribute("aria-pressed"), "Go to date is the last button and an action, not a toggle");
@@ -308,7 +310,11 @@ function makeContext() {
   const state = () => ["Percent", "Logarithmic", "Auto"].map((name) => button(name).getAttribute("aria-pressed")).join(",");
   assert(state() === "false,false,true", "initial state: auto on");
   assert(!button("Percent").hasAttribute("title"), "toggles use kit tooltips instead of title attributes");
-  assert(bar.el.style.getPropertyValue("--raze-scale-bar-background") === "#101010", "the bar takes the axis background from the theme");
+  assert(bar.el.style.getPropertyValue("--_raze-axis-background") === "#101010", "the bar takes the axis background from the theme");
+  assert(
+    bar.el.style.getPropertyValue("--raze-scale-bar-background") === "" && bar.el.style.getPropertyValue("--raze-scale-bar-text") === "",
+    "the public scale-bar tokens are left to the host (never set inline)",
+  );
 
   button("Logarithmic").click();
   assert(context.logScale && reasons.at(-1) === "scale-bar" && changes === 1, "a toggle writes through setScaleMode with the scale-bar reason");
@@ -324,6 +330,24 @@ function makeContext() {
   assert(state() === "false,true,true", "load() (setScaleMode 'load') updates the pressed state");
   context.setScaleMode({ mode: "normal" }, "api");
   assert(state() === "false,false,true", "API calls update the pressed state");
+
+  // Coarse pointers: one pointer-only target opens the toggles as a menu.
+  const hit = bar.el.querySelector(".raze-chart-scale-hit");
+  assert(hit?.getAttribute("aria-hidden") === "true" && hit.tagName === "DIV" && !hit.hasAttribute("tabindex"), "the touch target is pointer-only (keyboard and screen readers use the toggles)");
+  hit.click();
+  const scaleRows = () => [...document.querySelectorAll('.raze-chart-scale-menu [role="menuitemcheckbox"]')];
+  assert(
+    scaleRows().map((row) => `${row.textContent}:${row.getAttribute("aria-checked")}`).join(",") === "Percent scale:false,Logarithmic scale:false,Auto-scale price:true",
+    "the touch menu lists the three toggles as checkable rows with the current state",
+  );
+  const before = changes;
+  scaleRows()[1].click();
+  assert(context.logScale && reasons.at(-1) === "scale-bar" && changes === before + 1, "a menu row writes through setScaleMode with the scale-bar reason");
+  assert(state() === "false,true,true" && scaleRows().length === 0, "choosing a row closes the menu and presses the toggle");
+  hit.click();
+  hit.click();
+  assert(scaleRows().length === 0, "the target toggles the menu closed again");
+  context.setScaleMode({ mode: "normal" }, "api");
 
   // A legacy writer that still assigns the fields directly is reconciled
   // after the next chart interaction or data change.
@@ -366,6 +390,11 @@ function makeContext() {
     "the button reset lives in the adopted stylesheet",
   );
   assert(css.includes("@media (pointer:coarse)") && css.includes("@media (hover:hover)"), "touch sizing and hover come from media queries");
+  assert(
+    css.includes("button.raze-chart-header-btn{") && css.includes("input.raze-chart-symbol-search-input{") && !/:where\(\.raze-chart-(header-btn|symbol-search-input)/.test(css),
+    "library-owned controls are matched as element.class, so page-wide button resets cannot restyle them",
+  );
+  assert(toolbar.el.style.getPropertyValue("--raze-font") === "sans-serif", "the toolbar carries the context font as --raze-font");
   toolbar.destroy();
 }
 

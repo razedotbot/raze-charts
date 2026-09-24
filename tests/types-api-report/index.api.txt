@@ -1005,7 +1005,7 @@ class TimeIndex
 interface TimePoint
   readonly time: number
 class TimeframeBar
-  new (_context: ChartContext, el: HTMLElement, onPreset: (preset: '1D' | '1M' | '1W' | '3M' | 'ALL' | 'YTD') => void, onGoToDate: () => void): TimeframeBar
+  new (context: ChartContext, el: HTMLElement, onPreset: (preset: '1D' | '1M' | '1W' | '3M' | 'ALL' | 'YTD') => void, onGoToDate: () => void): TimeframeBar
   destroy(): void
   readonly el: HTMLElement
   setActive(preset: null | string): void
@@ -1025,7 +1025,7 @@ interface TimescaleMarkHit
 type Timezone = string
 type TimezoneSetting = null | string
 class Toolbar
-  new (_context: ChartContext): Toolbar
+  new (context: ChartContext): Toolbar
   createButton(options?: CreateButtonOptions | undefined): HTMLElement
   destroy(): void
   readonly el: HTMLDivElement

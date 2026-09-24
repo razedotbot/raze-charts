@@ -186,12 +186,13 @@ export function adoptStyles(
 
 /**
  * Keep `chunks` adopted into whichever root renders `el`, including a root it
- * joins after construction: a shadow root the element is appended to later, or
- * a new root after a remount. Adopts now (a detached element inside a shadow
- * tree already resolves to that shadow root), again on the next microtask
- * (callers usually append synchronously), and whenever the element's box
- * appears (a ResizeObserver reports a connected element as it gains a size).
- * Returns a function that stops watching.
+ * joins after construction (a shadow root the element is appended to later).
+ * Adopts now (a detached element inside a shadow tree already resolves to that
+ * shadow root), again on the next microtask (callers usually append
+ * synchronously), and whenever a ResizeObserver reports a new size for the
+ * connected element (it gains a box when it joins a rendered root). A
+ * synchronous move into another root at the same size fires no observer: call
+ * `adoptStyles()` after such a move. Returns a function that stops watching.
  */
 export function adoptStylesOnConnect(
   el: Element,

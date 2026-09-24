@@ -89,7 +89,7 @@ export class SymbolSearch {
       }
     });
     this.el.appendChild(this.input);
-    adoptHeaderStyles(this.el);
+    adoptHeaderStyles(this.el, context);
   }
 
   setSymbol(symbol: string): void {

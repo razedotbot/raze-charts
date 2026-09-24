@@ -78,7 +78,7 @@ export class IntervalSelector {
     this.active = String(context.resolution);
     this.mount.setAttribute("role", "group");
     this.mount.setAttribute("aria-label", t("header.interval.group", "Chart interval"));
-    adoptHeaderStyles(this.mount);
+    adoptHeaderStyles(this.mount, context);
     this.render();
   }
 

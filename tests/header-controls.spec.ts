@@ -3,7 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 // Real-browser acceptance for the header controls (W1B-22): favourite
 // intervals and the overflow menu, pressed state that follows the scale seam
 // after axis drags and double-clicks, the ScaleBar kept out of the plot and
-// the price labels, class-based styling that host CSS and tokens can
+// the price labels (and its single 24px touch target and menu), class-based
+// styling that page-wide resets cannot reach but host classes and tokens can
 // override, reduced-motion header scrolling and per-root keyframes.
 
 const HARNESS = `<!doctype html>
@@ -145,6 +146,7 @@ test.describe("header controls", () => {
           canvas: { left: canvas.left, top: canvas.top, right: canvas.right, bottom: canvas.bottom },
           buttons,
           background: getComputedStyle(bar).backgroundColor,
+          touchTarget: getComputedStyle(bar.querySelector(".raze-chart-scale-hit")!).display,
         };
       });
       const { canvas } = geometry;
@@ -161,6 +163,7 @@ test.describe("header controls", () => {
         expect(button.bottom).toBeLessThanOrEqual(canvas.bottom);
       }
       expect(geometry.background).toMatch(/^rgb\(/); // opaque axis background
+      expect(geometry.touchTarget).toBe("none"); // a mouse gets the three direct toggles
       await expect(page.getByRole("button", { name: /^Auto-scale/ })).toHaveAttribute("aria-pressed", "true");
     });
   }
@@ -189,6 +192,51 @@ test.describe("header controls", () => {
     expect(styles.styled.color).toBe("rgb(255, 0, 0)");
   });
 
+  test("page-wide button resets leave library controls alone; host classes still override", async ({ page }) => {
+    await openHarness(page, { favorites: { intervals: ["1", "5", "15"] } });
+    // Bootstrap-reboot / Tailwind-preflight style element rules, added after mount.
+    await page.addStyleTag({
+      content: "button{padding:0;border:1px solid red;background:#eee;border-radius:0;box-shadow:0 0 0 2px red;text-transform:uppercase}" +
+        "input{padding:0;border-radius:0;background:#eee}",
+    });
+    const read = (locator: ReturnType<Page["locator"]>) => locator.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        padding: `${style.paddingLeft}/${style.paddingRight}`,
+        radius: style.borderTopLeftRadius,
+        border: style.borderTopWidth,
+        background: style.backgroundColor,
+        shadow: style.boxShadow,
+        transform: style.textTransform,
+      };
+    });
+    const idle = { radius: "4px", border: "0px", background: "rgba(0, 0, 0, 0)", shadow: "none", transform: "none" };
+    expect(await read(page.getByRole("button", { name: "Interval 5m" }))).toEqual({ ...idle, padding: "7px/7px" });
+    expect(await read(page.getByRole("button", { name: "Range 1D" }))).toEqual({ ...idle, padding: "7px/7px" });
+    expect(await read(page.getByRole("button", { name: "Percent scale" }))).toEqual({ ...idle, padding: "3px/3px" });
+    const search = await read(page.getByRole("combobox", { name: "Search symbols" }));
+    expect({ padding: search.padding, radius: search.radius, background: search.background }).toEqual({ padding: "8px/8px", radius: "4px", background: "rgba(0, 0, 0, 0)" });
+
+    // createButton's reset beats element selectors; a host class on the host's
+    // own button wins, and one more class restyles a library control.
+    const custom = await page.evaluate(() => {
+      const w = (window as unknown as { __w: { createButton(o?: unknown): HTMLElement } }).__w;
+      const plain = w.createButton({ useTradingViewStyle: false });
+      plain.textContent = "Plain";
+      const classed = w.createButton({ useTradingViewStyle: false });
+      classed.className += " host-btn";
+      classed.textContent = "Classed";
+      const style = document.createElement("style");
+      style.textContent = ".host-btn{background:rgb(1, 2, 3);padding:0 9px}.raze-chart-root .raze-chart-header-btn{padding:0 11px}";
+      document.head.appendChild(style);
+      const read = (el: Element) => ({ background: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderTopWidth, padding: getComputedStyle(el).paddingLeft });
+      return { plain: read(plain), classed: read(classed), interval: read(document.querySelector('[aria-label="Interval 5m"]')!) };
+    });
+    expect(custom.plain).toEqual({ background: "rgba(0, 0, 0, 0)", border: "0px", padding: "0px" });
+    expect(custom.classed).toEqual({ background: "rgb(1, 2, 3)", border: "0px", padding: "9px" });
+    expect(custom.interval.padding).toBe("11px");
+  });
+
   test("hover, pressed and tokens come from CSS a host can override", async ({ page }) => {
     await openHarness(page, { favorites: { intervals: ["1", "5", "15"] } });
     const pressed = page.getByRole("button", { name: "Interval 1m" });
@@ -197,8 +245,13 @@ test.describe("header controls", () => {
     await idle.hover();
     await expect.poll(() => idle.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(idleBackground);
 
-    await page.addStyleTag({ content: ".raze-chart-root{--raze-accent:red}" });
+    const bar = page.getByRole("toolbar", { name: "Price scale" });
+    const axisBackground = await bar.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(axisBackground).toBe("rgb(19, 23, 34)"); // the theme's price-axis colour
+    await page.addStyleTag({ content: ".raze-chart-root{--raze-accent:red;--raze-scale-bar-background:rgb(1, 2, 3)}" });
     await expect.poll(() => pressed.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(255, 0, 0)");
+    // The library never sets the public scale-bar tokens, so the host's win.
+    await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(1, 2, 3)");
     const auto = page.getByRole("button", { name: /^Auto-scale/ });
     await expect.poll(() => auto.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(255, 0, 0)");
     await page.getByRole("button", { name: "Range 1D" }).click();
@@ -217,6 +270,66 @@ test.describe("header controls", () => {
     const heights = await page.locator(".raze-chart-toolbar .raze-chart-header-btn").evaluateAll((buttons) =>
       [...new Set(buttons.map((button) => button.getBoundingClientRect().height))]);
     expect(heights).toEqual([32]);
+    await context.close();
+  });
+
+  test("on touch the scale toggles are one 24px target that opens a menu", async ({ browser }) => {
+    // The corner cell is 22px tall and its top 4px belong to the lowest price
+    // label, so no toggle can be 24px tall there. Under pointer:coarse the
+    // whole bar is one target: at least 24x24, reaching up into the label
+    // clearance but never into the plot.
+    const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await openHarness(page, { favorites: { intervals: ["1", "5", "15"] } });
+    const geometry = await page.evaluate(() => {
+      const box = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      };
+      const canvas = box(document.querySelector("canvas.raze-chart-canvas")!);
+      const hit = document.querySelector(".raze-chart-scale-hit")!;
+      const toggles = [...document.querySelectorAll<HTMLElement>(".raze-chart-scale-btn")];
+      // The target really receives taps: over every toggle, and at each corner
+      // of its box (nothing else sits on top of it).
+      const h = box(hit);
+      const points = [
+        ...toggles.map((toggle) => {
+          const r = toggle.getBoundingClientRect();
+          return [(r.left + r.right) / 2, (r.top + r.bottom) / 2];
+        }),
+        [h.left + 1, h.top + 1], [h.right - 1, h.top + 1], [h.left + 1, h.bottom - 1], [h.right - 1, h.bottom - 1],
+      ];
+      const lands = points.map(([x, y]) => document.elementFromPoint(x!, y!) === hit);
+      return { canvas, hit: h, hidden: hit.getAttribute("aria-hidden"), tabbable: hit.matches("button,[tabindex]"), toggles: toggles.map(box), lands };
+    });
+    const { canvas, hit } = geometry;
+    expect(hit.right - hit.left).toBeGreaterThanOrEqual(24);
+    expect(hit.bottom - hit.top).toBeGreaterThanOrEqual(24);
+    expect(geometry.lands).toEqual(Array(7).fill(true));
+    const plot = { left: canvas.left, top: canvas.top, right: canvas.right - 56, bottom: canvas.bottom - 22 };
+    expect(intersects(hit, plot)).toBe(false);
+    // The visible toggles still clear the plot and the price labels.
+    const priceLabels = { left: canvas.right - 128, top: canvas.top, right: canvas.right, bottom: plot.bottom + 3.5 };
+    for (const toggle of geometry.toggles) {
+      expect(intersects(toggle, plot)).toBe(false);
+      expect(intersects(toggle, priceLabels)).toBe(false);
+    }
+    // Pointer-only: keyboard and screen readers use the toggles themselves.
+    expect(geometry).toMatchObject({ hidden: "true", tabbable: false });
+
+    await page.locator(".raze-chart-scale-hit").tap();
+    const menu = page.getByRole("menu", { name: "Price scale" });
+    const rows = menu.getByRole("menuitemcheckbox");
+    await expect(rows).toHaveText(["Percent scale", "Logarithmic scale", "Auto-scale price"]);
+    await expect(rows.nth(2)).toHaveAttribute("aria-checked", "true");
+    const rowHeights = await rows.evaluateAll((items) => items.map((item) => item.getBoundingClientRect().height));
+    for (const height of rowHeights) expect(height).toBeGreaterThanOrEqual(44);
+    await menu.getByRole("menuitemcheckbox", { name: "Logarithmic scale" }).tap();
+    await expect(menu).toHaveCount(0);
+    const scale = page.getByRole("toolbar", { name: "Price scale" });
+    await expect(scale.getByRole("button", { name: "Logarithmic scale" })).toHaveAttribute("aria-pressed", "true");
+    await page.locator(".raze-chart-scale-hit").tap();
+    await expect(page.getByRole("menuitemcheckbox", { name: "Logarithmic scale" })).toHaveAttribute("aria-checked", "true");
     await context.close();
   });
 

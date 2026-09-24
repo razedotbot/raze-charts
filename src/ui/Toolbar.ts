@@ -22,26 +22,32 @@ export const TOOLBAR_HEIGHT = 38;
  * the browser's native chrome. `.raze-chart-header-btn` is the shared
  * TradingView-style control used by intervals, ranges and styled custom
  * buttons: one font size, height and radius for the whole row.
+ *
+ * Specificity: library-owned controls are matched as `element.class`, so a
+ * page-wide reset (`button{…}` in Bootstrap's reboot or Tailwind's preflight)
+ * does not restyle them, while one more class (`.raze-chart-root
+ * .raze-chart-header-btn`) overrides them on purpose. The `createButton()`
+ * reset is `button:where(…)`: it beats element selectors (adopted sheets come
+ * last in the cascade) and loses to any class the host puts on its button.
  */
 export const HEADER_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "header",
   `.raze-chart-toolbar{display:block;height:${TOOLBAR_HEIGHT}px;min-height:${TOOLBAR_HEIGHT}px;box-sizing:border-box;` +
   "border-bottom:1px solid var(--raze-border);background:var(--tv-color-toolbar-button-background,transparent);" +
-  "color:var(--raze-toolbar-text);font-size:var(--raze-font-size);user-select:none;-webkit-user-select:none;" +
+  "color:var(--raze-toolbar-text);font-family:var(--raze-font);font-size:var(--raze-font-size);user-select:none;-webkit-user-select:none;" +
   "overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scroll-behavior:smooth;position:relative;z-index:3}" +
   ".raze-chart-toolbar-rail{display:flex;align-items:center;justify-content:space-between;gap:10px;width:max-content;min-width:100%;height:100%;padding:0 6px;box-sizing:border-box}" +
   ".raze-chart-toolbar-slot{display:flex;align-items:center;gap:2px;flex:0 0 auto;white-space:nowrap}" +
   ".raze-chart-toolbar-slot-end{justify-content:flex-end}" +
   // A hairline between non-empty groups (search | intervals | ranges).
   ".raze-chart-toolbar-slot>.raze-chart-toolbar-slot:not(:empty)+.raze-chart-toolbar-slot:not(:empty)::before{content:\"\";width:1px;height:16px;margin:0 4px 0 2px;background:var(--raze-border)}" +
-  // Zero-specificity (:where) base rules: any host selector restyles them.
-  ":where(.raze-chart-toolbar-btn){appearance:none;margin:0;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:inherit}" +
-  ":where(.raze-chart-header-btn){appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:2px;flex:0 0 auto;box-sizing:border-box;" +
-  "height:var(--raze-control-height);padding:0 7px;margin:0 1px;border:0;border-radius:var(--raze-radius-sm);background:transparent;" +
-  "color:var(--raze-toolbar-text);font:inherit;font-size:var(--raze-font-size);line-height:1;white-space:nowrap;cursor:pointer;touch-action:manipulation}" +
-  "@media (hover:hover){:where(.raze-chart-header-btn):hover{background:var(--raze-toolbar-hover)}}" +
-  ":where(.raze-chart-header-btn):active,:where(.raze-chart-header-btn)[aria-expanded=\"true\"]{background:var(--raze-toolbar-hover)}" +
-  ":where(.raze-chart-header-btn)[aria-pressed=\"true\"]{background:var(--raze-active);color:var(--raze-accent);font-weight:600}" +
+  "button:where(.raze-chart-toolbar-btn){appearance:none;margin:0;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:inherit}" +
+  "button.raze-chart-header-btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:2px;flex:0 0 auto;box-sizing:border-box;" +
+  "height:var(--raze-control-height);padding:0 7px;margin:0 1px;border:0;border-radius:var(--raze-radius-sm);background:transparent;box-shadow:none;" +
+  "color:var(--raze-toolbar-text);font:inherit;font-family:var(--raze-font);font-size:var(--raze-font-size);line-height:1;text-transform:none;white-space:nowrap;cursor:pointer;touch-action:manipulation}" +
+  "@media (hover:hover){button.raze-chart-header-btn:hover{background:var(--raze-toolbar-hover)}}" +
+  "button.raze-chart-header-btn:active,button.raze-chart-header-btn[aria-expanded=\"true\"]{background:var(--raze-toolbar-hover)}" +
+  "button.raze-chart-header-btn[aria-pressed=\"true\"]{background:var(--raze-active);color:var(--raze-accent);font-weight:600}" +
   // Overflow chevron, drawn in CSS (decorative; the button is named).
   ".raze-chart-interval-more::after{content:\"\";width:5px;height:5px;margin:-3px 1px 0;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}" +
   // Menus portalled out of the header (to <body>, outside the token scope, so
@@ -52,11 +58,11 @@ export const HEADER_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   ".raze-chart-interval-menu [aria-checked=true]::before{content:\"✓\";color:var(--raze-accent,var(--tv-color-toolbar-button-text-hover,#2962ff))}" +
   ".raze-chart-symbol-search [aria-selected=true]{box-shadow:inset 2px 0 0 var(--raze-accent,var(--tv-color-toolbar-button-text-hover,#2962ff))," +
   "inset 0 0 0 100vmax var(--raze-hover,var(--tv-color-popup-element-background-hover,rgba(255,255,255,.08)))}" +
-  ".raze-chart-symbol-search-field{display:flex;align-items:center;flex:0 0 auto;margin:0 4px 0 0}" +
-  ":where(.raze-chart-symbol-search-input){box-sizing:border-box;width:88px;height:var(--raze-control-height);margin:0;padding:0 8px;" +
-  "border:1px solid var(--raze-border);border-radius:var(--raze-radius-sm);background:transparent;color:inherit;font:inherit;font-size:var(--raze-font-size)}" +
-  "@media (hover:hover){:where(.raze-chart-symbol-search-input):hover{background:var(--raze-toolbar-hover)}}" +
-  "@media (pointer:coarse){:where(.raze-chart-header-btn,.raze-chart-symbol-search-input){height:var(--raze-touch-control-height)}:where(.raze-chart-header-btn){padding:0 10px}}" +
+  ".raze-chart-symbol-search-field{display:flex;align-items:center;flex:0 0 auto;margin:0 4px 0 0;font-family:var(--raze-font)}" +
+  "input.raze-chart-symbol-search-input{box-sizing:border-box;width:88px;height:var(--raze-control-height);margin:0;padding:0 8px;" +
+  "border:1px solid var(--raze-border);border-radius:var(--raze-radius-sm);background:transparent;box-shadow:none;color:inherit;font:inherit;font-size:var(--raze-font-size)}" +
+  "@media (hover:hover){input.raze-chart-symbol-search-input:hover{background:var(--raze-toolbar-hover)}}" +
+  "@media (pointer:coarse){button.raze-chart-header-btn,input.raze-chart-symbol-search-input{height:var(--raze-touch-control-height)}button.raze-chart-header-btn{padding:0 10px}}" +
   "@media (prefers-reduced-motion:reduce){.raze-chart-toolbar{scroll-behavior:auto}}",
 );
 
@@ -64,11 +70,21 @@ export const HEADER_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
 export const HEADER_CHUNKS: readonly StyleChunk[] = [TOKEN_STYLES, HEADER_STYLES];
 
 /**
- * Install the header stylesheet for a control mounted outside a `Toolbar`
- * (the header modules are public exports): now, and once more after the
- * caller appended it.
+ * Carry the context font (`custom_font_family`) to a header module, so a
+ * module mounted outside the widget root still uses it. A custom property
+ * rather than inline `font-family`: the class rules read `var(--raze-font)`.
  */
-export function adoptHeaderStyles(el: Element): void {
+function setHeaderFont(el: HTMLElement, context: Pick<ChartContext, "fontFamily"> | undefined): void {
+  if (context?.fontFamily) el.style.setProperty("--raze-font", context.fontFamily);
+}
+
+/**
+ * Install the header stylesheet (and the context font) for a control mounted
+ * outside a `Toolbar` (the header modules are public exports): now, and once
+ * more after the caller appended it.
+ */
+export function adoptHeaderStyles(el: HTMLElement, context?: Pick<ChartContext, "fontFamily">): void {
+  setHeaderFont(el, context);
   adoptStyles(el, HEADER_CHUNKS);
   queueMicrotask(() => adoptStyles(el, HEADER_CHUNKS));
 }
@@ -103,9 +119,10 @@ export class Toolbar {
   readonly searchSlot: HTMLDivElement;
   readonly rangeSlot: HTMLDivElement;
 
-  constructor(_context: ChartContext) {
+  constructor(context: ChartContext) {
     this.el = document.createElement("div");
     this.el.className = "raze-chart-toolbar";
+    setHeaderFont(this.el, context);
     this.el.setAttribute("role", "toolbar");
     this.el.setAttribute("aria-label", t("header.toolbar", "Chart toolbar"));
     this.el.setAttribute("aria-orientation", "horizontal");

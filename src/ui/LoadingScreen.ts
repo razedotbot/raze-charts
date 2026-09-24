@@ -9,7 +9,8 @@ import { adoptStyles, adoptStylesOnConnect, defineStyles, type StyleChunk } from
  * Spinner keyframes and the reduced-motion rule. Adopted by the screen itself
  * (constructable stylesheet, so a strict style-src allows it): LoadingScreen is
  * a public export and must spin without the widget's chrome stylesheet, in
- * every root it is shown in (each shadow root, and again after a remount).
+ * the root it is shown in (a shadow root too, and the root the widget
+ * re-mounts it into).
  */
 const LOADING_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "loading-screen",
@@ -74,10 +75,9 @@ export class LoadingScreen {
       "color:var(--tv-color-toolbar-button-text, currentColor)",
     ].join(";");
     this.el.appendChild(this.message);
-    // Install the keyframes in the document now, and in whichever root the
-    // screen is mounted into: a shadow root it joins later (even one whose
-    // host is not attached yet), each further shadow root, and the root it is
-    // re-mounted into, so the spinner turns wherever the screen is shown.
+    // Install the keyframes in the document now, and in the root the screen
+    // is mounted into, including a shadow root it joins later (even one whose
+    // host is not attached yet). showMessage() re-adopts after a re-mount.
     adoptStyles(document, LOADING_STYLES);
     this.stopStyles = adoptStylesOnConnect(this.el, LOADING_STYLES);
   }

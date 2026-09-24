@@ -12,14 +12,14 @@ export class TimeframeBar {
   private buttons = new Map<string, HTMLButtonElement>();
 
   constructor(
-    _context: ChartContext,
+    context: ChartContext,
     readonly el: HTMLElement,
     private readonly onPreset: (preset: TimeframePreset) => void,
     private readonly onGoToDate: () => void,
   ) {
     this.el.setAttribute("role", "group");
     this.el.setAttribute("aria-label", t("header.range.group", "Visible time range"));
-    adoptHeaderStyles(this.el);
+    adoptHeaderStyles(this.el, context);
     this.render();
   }
 
