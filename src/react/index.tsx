@@ -602,18 +602,31 @@ function describeResponsiveChild(children: unknown): string {
   if (Array.isArray(children)) return `${children.length} children`;
   if (!isValidElement(children)) return children == null ? "no child" : `a ${typeof children} child`;
   if (typeof children.type === "string") return `<${children.type}>`;
-  return "a Fragment";
+  const role = componentRole(children.type);
+  if (!role) return "a Fragment";
+  const name = COMPONENT_NAMES[role];
+  // Every series descriptor has a same-named container: <Line> → <LineChart>.
+  return SERIES_ROLES.has(role)
+    ? `<${name}>, a series descriptor; wrap it in a chart container such as <${name}Chart>`
+    : `<${name}>, a chart descriptor; wrap it in a chart container such as <LineChart> or <ComposedChart>`;
 }
 
 /**
  * Any component element can receive the measured size: a chart, or a user
  * wrapper such as <RevenueChart /> that forwards width and height. Host
- * elements and fragments cannot, so they fail loudly instead of ignoring it.
+ * elements, fragments and bare descriptors (<Line>, <Tooltip>, which render
+ * nothing outside a chart container) cannot, so they fail loudly instead of
+ * rendering an empty container.
  */
 function assertResponsiveChild(
   children: unknown,
 ): asserts children is ReactElement<{ width?: number; height?: number }> {
-  if (isValidElement(children) && typeof children.type !== "string" && children.type !== Fragment) return;
+  if (
+    isValidElement(children)
+    && typeof children.type !== "string"
+    && children.type !== Fragment
+    && componentRole(children.type) === null
+  ) return;
   throw new Error(
     "[@razedotbot/charts/react] ResponsiveContainer requires exactly one chart element " +
     "(a chart, or a component that forwards width and height to one) or a render function child " +

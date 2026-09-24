@@ -434,7 +434,8 @@ viewport literals never recompile, and Recharts-shaped charts memoize on the
 structure of their JSX children, so only a real data or prop change repaints
 ([React update flow](./docs/performance.md#react-update-flow)). Charts with the
 same `syncId` (or `viewportGroup` from `createViewportGroup()`) pan and zoom
-together ([synchronized charts](./docs/migration.md#synchronized-charts)).
+together; they share the X window, not the tooltip position
+([synchronized charts](./docs/migration.md#synchronized-charts)).
 
 The React entry ships with a `"use client"` directive, so Next.js App Router
 Server Components can render `<LineChart>` without a client wrapper file of

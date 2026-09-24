@@ -203,6 +203,29 @@ try {
     }
   }
 
+  // Module directives must survive packing as the first statement of every
+  // installed JavaScript target: "use client" on /react is what lets React
+  // Server Component bundlers (the Next.js App Router) see the client boundary.
+  assert.equal(
+    PACKAGE_ENTRIES.find((entry) => entry.subpath === "./react")?.directive,
+    "use client",
+    "the React entry must declare the \"use client\" directive",
+  );
+  for (const entry of PACKAGE_ENTRIES) {
+    const conditions = installedPackage.exports[entry.subpath];
+    for (const target of new Set([conditions.import.default, conditions.require.default])) {
+      const head = readFileSync(resolve(installedDir, target), "utf8").trimStart();
+      if (entry.directive) {
+        assert.ok(
+          head.startsWith(`${JSON.stringify(entry.directive)};`),
+          `packed ${target} must start with "${entry.directive}";`,
+        );
+      } else {
+        assert.doesNotMatch(head, /^["']use client["']/, `packed ${target} must stay server-safe (no "use client")`);
+      }
+    }
+  }
+
   const esmConsumer = join(consumerDir, "consume.mjs");
   writeFileSync(
     esmConsumer,

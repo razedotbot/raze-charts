@@ -203,9 +203,9 @@ export function Trend({ data }: { data: Point[] }) {
 | `Tooltip` | Enable built-in pointer tooltip | It is a configuration descriptor, not a rendered React overlay. |
 | `Legend` | Enable built-in legend | It is a configuration descriptor, not a customizable React child. |
 | `ReferenceLine` | Add a horizontal (`y`, a number) or vertical (`x`, a category, number or Date) rule | Exactly one of `y` or `x`. |
-| `ResponsiveContainer` | Measure the wrapper and inject numeric width/height into its child | The child is one component element (a chart, or your own wrapper that forwards `width`/`height`) or a render function `({ width, height }) => …`; host elements such as `<div>` are rejected. |
+| `ResponsiveContainer` | Measure the wrapper and inject numeric width/height into its child | The child is one component element (a chart, or your own wrapper that forwards `width`/`height`) or a render function `({ width, height }) => …`; host elements such as `<div>` and bare descriptors such as `<Line>` are rejected. |
 | `Brush` | Window the native viewport | `startIndex`/`endIndex` or a time domain; it is not the Recharts brush overlay API. |
-| `syncId` | Share the X window between charts | Same idea as Recharts: charts with the same `syncId` pan and zoom together. `viewportGroup` is the explicit form. |
+| `syncId` | Share the X window between charts | Charts with the same `syncId` share one X window (pan, zoom, brush and presets). Unlike Recharts, the tooltip and crosshair position are not synchronized. `viewportGroup` is the explicit form. |
 
 ### Exact React prop surface
 
@@ -258,7 +258,9 @@ match. Move mixed Cartesian/polar layouts into separate chart instances.
 
 Recharts' `syncId` maps to a viewport group. Charts in the same group share
 one X window: a wheel zoom, drag pan, brush or range preset on any member moves
-the others. Each chart joins when it mounts and leaves when it unmounts.
+the others. Each chart joins when it mounts and leaves when it unmounts. Only
+the X window is shared: unlike Recharts, hovering one chart does not move the
+tooltip or crosshair of the others.
 
 ```tsx
 import { LineChart, Line, XAxis, createViewportGroup } from "@razedotbot/charts/react";
@@ -289,9 +291,12 @@ Use `viewportGroup` when the host also drives the window (for example
 `dashboard.setViewport({ x: [from, to] })` from a date picker) or reads it
 back with `dashboard.getViewport()`. `onReady` handles also satisfy
 `ViewportHandle`, so `group.add(handle)` works for charts you wire up by hand;
-call the function it returns when that chart unmounts. Only the chart the user
-interacted with calls its `onViewportChange`; followers are moved
-programmatically.
+call the function it returns when that chart unmounts. A handle added this way
+only follows the group; its own gestures do not move the others. To make it
+lead as well, prefer the `viewportGroup` prop, which joins and broadcasts, or
+also pass `onViewportChange={(v) => group.setViewport(v)}` to that chart. Only
+the chart the user interacted with calls its `onViewportChange`; followers are
+moved programmatically.
 
 ### Next.js App Router and Server Components
 

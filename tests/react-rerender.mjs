@@ -457,6 +457,11 @@ const series = Array.from({ length: 20 }, (_, index) => ({ t: index, v: Math.sin
 for (const [label, child, expected] of [
   ["a host element", createElement("div"), "received <div>"],
   ["two children", [createElement(Chart, { key: 1, definition: defineChart({ marks: [] }) }), createElement("span", { key: 2 })], "received 2 children"],
+  // Descriptors render nothing outside a chart container; cloning size into
+  // one would leave an empty responsive box with no error (a silent no-op).
+  ["a series descriptor", createElement(Line, { dataKey: "v" }), "received <Line>, a series descriptor; wrap it in a chart container such as <LineChart>"],
+  ["a chart descriptor", createElement(Tooltip), "received <Tooltip>, a chart descriptor; wrap it in a chart container"],
+  ["an axis descriptor", createElement(XAxis, { dataKey: "t" }), "received <XAxis>, a chart descriptor"],
 ]) {
   const view = scene();
   await withSilencedErrors(() => view.render(createElement(

@@ -172,7 +172,7 @@ that changes the picture changed:
 | `interaction` | shallow value | a flag changes; `interaction={{ zoom: true }}` inline is free |
 | `viewport` | value (Dates by time) | the window changes; an inline literal is free |
 | `onViewportChange`, `onSelect` | never | never: stable trampolines always call the latest callback |
-| `viewportGroup`, `syncId` | identity / value | never: joining or leaving a group does not recompile |
+| `viewportGroup`, `syncId` | identity / value | only when the joined group already has a window (the chart adopts it with one repaint); leaving never repaints |
 
 Recharts-shaped containers (`<LineChart>` and friends) derive their definition
 from the JSX children. Children are new objects on every React render, so the
