@@ -167,791 +167,791 @@
   },
   "facets": {
     "scene/basic-mixed": {
-      "scene": "1dc75fc24c03ad09e3e80dfe",
-      "svg": "9266a7d1fa581208abc0082e",
-      "canvas": "c60db68f81af9e3c9fa49a69",
+      "scene": "dc8cccbe5791e92ff8e86a27",
+      "svg": "ebcdce0eba54d3d47b669554",
+      "canvas": "314fa032b5d4dc9b1c1c4307",
       "hits": "fb968d95dc5dc1cd33d9bfdd",
-      "tooltips": "fe1e3c4227d4676019b04f7b"
+      "tooltips": "8d9448de570dbf0fc0fc87a7"
     },
     "scene/stacked": {
-      "scene": "5a7d63c419c1cf576ef29a43",
-      "svg": "f0065e38dc4242f9268a2fcd",
-      "canvas": "9291a526c9b0d5ce9a881dcc",
+      "scene": "e3ccf0b456a4499f9712d536",
+      "svg": "78309da0ddf68d72a6edee1a",
+      "canvas": "1f5f52115d66487cc36774ae",
       "hits": "cce58cdfdb0be46ad67e92b8",
       "tooltips": "d7c648e8ab20a9411ec34c74"
     },
     "scene/area-points": {
-      "scene": "30c1854d4a2b97f26134ce2a",
-      "svg": "f802320c77324e1c5a840d7b",
-      "canvas": "1d7cfb8e7eed3949f9166bc5",
-      "hits": "483034b98b7ca8cde340147f",
-      "tooltips": "6cf970e4b1db9d9966a82200"
+      "scene": "b363f830f152637170f9518e",
+      "svg": "af24174bcec72cc40e60172f",
+      "canvas": "291704fbcaf9fbf39ac9bb12",
+      "hits": "22edb77050fa64a03b471d0b",
+      "tooltips": "cf1da40e4af82c759fd829a8"
     },
     "scene/fit-dashed": {
-      "scene": "b42274eb14eb70edb52997df",
-      "svg": "90ba55b982004c1d5c05a5bd",
-      "canvas": "0f9162bebaea1e000867fc87",
+      "scene": "c2aa46a2d5d8f51d0ecc8f13",
+      "svg": "3c9571db6ddf1ae0691cc3b5",
+      "canvas": "d4722d809ba4b03ccd93195e",
       "hits": "803602b26bfbc8de3ae75b99",
       "tooltips": "bcc87c1a785438a37352933d"
     },
     "scene/plugin-lollipop": {
-      "scene": "d1e92cbc35d69eb75243f9b1",
-      "svg": "a38a22298c73f7137a7feacb",
-      "canvas": "d6ac59d4769f6d71a71bb5c4",
+      "scene": "6055f48c72f18bfe33f57e0f",
+      "svg": "fec07832b307a55591f2a19f",
+      "canvas": "c3bebc8bd859bcd68fdf604b",
       "hits": "6e7bf00b3259dd268c325a4f",
       "tooltips": "c5ee3481f0a1132b5e2be714"
     },
     "scene/plugin-band-probe": {
-      "scene": "062bc58f6c9d7544db388bad",
-      "svg": "5760302a5cb0fb28c79c2e99",
-      "canvas": "da039beb3c6d3eb0cb6a4abd",
+      "scene": "47db92eb527f52311641eb70",
+      "svg": "e6e9b75b5b49a7620f580666",
+      "canvas": "a394becd575cec86daf5859f",
       "hits": "b54dac0bb22da2b75ac68afb",
       "tooltips": "1cfad2549c5fd5287e74d113"
     },
     "scene/plugin-annotations": {
-      "scene": "e025433ae9f92122b44f70a7",
-      "svg": "4954e7701cd4f2b3cb31a7f7",
-      "canvas": "1bf968773ab5a35c5ab2b41b",
+      "scene": "d5680915b7088e8a87417fe6",
+      "svg": "252412a60e63eacddc9b3bbb",
+      "canvas": "8d61a1215037304b4fcc76e5",
       "hits": "c3d2bc8470e77c6b746913b0",
       "tooltips": "27e7fb8b2e8999a25e7433e4"
     },
     "scene/dense-128": {
-      "scene": "95c986c4eded1302286b2163",
-      "svg": "114516aeabe8c71663804f3a",
-      "canvas": "fef81777b950635ae5286f58",
+      "scene": "43ec88c50aa79d996a5ce26a",
+      "svg": "c0070add86ec85d6bd745db7",
+      "canvas": "b1189a711c492251d8119f4f",
       "hits": "ffe31356a26cd8da02e31531",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-exact": {
-      "scene": "5d793b0778b54ef5aa82d0f9",
-      "svg": "3bfd1db7591e8881a61c7678",
-      "canvas": "a859caa9728ad48a19dc6375",
+      "scene": "da5943454076c5eb86be008b",
+      "svg": "b90473b8d0b357ddea8b5f80",
+      "canvas": "60be7ff97e0875f5b15ee7a8",
       "hits": "5ea3eacafb650b9a3e2e8647",
       "tooltips": "20ae432550a4733e68d911d3"
     },
     "scene/dense-narrow": {
-      "scene": "c099ff0bd7cae62ff1693884",
-      "svg": "33b7f895ca8380aa70446b59",
-      "canvas": "0d2381690e5dbc2d32a58696",
+      "scene": "c2a566b7b6c619dbfe3d729a",
+      "svg": "f7bf1857d4047b42513c203a",
+      "canvas": "d51b271abdce8d18af34b812",
       "hits": "578ec14fd3fa29ea72d435da",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-1": {
-      "scene": "9022e3bf3b1bd1892c79cca2",
-      "svg": "fa2a2c52b66ca43faf16ec8a",
-      "canvas": "7f8a5202abee7938489e0cd0",
+      "scene": "44a1809747848403f2147311",
+      "svg": "d164188d55748353a0448e4d",
+      "canvas": "83f434fdaa78df670983274f",
       "hits": "57ad26d03fada2b812c9cf6b",
       "tooltips": "bb5e3da0156722ab6deef71a"
     },
     "scene/dense-cap-2": {
-      "scene": "72f4db64565dc52ca9734036",
-      "svg": "427512abe18ad7ea2f82638c",
-      "canvas": "532061b80950e3d28948b554",
+      "scene": "112252358221f6da73bd359e",
+      "svg": "84f1a52fca7898057cd4a1d4",
+      "canvas": "89b83e1b05d6e46f3b75b263",
       "hits": "17d7f15e1f25e2362ac5c73e",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-3": {
-      "scene": "12850a2f5d84fe271b858070",
-      "svg": "a34397ccb0d1fca2a3d854c6",
-      "canvas": "121b5f6b92cfcefe81db79b1",
+      "scene": "522b3cc63869443ec88072db",
+      "svg": "fc6ec9ed715b12e22030df6a",
+      "canvas": "e08c51c2159e1e842754e481",
       "hits": "682bad2664410d3b7b327cc4",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-4": {
-      "scene": "7b3074b3646bc678a18c334b",
-      "svg": "6211fb891aebdf8ed112e5a1",
-      "canvas": "45cd71c172055a55b1207a23",
+      "scene": "06c1efe9abe84e5f882191f5",
+      "svg": "f608e6530f5b41a6d171dd87",
+      "canvas": "b68ed076127938709066cb5e",
       "hits": "6167c8ac7825fce5923e060b",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-5": {
-      "scene": "7b3074b3646bc678a18c334b",
-      "svg": "77b3cc8443361efc48b32c71",
-      "canvas": "45cd71c172055a55b1207a23",
+      "scene": "06c1efe9abe84e5f882191f5",
+      "svg": "210a43521fd00333746156f3",
+      "canvas": "b68ed076127938709066cb5e",
       "hits": "6167c8ac7825fce5923e060b",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-15": {
-      "scene": "1a3737c4c9a57fd5563f38d1",
-      "svg": "2280574aa84a6d9d4a132c33",
-      "canvas": "3708abefb9ca1571a0779b27",
+      "scene": "486e9a6f3b3ca09b53ab25d6",
+      "svg": "b9403b046e28a1758bb3604f",
+      "canvas": "48d7f31cc00841640c01d57b",
       "hits": "06a91c4af1ca47fa037145b0",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-16": {
-      "scene": "8a91b12a5481ea7f4536627a",
-      "svg": "99a0464e1b124a0a12abf74a",
-      "canvas": "624abbd7ea8219ff66d2591e",
+      "scene": "7bfbbf5d88b42efb84d5ebb6",
+      "svg": "0bb159e9fccdc115a0d79915",
+      "canvas": "4943349d638f801e13110a73",
       "hits": "df0b0b7493ac86865196318f",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/gap": {
-      "scene": "eb56f745d1b9dc596ec3b826",
-      "svg": "67d186012eb637eeed0233ea",
-      "canvas": "3d6474ccd08f420540fd28bf",
+      "scene": "dfcd0f12adfccd5372b25062",
+      "svg": "4eb889f34d85a323feb676c9",
+      "canvas": "f192b5ea50a58a99c845ceac",
       "hits": "725a6e3648d5435a0c7209c0",
       "tooltips": "88bf30415f75d82e811e3fe8"
     },
     "scene/fragmented": {
-      "scene": "6e1c53da96d8fdc92232b78b",
-      "svg": "87105e6ed6274e700f8d4e1c",
-      "canvas": "668733eb9676e65b86b71a69",
+      "scene": "e7ff50a92579d001e492a101",
+      "svg": "8f98fb720c84068feca12313",
+      "canvas": "d2e0748e0eedd04fbc7dfa23",
       "hits": "75d4ba6f5a09e4e912fa94a6",
       "tooltips": "6ce371aed4fc0215867333e1"
     },
     "scene/isolated-spike": {
-      "scene": "86d4654dfcce9f843af0a6b8",
-      "svg": "fde71f9f7b98f28382bfc192",
-      "canvas": "f501dc43c7d6dcd079f381f3",
+      "scene": "573cd1a04b7b3b75ec7004e4",
+      "svg": "688da650694e97da9c0828ac",
+      "canvas": "757c0409668ff664cdd343cc",
       "hits": "ab2a2e6c38b552c7a90efbdc",
       "tooltips": "f3b95ba9ae5a0339864f17ff"
     },
     "scene/internal-spike": {
-      "scene": "9143e09737d583fc1de9bc8c",
-      "svg": "02b6926163cb756bb3c331a9",
-      "canvas": "e0fecf9294e1d4e65240bc09",
+      "scene": "97228488228d1b339a9b983d",
+      "svg": "57ae12cdc57749bbd6ceefc4",
+      "canvas": "62ec5b8d07d9b69597efb141",
       "hits": "fde41f6842dc0097b73350f0",
       "tooltips": "6d2cf4f955c9ca7ec6d37ff1"
     },
     "scene/last-value-tail": {
-      "scene": "2d725520cb258dc68b84f96e",
-      "svg": "744bc4306ec6925b1470b66c",
-      "canvas": "5f1f0f39a2e1cb1937d38bcc",
+      "scene": "8444ba3fa0be05ff4194dbee",
+      "svg": "6fd796f42d258aa6bdf09257",
+      "canvas": "288b97d1f192eaa718e832e0",
       "hits": "b6a489f99d9d4c521a41c35b",
       "tooltips": "eba0a4174f75f08cc60a48b5"
     },
     "scene/singletons": {
-      "scene": "9e2f19effdbe2cefc194f0d1",
-      "svg": "00706539f916f3d4535a64fc",
-      "canvas": "a4d2e4e24aef09ff39addd31",
+      "scene": "d1399daa56c8146fb629b779",
+      "svg": "ae4df79a5ce61da9f6fdf7e1",
+      "canvas": "76db3ab912705a117f4fd6fa",
       "hits": "dd9f7af9a9503e0787a1bcab",
       "tooltips": "026c6386ea1b927b7c0914a7"
     },
     "scene/final-extreme": {
-      "scene": "2bf239ff4956e929dd9c9ea2",
-      "svg": "8ccad518f1f6f464b335aec1",
-      "canvas": "a99fcd855aefa1bc16a3c1e9",
+      "scene": "7288687f2430bd35cb24b19a",
+      "svg": "b7860edfb3db06cf53ff872e",
+      "canvas": "b2c673ee41b382bde7a7268a",
       "hits": "0a3720fd9dbf35a50875e03f",
       "tooltips": "bc7c94ef3210ef536583d76a"
     },
     "scene/decimated-area": {
-      "scene": "ad3d603cc3ae41f1eac3fbd3",
-      "svg": "63df00a67ce750ef2a723861",
-      "canvas": "438124798ba9eea59e3cb17d",
+      "scene": "e30c1fe12b727f68147fb539",
+      "svg": "b53f2f557bb73205b0c0fcc0",
+      "canvas": "fad559f4b0eac2e94c0d12d5",
       "hits": "484f109ca313dbe176fec2a4",
       "tooltips": "d747ac8c9f0c335bba35b8a2"
     },
     "scene/ranged-area": {
-      "scene": "ddd2bd9579609f25ef1b63ce",
-      "svg": "b51f8249c34581abbf984f56",
-      "canvas": "f5f0834ee2dfca8d94e988f8",
-      "hits": "f720ef83cf87ad1ad510ba17",
+      "scene": "4c012936c94b7eb561cc78b9",
+      "svg": "33682f5dd5a2fe79d855118c",
+      "canvas": "f69194e98542cf7a723fab13",
+      "hits": "e66eb785509f181952c41524",
       "tooltips": "03cee14e894c6b79dfce6f39"
     },
     "scene/ranged-area-gaps": {
-      "scene": "ffd423604b3fe78b59dccb31",
-      "svg": "09832bc054975dd92026973d",
-      "canvas": "25bde688743cfdde44e9675a",
+      "scene": "51acfac4855e16620bc5bb8f",
+      "svg": "a6e7d5c54aae9e446b369178",
+      "canvas": "66a3998f5feb6d809fe4ac21",
       "hits": "969a9920e6217f5760a62ad4",
       "tooltips": "b92eda1b66f7153bcb8460bf"
     },
     "scene/viewport-x": {
-      "scene": "4e39ae14dac8ae113b420555",
-      "svg": "65d9e97908cc54eda70220d4",
-      "canvas": "05a7dc96c8812e399b547cf2",
+      "scene": "f25e2005fcd11666b3e584fa",
+      "svg": "4618103a3994178f324b91a4",
+      "canvas": "36e73d41d694113d208887f5",
       "hits": "545ecbe1153399877b7d2dd0",
       "tooltips": "87d7a0f8d9cb156c9ad23f3d"
     },
     "scene/domain-only": {
-      "scene": "0e3897a60431b22328208ffe",
-      "svg": "41bf28cb8c18ee719937aa36",
-      "canvas": "2961603a67f3039a2141674b",
+      "scene": "9603c5809210fc564a5cb3af",
+      "svg": "462e3ff937e48d9abd3ba664",
+      "canvas": "a1dd362a3cd1cf00dfd527ad",
       "hits": "8eda0b502622751f30628f10",
       "tooltips": "f42b26be7d2b585f5a93d06b"
     },
     "scene/viewport-decimated": {
-      "scene": "14eedd2fb66713117282c56c",
-      "svg": "503f3c1e6b1c17e7e7c952be",
-      "canvas": "4d436831c236ddcce8511d7a",
+      "scene": "528272358bd311e26000817a",
+      "svg": "708dfbfa076a955455767eaa",
+      "canvas": "cc9467005e092fb92a01e248",
       "hits": "f1fc52d1dfca54934e5f1879",
       "tooltips": "35047a04a738ee77fad39408"
     },
     "scene/viewport-y": {
-      "scene": "15c69739a38899c5d79e7a95",
-      "svg": "ecaf09b4ca38a0045131807b",
-      "canvas": "aa334a47c6b98e6569b00bb1",
+      "scene": "244dff88c1911aeff7a59b5b",
+      "svg": "f5e4d43601e7247104ebd895",
+      "canvas": "ead82893bdfa196f445bd9ff",
       "hits": "0dc3c77f0c7bb0c331031e6f",
       "tooltips": "f322eb6a12223a9005622f52"
     },
     "scene/viewport-band": {
-      "scene": "4a39a75cce0ba05423272257",
-      "svg": "86ac9420314a23cba18daab7",
-      "canvas": "bf1ded3e7cb27dca01a48f02",
+      "scene": "f0b46a020a4967cc23c3a68a",
+      "svg": "68d6588d78a438040f5884a8",
+      "canvas": "1b47628bf01c760a949fabce",
       "hits": "cd899e068412535dd1c032e8",
       "tooltips": "e454bedf9a3204aa97906f54"
     },
     "scene/viewport-time": {
-      "scene": "c675ebc0dc4199cf144a4dfe",
-      "svg": "ad52623e46354dc93ff0187c",
-      "canvas": "c9ef12ecfb1e9b3307424f0a",
+      "scene": "2c22dc40abd166a91816d5cc",
+      "svg": "8cc730942c02f49057848b69",
+      "canvas": "4fca4f304dabb2154927875b",
       "hits": "fcf3e48e14ca0d8d4a5be4cb",
       "tooltips": "77728daf4d48f3d2687b4f91"
     },
     "scene/viewport-dates": {
-      "scene": "bbb97ebd13b17391012cbaf5",
-      "svg": "78bb733a8db32f944942e965",
-      "canvas": "a18081a1d40dba9a703df377",
+      "scene": "7ec1153b10e6da0bb3d177ba",
+      "svg": "c32290692a551cafe72ef97a",
+      "canvas": "29ab6d740529b91b670b1bb0",
       "hits": "4e10647ba7f71e1ac8357698",
       "tooltips": "f10ead6d8382fc36b0672bd3"
     },
     "scene/viewport-reversed": {
-      "scene": "c1411cbce93ded2ff963218d",
-      "svg": "e2d8ebe55f0a044ca7370040",
-      "canvas": "1b3b15fdf6c6dc7fe9515c2b",
-      "hits": "d2cf055fcf952ff32ca5951a",
+      "scene": "101cd825c2d27c228ab80165",
+      "svg": "9129758bbded57adce9dcead",
+      "canvas": "3cd0cc201b073bb045a8bfb3",
+      "hits": "559faf8021b8132e1dc9d160",
       "tooltips": "5cf4b7035071b0dddc9fbc69"
     },
     "scene/hidden-series": {
-      "scene": "392109201fa1d684331773d1",
-      "svg": "f5a22c32ac98e514a302a27b",
-      "canvas": "72fcf6214cae54973b43e5bc",
+      "scene": "6503633647ee89808fbffadf",
+      "svg": "34816a114a3a746f1a15aad7",
+      "canvas": "a1be50635a2441dfba40141e",
       "hits": "6b34aefe8383159d856a97ce",
       "tooltips": "36a5218915457fe186091cc7"
     },
     "scene/hidden-unmatched": {
-      "scene": "44ffd6516ea952abafd32231",
-      "svg": "818c2e5f0a0c4a6d6547e691",
-      "canvas": "72fcf6214cae54973b43e5bc",
+      "scene": "0c63b4da7b62af13d2ea7e42",
+      "svg": "88da26600f460b720593df55",
+      "canvas": "518475bb860bccef36b55f6b",
       "hits": "6b34aefe8383159d856a97ce",
       "tooltips": "36a5218915457fe186091cc7"
     },
     "scene/curves": {
-      "scene": "c07ebb0663ebc26abf901a24",
-      "svg": "b290c4c27fa0f38804415298",
-      "canvas": "2e1d5781060026c1b43f502f",
+      "scene": "39e2c79f4b8f4920ec532cf7",
+      "svg": "d2439fb666c60219717c2bdb",
+      "canvas": "082469f993f80ab3e3bcf2aa",
       "hits": "d99143a651802108dea97ade",
       "tooltips": "02ec8d0048a87500b56a414f"
     },
     "scene/rule-x": {
-      "scene": "d4db79a11d9d390c8f23b4d6",
-      "svg": "93a34b1573aa5d43e5d78316",
-      "canvas": "b8931dc2c21ec2f1824be4ef",
+      "scene": "e58d24cd52ffcbab3dc1acd2",
+      "svg": "40a6c13c7b725748409355c4",
+      "canvas": "3eb05a79b1eb8802fd1f3371",
       "hits": "57e6a988add274daec6d6605",
       "tooltips": "c43c127bbabdf422659cdcb8"
     },
     "scene/rule-x-time": {
-      "scene": "2efd9c947eff19edbf5d8537",
-      "svg": "787de33cabbf6adfa74cac37",
-      "canvas": "a5f6e732038a4386a763b00f",
+      "scene": "ee24b8507f4359d6e4f45d76",
+      "svg": "261cf83840a950e33a87310c",
+      "canvas": "530be67bfa75aced2babf7a0",
       "hits": "a2f6be74c3117e5641086038",
-      "tooltips": "a0068f8edd400b4e2e8a8f4d"
+      "tooltips": "11108bc8f056698ef31ab034"
     },
     "scene/rule-only": {
-      "scene": "2b9207283c1bdc17e4d10d89",
-      "svg": "48f837de70da2fe91805b52e",
-      "canvas": "09ec725f9a3ea150f46af605",
-      "hits": "15bb0599012fd7ca89c0184f",
+      "scene": "e8281fe38f9cbdc74ee2be94",
+      "svg": "7de173c57875322fab9d1b28",
+      "canvas": "4f6a290f5e1d9b4c3c6d750c",
+      "hits": "229bd29953e62c94c30ab44b",
       "tooltips": "98843e80a8b066ce204168bb"
     },
     "scene/tick-format": {
-      "scene": "f80099fe5a0686fe2cb3da12",
-      "svg": "11037ed4ac00bd3e37b12064",
-      "canvas": "88f3ffb5330f54a213497c99",
+      "scene": "47b429ce131d23e5007aec01",
+      "svg": "705d8f0ebac6cd0534d6a0d7",
+      "canvas": "57e83d52a70c73842e7befe3",
       "hits": "a80f1b8adc04c9c691a447e3",
       "tooltips": "068ad522bb8883b81bbaf323"
     },
     "scene/typed-categories": {
-      "scene": "93e9d68c27de3c9da1cf1957",
-      "svg": "69800a41771bfaeb08a78210",
-      "canvas": "8915c337145df9cee2cd4b93",
+      "scene": "9a6fa964e86a8f9f055815f6",
+      "svg": "bc85800b8af0f5973fa78d35",
+      "canvas": "f383879e19411abe82c1d244",
       "hits": "d0199aeb904bde59e391f405",
       "tooltips": "2f25f46f59fdc052f69bf134"
     },
     "scene/band-padding": {
-      "scene": "5d93bb011efbaf91cc5c1e28",
-      "svg": "feb2b767bea3f24dba4a48a8",
-      "canvas": "7c5f54fb5cc66cc3bc6b1621",
+      "scene": "336aca088dda1bc580380eda",
+      "svg": "e0b9da982f5abfa10d0b36b2",
+      "canvas": "6cf7a8b27df2182441497dc1",
       "hits": "3a13fe3cc4487f4040854dde",
       "tooltips": "23b2f47a342ae4f5084d4724"
     },
     "scene/many-categories": {
-      "scene": "6697fc73bef25251920861e4",
-      "svg": "262ce88e0d74639d34aae802",
-      "canvas": "9e16074f139b4e59a305be46",
-      "hits": "d87445fa76df524a551740b3",
-      "tooltips": "326e41f4f4db81b4453632fa"
+      "scene": "9d6b981dcf4b826c69dc262e",
+      "svg": "d692b66fe87f05c3abe1b9a7",
+      "canvas": "5ccbbf7f42e5cc0d8fe9cce0",
+      "hits": "56f666047361f30d664ff806",
+      "tooltips": "579f3f81d9e1e58e75f8b615"
     },
     "scene/heatmap-basic": {
-      "scene": "9f20f27556303b5e85659815",
+      "scene": "67819bc5128ec8740b32b6a7",
       "svg": "6f6f53f69fdb71dcc5627958",
       "canvas": "cb9bafa157e9d16ed0288b1d",
       "hits": "85fba405c2d7009fa31bc92a",
       "tooltips": "a4483428ac825b60fa58d829"
     },
     "scene/heatmap-sparse": {
-      "scene": "e59098e3bc58760181512afa",
+      "scene": "dd0d4c910969bfbbc46bf0b5",
       "svg": "e68ef6454fc9ae0eee76221e",
       "canvas": "5c519c256d6fee82c246a4e5",
       "hits": "6eb5b804401aae19a0c095cf",
       "tooltips": "33eeb72fd7e071fa67d2a008"
     },
     "scene/heatmap-dashboard": {
-      "scene": "adcd68eabda66750c3a1e686",
+      "scene": "4d62e6bcdd8b699ca0d508a3",
       "svg": "8ece2cece336a65bd2bd0c62",
       "canvas": "7bf73b4a0f4513ccdd1fcdde",
       "hits": "c07c38e17325b4c79748430a",
       "tooltips": "b56c3ed0d23d2769af40e965"
     },
     "scene/heatmap-positive": {
-      "scene": "43d59504d50b6b7482d46e89",
+      "scene": "bd64a037d3afb26a7ad00251",
       "svg": "685a2016b3bebd5ffb07582f",
       "canvas": "48a044c269b68e4aa7ee7e68",
       "hits": "f4ab854149a3aae50c17de8c",
       "tooltips": "e4f6d400d01e95f64d301f8f"
     },
     "scene/bar-single-pos": {
-      "scene": "3b193689d57b89f0425f06ee",
-      "svg": "6eb7111fb94baa3e92744e52",
-      "canvas": "110147c7996128c87642b12e",
+      "scene": "67186add4dd17eed6f38f55e",
+      "svg": "ac9eddc113a7551b66a78412",
+      "canvas": "c2622e9b92d3e4a523243917",
       "hits": "1b13153d24aa66398e51b402",
       "tooltips": "ada27a32c5f4ab747cf4b256"
     },
     "scene/bar-single-neg": {
-      "scene": "8623d9a6b220950afa0cb771",
-      "svg": "4da2006b722608bc64588b48",
-      "canvas": "313773cf57333f28b1dea888",
+      "scene": "0047a4c7c92b8131e0c52d33",
+      "svg": "6676a0b2a7e541406249568e",
+      "canvas": "9eb1d6ce14096c9138b5de0a",
       "hits": "52f97c3db593d026a66cc2ba",
       "tooltips": "629e88b56b7a3bdd2490d80c"
     },
     "scene/stack-normalized": {
-      "scene": "63b221a40c083aa2ac16b922",
-      "svg": "caa34cb3a9d6a777c9bb6bde",
-      "canvas": "cba5c3fdeca02d8bfa1ef78c",
+      "scene": "b70a74d00bf74d5ba14a5ad2",
+      "svg": "eafe64abe320240d218e4071",
+      "canvas": "c8b41f80cd48b5ca1723d201",
       "hits": "6f5d9095890a079754357852",
       "tooltips": "d31267b3658a90ab49a11a9e"
     },
     "scene/stack-time": {
-      "scene": "cc87f1915536e9f1fc28a5df",
-      "svg": "8b9dc38b9148e7e6d9c4d08d",
-      "canvas": "c4ce54f91f5d6743560c7b9b",
-      "hits": "de46119a4e2fda949a0eded2",
-      "tooltips": "a894917c845e01a1f5e02f36"
+      "scene": "f6c4ca502dc9c9d996ae2438",
+      "svg": "8815a89496f04df040579c1e",
+      "canvas": "bb7ce7d3209b4c8bf7947f0d",
+      "hits": "a6fc3a62bc4f576cfb790034",
+      "tooltips": "575c34a3436580a525f1325a"
     },
     "scene/stack-diverging": {
-      "scene": "77d55a6dd08da40a54269bc2",
-      "svg": "e7605969798647c4f8f32275",
-      "canvas": "4686f96c5eb42f73a3aae16e",
-      "hits": "b30387582cf54774c29a8a78",
-      "tooltips": "6fc69f7ddfa1f32a8e5e635a"
+      "scene": "db97e8386f57a5e98f9f4fec",
+      "svg": "44567c4589aa72c36b5cf908",
+      "canvas": "3febe574f4f4dfadb84e8a9b",
+      "hits": "5877ff0f74ca030fd51dfe26",
+      "tooltips": "b6a964cd5981225873b4bb75"
     },
     "scene/stack-grouped": {
-      "scene": "86d80da9093523ff3e9681cc",
-      "svg": "4e95ac6f3da747ea4d5e4239",
-      "canvas": "c15d6bbd18b56087c42d393c",
-      "hits": "b3b4c077ecca6078d0106540",
-      "tooltips": "7f6221649095726c4170fff9"
+      "scene": "c3f8492ed65e0319f93fa5db",
+      "svg": "0bcf09a23fba67b6c9413c32",
+      "canvas": "03f52cbe1b311bae01ee113f",
+      "hits": "4affb4d8576a948b82ced72c",
+      "tooltips": "b7034018e5fc7d394cc93d87"
     },
     "scene/bars-negative": {
-      "scene": "360de8985515f9d0d4f2d625",
-      "svg": "269274e10ef7727c23c11e72",
-      "canvas": "f2f897610286db662045f2eb",
-      "hits": "e6355572b9132ad25af8ef6b",
-      "tooltips": "5dd979bd3a7521aa837e464d"
+      "scene": "cca702befc043264f5eb0ce6",
+      "svg": "894b2093eaa50cfb0df34505",
+      "canvas": "525e2bc9cc7a37225642190c",
+      "hits": "5c16937e0406d17077162aeb",
+      "tooltips": "94b15dd8944adbfd0fdb7bb5"
     },
     "scene/bars-numeric": {
-      "scene": "4f7a4944eef52dbf919a3bc2",
-      "svg": "5e9e662d3cb3d1c0762edf75",
-      "canvas": "be0d4c7879d1da32da6d647b",
+      "scene": "0ef038fd84a3ce00f67dd519",
+      "svg": "4631b05f3372a6e365c43c7d",
+      "canvas": "c6b6c848562688ae3d7c2a74",
       "hits": "a05bfd13eac66b6b2d17bd94",
       "tooltips": "e4e36c9d752b88b3da227e43"
     },
     "scene/bars-log-x": {
-      "scene": "4384dfd5494b246cfeab6b9e",
-      "svg": "f5016a32a3e33d847096de32",
-      "canvas": "1f9d15b2138d08e6276d951e",
+      "scene": "194d45ef803d48cfba76cccb",
+      "svg": "b940fef58a69da49c676f762",
+      "canvas": "ea30ed7e37e7a79d539f38fd",
       "hits": "1c0cfa9241cff488299ab1e2",
       "tooltips": "5eb90513cfafadb970d54d92"
     },
     "scene/bars-time": {
-      "scene": "7153a478dd07bf010c23220a",
-      "svg": "6874e082eff55ac30e35f711",
-      "canvas": "0d3ca947470cff15517f6acf",
+      "scene": "f1f30ce7e93f603394003588",
+      "svg": "066d9c90c17cbd47c40b24fe",
+      "canvas": "40407c0942f36f01d5f8e246",
       "hits": "5b280da77399ef21c61b19ad",
       "tooltips": "6234df914fe7bbbde9b44495"
     },
     "scene/bars-time-single": {
-      "scene": "1a9f010d5af54044d180760c",
-      "svg": "c3123f44386a285de9464a80",
-      "canvas": "8dfa3e16c4b862681155a8d0",
+      "scene": "b759f60158bfc57b1fc98f8f",
+      "svg": "61415c1d500147b020f7914d",
+      "canvas": "73a38e205922e4a534c613e9",
       "hits": "578d79070094591c87f19f91",
       "tooltips": "79a46a0bd3efcb1e595720a2"
     },
     "scene/bars-grouped-dashboard": {
-      "scene": "f08eaeb72f97912d02ae039c",
+      "scene": "4b146f8aa2fe8b5fab149ddc",
       "svg": "cbf1c73c52d0eb4ec48832fe",
       "canvas": "66b5e953f0739268cb6402f6",
       "hits": "b929ea458222b11d3566db7e",
       "tooltips": "ab446828a014cfea14bb8929"
     },
     "scene/histogram-fade": {
-      "scene": "192ba6a8366038c8113d448a",
-      "svg": "d0f25997cde05c2553546cad",
-      "canvas": "5b702c6d758c12f30693a611",
+      "scene": "052f7bbecbbb2608ccd102ff",
+      "svg": "abfe89fbbdb216f64291384d",
+      "canvas": "11b1bba9155b21d6e5ba19bc",
       "hits": "668d1e22cf3bd9a91aa1713c",
       "tooltips": "7f658c9fc308a51146c0d41d"
     },
     "scene/pie-empty": {
-      "scene": "f8ce8dbf981da30d08de80e9",
+      "scene": "741da3d479838c757b1531e3",
       "svg": "27407971fd4a53a532327d10",
       "canvas": "542850ea9689125a1ced2092",
       "hits": "a2acef9a347a7010d6440f14",
       "tooltips": "1f6fe5e9305f8928f82ee079"
     },
     "scene/pie-zero-total": {
-      "scene": "f6713a94765e0dc4e07ad0ec",
-      "svg": "5b81d9e4b6a5d8f8860fbc23",
-      "canvas": "5be911dbd5973d5eb62b3d1b",
+      "scene": "5e02f106a9db8156a828e254",
+      "svg": "eb00af34d4ff543eb1e55800",
+      "canvas": "db48298a8bcc55746425574a",
       "hits": "7e6fc625e4f27dba694c72be",
       "tooltips": "1f6fe5e9305f8928f82ee079"
     },
     "scene/pie-partial": {
-      "scene": "db9c085b7c3f416c93efb491",
-      "svg": "192809932cd263c11129e1a1",
-      "canvas": "9d7a7093c9b763fd4cbd3631",
+      "scene": "8750c19cacc3aa59625cc4c7",
+      "svg": "1789e54854c8abc50b44e9f9",
+      "canvas": "d791a4a3dd9bef5be65d9924",
       "hits": "c6904966e233e90a0dcb93c1",
       "tooltips": "f8faed6a94ea7dc4b7f20995"
     },
     "scene/pie-dashboard": {
-      "scene": "3ba2370ac4e7ac07ed526897",
-      "svg": "2292ce44fb80fb64954332c9",
-      "canvas": "0ba657ab55d695b767f0edb8",
+      "scene": "70751628dc26fe370d2dedcd",
+      "svg": "c89094ca0a7c86fde677bf11",
+      "canvas": "b3ac1128865818dc34948abb",
       "hits": "870d037ef861c7d293e1f28a",
       "tooltips": "ae7a491eaed73de864d15f81"
     },
     "scene/pie-radii": {
-      "scene": "0b84fda1b680fd982cf97eda",
-      "svg": "9ad2494e630105b0e5f6341b",
-      "canvas": "449e2e4477f1cbe784066cac",
+      "scene": "5fc2263034f6df932a98b0a6",
+      "svg": "7e1a22ca9b0135248a585ed2",
+      "canvas": "f536c3eb1a92c2ca9d0d3962",
       "hits": "53e6690282c06b8b344a38b9",
       "tooltips": "a5a3da182cfd949843e41491"
     },
     "scene/pie-solid": {
-      "scene": "eb93895eb0b40f82cd93ebe6",
+      "scene": "88145563b81fcb94c3a6afe0",
       "svg": "2f71ae33f07a84e45d005e84",
       "canvas": "eabb41506169cbed512e6b8a",
       "hits": "5ee81c8afb5bafd9a784369b",
       "tooltips": "e140d72214fd620ae770800c"
     },
     "scene/radar-basic": {
-      "scene": "5a330d4e187759f322869b36",
-      "svg": "01a9560f710416c1fa5b9951",
-      "canvas": "02421af8240e1f69970f969c",
+      "scene": "5d2050b239931484785ae3e2",
+      "svg": "11785650bcd3845967935154",
+      "canvas": "3fd37e70324cf8168cba383a",
       "hits": "f8d9ffdccaf0cf1459cdd8fc",
       "tooltips": "58e1415baa15c42447cd58d5"
     },
     "scene/radar-multi": {
-      "scene": "985ba31b0ef89bfb3ed903cc",
-      "svg": "985d17c71e1702a63e2f903e",
-      "canvas": "3fc3fc2a05006ef7f977b1d4",
+      "scene": "a79f3e819381b75620badf4f",
+      "svg": "744be869b5d174c55b92f523",
+      "canvas": "ca8e71bb4acf3946fee70f20",
       "hits": "d9c07f87fff42908108237a3",
       "tooltips": "aaed6249972f41a5a9039d8a"
     },
     "scene/radar-dashboard": {
-      "scene": "c536a1d298231b6b2d8f64b3",
+      "scene": "1744d8443bbb7c65a41a0cd3",
       "svg": "552ec3bf25e5a5812ec09245",
       "canvas": "8f7ecb12811a76a4cec36345",
       "hits": "b8e66995eb9dc1bac44404f5",
       "tooltips": "d8bc856d50fb8d4657257d68"
     },
     "scene/radar-empty": {
-      "scene": "751d43d55cea33226f1e667f",
-      "svg": "a0cec0ac246cd0dde279be31",
-      "canvas": "a1041d058ff4a51296f5f593",
+      "scene": "407c1b42519dcb92080ab0f2",
+      "svg": "ada2d195ca78d5f6c6557647",
+      "canvas": "9e3db9629add41f95c96b764",
       "hits": "afad809186ff09b729284159",
       "tooltips": "f1adb4ad7e3730a590227ce4"
     },
     "scene/null-gap": {
-      "scene": "c0a5ef6243875119ad66f103",
-      "svg": "b5a2013ae7072ddff337133e",
-      "canvas": "0fb35205f970242b85b1465a",
+      "scene": "52347efb6a883b8479663dc6",
+      "svg": "82a094d7f05915f4268b5c43",
+      "canvas": "88b96ca6f0431f36de50ede7",
       "hits": "7023a1600eb90349bec3d621",
       "tooltips": "c651d59dd209b0992fc84d9f"
     },
     "scene/large-metrics": {
-      "scene": "2ed99cd3d6c2d7a416d79dee",
-      "svg": "34b42b16c1528d2540dc80cc",
-      "canvas": "ad29964803eedb29d19d6ac3",
+      "scene": "fa30d74a76efb931e44d03e1",
+      "svg": "cb60bccdddb810dedc4a016d",
+      "canvas": "f9857673aa03913100c67205",
       "hits": "39c0e05fa714072713ecb9e9",
       "tooltips": "7da9ac34537c01b880953180"
     },
     "scene/small-metrics": {
-      "scene": "833a67bc838c834270701a2e",
-      "svg": "bf4ea8bb6c883e8bbd3b7085",
-      "canvas": "9d8ed3b0741951e9e02dbeb5",
+      "scene": "4eeeaca2bde996b1baad370d",
+      "svg": "c0ec8534eb5e1bc7a4c05ca6",
+      "canvas": "f9eb5f8d91121d7046077ce8",
       "hits": "77f4b1975b49bc8bab07d0c6",
-      "tooltips": "9e85930cdca73be3daad28a6"
+      "tooltips": "fea32969aae107d9ef268352"
     },
     "scene/epoch-time": {
-      "scene": "a5b51c320afa57e149b806af",
-      "svg": "5691b998580be8a3b9ef01bc",
-      "canvas": "7f89fce7845ab5a82a86bd66",
+      "scene": "88c7dd86fd7f369dcb143c75",
+      "svg": "af03c7a6a37d85f1d56bbcac",
+      "canvas": "a67a17baf2b15edf3a05da64",
       "hits": "fc8a24fcb35777083435ade9",
       "tooltips": "7b0a2bf722bc1b35d2b8ffd6"
     },
     "scene/inferred-dates": {
-      "scene": "c6194e90ee6339f1a521b2e8",
-      "svg": "0abbdfef6a727fb6450a4f4a",
-      "canvas": "7f89fce7845ab5a82a86bd66",
+      "scene": "ffd2d6d2cacc15820e0aff18",
+      "svg": "9c5f81837baad808ab470a66",
+      "canvas": "a67a17baf2b15edf3a05da64",
       "hits": "fc8a24fcb35777083435ade9",
       "tooltips": "8740ac09fe5256e2f4be7d9c"
     },
     "scene/long-time": {
-      "scene": "1f648b2dd2c85c8623a5ad7c",
-      "svg": "49235838b858a299140e343c",
-      "canvas": "390bb037af9932b173e85fd1",
+      "scene": "1ce91da59cb4cd672ed8db54",
+      "svg": "e32f35ee5b6b361f8799299e",
+      "canvas": "912048104aa042d627cb3161",
       "hits": "08dcd2407c863f2ea6c8a476",
       "tooltips": "bb26a8b30e5c13baa46d54f9"
     },
     "scene/singleton-log": {
-      "scene": "7d27152fdc14697b06039c50",
-      "svg": "331900a2213de5032604c760",
-      "canvas": "e7a5082ec5a2643b3a209512",
+      "scene": "3a3c658fe187c2dfc0feff09",
+      "svg": "2b1bcd6a4e2b83d191864b1b",
+      "canvas": "ec5359762d6378f5af2f26fc",
       "hits": "76ec98fbf15e1c71771dde45",
       "tooltips": "419d8d63bc404ba68c98a9b4"
     },
     "scene/log-y": {
-      "scene": "988b3c15eac9b347f8397b57",
-      "svg": "d82a0a3116f5a2de3365187c",
-      "canvas": "9c33ee29d06c9fcb16f1019a",
-      "hits": "bec864d8521cdb4469c6e576",
-      "tooltips": "1f7469ed9a08d9b1d197ccc7"
+      "scene": "14e783ccb67f1010506d06a0",
+      "svg": "842f6dfa190a0eb4a359e48e",
+      "canvas": "fbcecd08aadcd7a72cc5f0b2",
+      "hits": "834b46606d1724f064ef9eaf",
+      "tooltips": "6b3a2370af9c644845b409d2"
     },
     "scene/log-x-points": {
       "thrown": "706c4a489be922a6cd06edd4"
     },
     "scene/log-x-flat": {
-      "scene": "7bab2dfae8ff4f4d5e2d105f",
-      "svg": "6ed97452fcda2adb2e4220f8",
-      "canvas": "ac7a4af8f90e3d9eeefa0340",
+      "scene": "a6a94dde6fb7462b27df63c3",
+      "svg": "dd48290b83b0ee0c78583cb2",
+      "canvas": "c7c41b27de7475ee9cd69033",
       "hits": "797e813d5fc74a4657d938e8",
       "tooltips": "2cf59d5268f1110f5d06b2af"
     },
     "scene/theme-light": {
-      "scene": "000725543051bcd0a4d1ee9e",
-      "svg": "25386ad1448322a926388599",
-      "canvas": "2dce6558c06468c4d2dbba0f",
+      "scene": "a8fd7aab9e2c3a18f8a941e8",
+      "svg": "0e0dbd4bd7912d65a60ca608",
+      "canvas": "96f529f93333e9dd032201d3",
       "hits": "edba3f00e8c5e7a843b4fea0",
-      "tooltips": "a1af73cf797748fe5e855820"
+      "tooltips": "93076dd370105de2384accb3"
     },
     "scene/theme-custom": {
-      "scene": "25d19d019371ead40fc7f0dd",
-      "svg": "59f8cc1684babe3055cc508c",
-      "canvas": "91b6d79d74ecbdfc8f351479",
+      "scene": "6648fb4cbaca6e4c01b68c5e",
+      "svg": "43068cd4348cb4444044d9c1",
+      "canvas": "99998b3b8943f5fe9a89c5b4",
       "hits": "0735a6e40f0e3dc0a2fbe7a2",
       "tooltips": "d76396fd99994dbbced78234"
     },
     "scene/theme-area-hsla": {
-      "scene": "2f902927d98805b6b2c94691",
-      "svg": "8da8abe2422a8c28c6e001c7",
-      "canvas": "ecac88a71a3a5d21c0d782fb",
+      "scene": "b67f7da2119884a964590035",
+      "svg": "81ba2953acde47d57dd2b40b",
+      "canvas": "56a33ae6031e931a8a95a4c4",
       "hits": "7dcb966eda66ab74c3091a50",
       "tooltips": "40da59588b0c5bcd8843b267"
     },
     "scene/theme-orange-bar": {
-      "scene": "25915bb6f94086dda15b8f1b",
-      "svg": "74a509e3f67a8e71bde392d8",
-      "canvas": "efc2f66732e911fd8508a54d",
+      "scene": "1a001840c36b64eed33f6aae",
+      "svg": "bf3af9045010b8e5b1a0f8a1",
+      "canvas": "3c18bde7eea15117e26a943e",
       "hits": "1068bef859d66d6773394c0f",
       "tooltips": "fa88cc7e8e92ab35e8646630"
     },
     "scene/dashboard-revenue": {
-      "scene": "a1e13f01466806d11383af02",
-      "svg": "2ed4aaa5f3d5a97e5bc21a07",
+      "scene": "ed419ccaa718c11b66252811",
+      "svg": "5a00f21469ceb85a954ae3f7",
       "canvas": "7bd1432025685b63faf8a81e",
       "hits": "ed91cc931f80deb66d75571b",
       "tooltips": "dee6342fd9dbf15249802c62"
     },
     "scene/dashboard-scatter": {
-      "scene": "78cf09db645b69d238f5eea2",
-      "svg": "cd252982db55e0de35512788",
-      "canvas": "df4ecdddda6a8922ebc59ee6",
-      "hits": "39929479ba8cc5c593fb021d",
+      "scene": "ddafbc9be425d1e95819af9d",
+      "svg": "6cafecf31651e80a3a49c464",
+      "canvas": "98135284791a6a3bd5a8e936",
+      "hits": "eacef3a7e2e81b90a5b956d9",
       "tooltips": "24590802676a306a2edb1897"
     },
     "scene/toggles-off": {
-      "scene": "96d36b0239b179310de03a6f",
+      "scene": "eef973fe1a3e6c0e58aae8bd",
       "svg": "39c5845c0e304f7292345237",
       "canvas": "71afffb9636e5bca79769de3",
       "hits": "0f6d4ae46792dd8e4ed7bd8e",
       "tooltips": "068ad522bb8883b81bbaf323"
     },
     "scene/margins": {
-      "scene": "8a74343bae69f9865eb0f14f",
-      "svg": "38c35adf507a72841fe48df9",
-      "canvas": "e1f1e1bd7bbd8ad1dbb518e3",
+      "scene": "143578f449980bccc3693693",
+      "svg": "1a3444b423916361e4d4f660",
+      "canvas": "1cd122b52fc01e0db907039d",
       "hits": "8e5a43984c77e7cbe4cee5a8",
       "tooltips": "23b2f47a342ae4f5084d4724"
     },
     "scene/empty": {
-      "scene": "922de269d4be22457b6712ac",
+      "scene": "aea558aaaff97d7be87a76b7",
       "svg": "7394ba2740784c95f7ee0424",
       "canvas": "340ea2f5dcd91185c0846261",
       "hits": "3b9d1e954248c40e1584a35f",
       "tooltips": "4f53cda18c2baa0c0354bb5f"
     },
     "scene/spec-size": {
-      "scene": "8977d128721e43f6e0bf5e9d",
-      "svg": "cbfd10277b59082c3bb549f3",
-      "canvas": "6b267888f50b8952dcead723",
+      "scene": "7a116499f3ad7717b3205f16",
+      "svg": "ae52871d0e365304bf84ba41",
+      "canvas": "9efb57586b7b21cf6feca8eb",
       "hits": "6c146ee7e22c8efa3560994f",
       "tooltips": "068ad522bb8883b81bbaf323"
     },
     "scene/y-nice-flags": {
-      "scene": "ba50a9527b34eda8c995a056",
-      "svg": "6b9eae579e10fa0244989dd0",
-      "canvas": "6f5e2fc600d64397e8e19f80",
+      "scene": "e695e4d1691a30e13f5e4a3f",
+      "svg": "310bb21ad7c1fc1116eb2d62",
+      "canvas": "abf9a2d538de225c5d459e5b",
       "hits": "57a3e8b5110ff1edaeb2ae16",
       "tooltips": "1dadb4824028e81a8c4bb796"
     },
     "scene/x-nice": {
-      "scene": "e01e42413f57f34876cbc6a3",
-      "svg": "02a1086980297ba23d17051f",
-      "canvas": "14e82a82dc5657c2dfccfd91",
+      "scene": "15b09529101cfb220f4977da",
+      "svg": "dc661d0a8616d9fb08e9ee15",
+      "canvas": "cb706535e3346a25cdf61e19",
       "hits": "680721b4face64717165048b",
       "tooltips": "7d3cd3da788e8b6b69d970bd"
     },
     "scene/single-point-line": {
-      "scene": "c1f7e9a9b83bdda1b6c5eba9",
-      "svg": "978bc300d9b8ab05e8fce615",
-      "canvas": "7c1ce626b49f0626c227a8c5",
+      "scene": "9215262d134af08dbc530219",
+      "svg": "b09644769fa881d341ce2f36",
+      "canvas": "e43457624eb715140bbeb713",
       "hits": "8b38bde2d6798bf853c13cc1",
       "tooltips": "1b4d1ba168631f0885c268da"
     },
     "scene/flat-series": {
-      "scene": "e9c5e68b5ada326419134bc3",
-      "svg": "eb5a2e989ee84eb70778ae88",
-      "canvas": "19227e3a8a9269775818180e",
+      "scene": "6599311a9495f439da881db0",
+      "svg": "09d8b6da96e2bed1d35921fd",
+      "canvas": "f3681c7b9482487c906a9fa9",
       "hits": "0e105d1cb0c462b1ae7b51ed",
       "tooltips": "9994cac820bd4c192d6ffc59"
     },
     "scene/numeric-strings": {
-      "scene": "f2c4d6ea3700c9ab2c2ad79c",
-      "svg": "5de4d396181fcfd51ab385a6",
-      "canvas": "a2932e73b3593109cb894e80",
+      "scene": "961c1bbcf8436faa69427b05",
+      "svg": "2c402c17676bb8d7ba700284",
+      "canvas": "cbfdda420785f58f3b89a23c",
       "hits": "eec42eac3c4df5e952a6e877",
       "tooltips": "89723e2860cd21e8768dca12"
     },
     "scene/accessor-fns": {
-      "scene": "71f4d7fb1a434aa059df761a",
-      "svg": "97d723a2e43f7c200ac62fbc",
-      "canvas": "a88410cb5f8b96c8473f28fd",
+      "scene": "e232b68cb3d8cfb7a42002aa",
+      "svg": "2006b6681741960c747f089b",
+      "canvas": "a1bfa29f9a6141fa7221c2ea",
       "hits": "0c66d43611d1e3fa0d1b550a",
       "tooltips": "b1468a6d8a36282e47c8ddf0"
     },
     "scene/palette-cycle": {
-      "scene": "5da7ba70a46edf877260c746",
-      "svg": "eecb691f89b5cc2a50c4b7e8",
-      "canvas": "7852fe00db1b198d8fae081e",
+      "scene": "d0cfa01908fa068575fd012e",
+      "svg": "8cd46f2bf65db026a9b09359",
+      "canvas": "8e6bb16d50e76cdc29266a1d",
       "hits": "60498d249cd88633666c7d7e",
       "tooltips": "56199abad42d0f8c6f22de8d"
     },
     "scene/mixed-legend-dupes": {
-      "scene": "5b9294b20930a222fcb27399",
-      "svg": "f20c8867ec6cce2871945af6",
-      "canvas": "a5d5a93f3b9c3b331cb204d7",
+      "scene": "a3caaa9e918663ad352ea0f1",
+      "svg": "23d2e6f06b583c46cfe183ae",
+      "canvas": "c9b34253d16f8f15a2b66bf6",
       "hits": "93be445e41b05bc761a0fa78",
       "tooltips": "2521f9f05a6fa9b74ae85b01"
     },
     "scene/function-spec": {
-      "scene": "ee13b3ffc05aef7fb92d4dd4",
-      "svg": "12ecdc8ec463bcbdb123233f",
-      "canvas": "9c495df96a40a3439fb7c89a",
+      "scene": "b1b06cfaa72ec3c6047bdec3",
+      "svg": "80ab74852d77d1981bede624",
+      "canvas": "26ea66f9f61b43e8a284e8c8",
       "hits": "8d893b31ce77ae67cf8a7dd4",
       "tooltips": "869bfb6dcba183df72b3541a"
     },
     "scene/hand-all-nodes": {
-      "scene": "cf7dcb606460cee18f2e3bd6",
-      "svg": "ca00cdec9781fb29957bcc38",
-      "canvas": "1a8dc93029f5ad50128c0cfa",
+      "scene": "b0b6005ec0f92ffa41f55dcd",
+      "svg": "521caeac570f2c7a81956768",
+      "canvas": "de3f1a35d635cf638842a03b",
       "hits": "647e268f2d9a1edb87beb202",
       "tooltips": "3ef767c4f0df6fac510ae9ba"
     },
     "scene/hand-right-legend": {
-      "scene": "29f5046a8462153edfa52d03",
-      "svg": "1ba1fbe47d799d7e6ab67638",
-      "canvas": "2e74feb3e46a3fe9bf2f89d0",
+      "scene": "4eb5a1698e3cc3c1bb0c653e",
+      "svg": "6970e4c10d8de73212055ccd",
+      "canvas": "78ea55ae6496d87e3586817c",
       "hits": "f671f34a64ec7860e4416539",
       "tooltips": "4f53cda18c2baa0c0354bb5f"
     },
     "scene/hand-colorbar-positive": {
-      "scene": "bc9fb3df75bee71ad19982a6",
+      "scene": "7745f8ed9fe0378b58eb55da",
       "svg": "881de9a8a432f071f04babdd",
       "canvas": "6acb0c137b5770b05abb5eec",
       "hits": "f671f34a64ec7860e4416539",
       "tooltips": "4f53cda18c2baa0c0354bb5f"
     },
     "scene/hand-polar-chrome": {
-      "scene": "a683160afab1ba8cbcf09e32",
+      "scene": "d8dbb1f60fcca29439dff56b",
       "svg": "61b6a8f55e4085d870f30a45",
       "canvas": "76bdb0b724426b9ddb999c89",
       "hits": "f671f34a64ec7860e4416539",
       "tooltips": "4f53cda18c2baa0c0354bb5f"
     },
     "mount/time-svg": {
-      "dom": "5f5748eedeb2ca7ed1c6178a",
-      "events": "3cbb657bf4d686921f17314b"
+      "dom": "a9209c7130bda9735f06a7b7",
+      "events": "edfb315c9964dd291ed8d2d0"
     },
     "mount/time-chrome-svg": {
-      "dom": "8556107c0fea4e0edcb355cc",
-      "events": "921c136fcb9be930f1c8e23e"
+      "dom": "ddf4c24dfeee233f8cae3ff5",
+      "events": "8cca69d826cf759437f77428"
     },
     "mount/time-static-svg": {
-      "dom": "a0a00569ba73d9fda7b5910c",
-      "events": "2b11a1bbb07518e4dbd5550b"
+      "dom": "603ad0de43a0e7770014e431",
+      "events": "3825d892a450d4294fd1c27c"
     },
     "mount/basic-mixed-svg": {
-      "dom": "01e08dcff1e2657da9c0c4fa",
-      "events": "5862f14fda0d839a31fb22ca"
+      "dom": "68e92326a2a11040a398e8c8",
+      "events": "14a12580b7ef8de8e46f3843"
     },
     "mount/stacked-svg": {
-      "dom": "6ca9a6487c58fcb022c2631e",
+      "dom": "88f26398ff7afced4f3f3c8e",
       "events": "e09259b36b51ad6b87c4afe2"
     },
     "mount/area-points-svg": {
-      "dom": "3bf23dfecf266875aadb10ba",
-      "events": "e4378df4c28e873c6864c726"
+      "dom": "c4d2366ad4d5ec14f694b762",
+      "events": "763b3eef7a87f2002b796d0e"
     },
     "mount/plugin-lollipop-svg": {
-      "dom": "b23b5cef7145aae5a8ddcb98",
+      "dom": "c2b44c5106a28cf2e61caf5a",
       "events": "90242dae843e6f6563a945f0"
     },
     "mount/plugin-band-probe-svg": {
-      "dom": "77ba128e0b3bedb8463eb83e",
-      "events": "222ec1f38432084dd22313a3"
+      "dom": "8c22d87084d844c91aff951a",
+      "events": "79617dd145d89d077abe248b"
     },
     "mount/plugin-annotations-svg": {
-      "dom": "11306cc3f0bc9852cef5f1cb",
-      "events": "0ea27d82ad28d6fd76822bb6"
+      "dom": "f64af0fe0fd7e7444677ae62",
+      "events": "358eed2a1b7ee1764b656952"
     },
     "mount/dense-128-svg": {
-      "dom": "aadf1083491a24f67c31a6e1",
-      "events": "8dd6d6f0b648d3c9d234312d"
+      "dom": "910e3f0832236d558bd50e15",
+      "events": "e9f0308b8642fa6f986165d1"
     },
     "mount/hidden-series-svg": {
-      "dom": "cd616ad18d236f3bd38c03f5",
-      "events": "4f6a47f61bee6161a16311bc"
+      "dom": "7936849f009e380433346013",
+      "events": "aa2a0ed0fcff6a21c05db109"
     },
     "mount/curves-svg": {
-      "dom": "2dfa45d6b5874354da26d06c",
-      "events": "215a75912d0d26afb58e7935"
+      "dom": "e1254a0eff6aaf02e2776307",
+      "events": "6a419370f7008f497aa8ed30"
     },
     "mount/rule-x-svg": {
-      "dom": "1eaa01be81df1c3c9cb44b4c",
-      "events": "f18baf1ce8dfb898b9999739"
+      "dom": "f2ea41ea35e6525621f83c06",
+      "events": "b3dbef82f486c009d8567c78"
     },
     "mount/typed-categories-svg": {
-      "dom": "c5c260576bc84f5867c668a2",
-      "events": "4a0db0f5db25e8e1af053e0b"
+      "dom": "49c7e41fcb9e362f3c72272f",
+      "events": "c475b7f0e6238151679808fc"
     },
     "mount/heatmap-basic-svg": {
       "dom": "9a3f034c26a7fda34133d1d8",
@@ -962,112 +962,112 @@
       "events": "9d2db855099e319be1fcc908"
     },
     "mount/bars-negative-svg": {
-      "dom": "32b769e4e2e26cd75e7d99c4",
+      "dom": "d164f02f742f674492971bbe",
       "events": "332875725dc76cb8e1dffffd"
     },
     "mount/bars-numeric-svg": {
-      "dom": "9500a6c7a1b0270870a62b3d",
+      "dom": "ebc314de3882248cf55262ab",
       "events": "4b47055f9ec9594b0cb41347"
     },
     "mount/histogram-fade-svg": {
-      "dom": "34f607085ad50b951071690c",
-      "events": "65a5ca2e973c100156054113"
+      "dom": "c8795a140708f6cb615c64fd",
+      "events": "22ae21c23cd49b50045762e8"
     },
     "mount/pie-empty-svg": {
       "dom": "db8f541651fbcc34d6c67050",
       "events": "0aa845ecd20144eaa8ad405b"
     },
     "mount/pie-dashboard-svg": {
-      "dom": "86e23ded65ce3b8d6bb393ff",
+      "dom": "e78a3d07e054200f7ae2de2d",
       "events": "b401762454642256d15840a4"
     },
     "mount/radar-multi-svg": {
-      "dom": "67e00d738825f41da92cc7bc",
-      "events": "b994ccae61f97f8fda83f746"
+      "dom": "7696427d4664bca0b239c7cf",
+      "events": "e90ad8bc00633056856f2418"
     },
     "mount/radar-dashboard-svg": {
       "dom": "c6efbee7d0a1d3177ae5d271",
-      "events": "ee5de7881afc610457c49810"
+      "events": "be1832e64c025ef4a01bdece"
     },
     "mount/log-y-svg": {
-      "dom": "8914eb3e56377db10a61fb70",
-      "events": "09cf24baac03d0cfb107ead9"
+      "dom": "2329bcb7bef6f598aa898422",
+      "events": "e53854e7e8fda124d27cd2b3"
     },
     "mount/theme-light-svg": {
-      "dom": "2b5482007ac8329088d7e02f",
-      "events": "2bd52e2b345b0181f062aaca"
+      "dom": "e9f32d617668b838a0604d49",
+      "events": "644693e3307b5f336f3b46dd"
     },
     "mount/theme-custom-svg": {
-      "dom": "317479b7e68194b7d1ba2115",
-      "events": "bd0161f60bf17fc3343c5150"
+      "dom": "66463def9aa581a887418ee5",
+      "events": "2cb2c54ef5469a6194b1506c"
     },
     "mount/dashboard-scatter-svg": {
-      "dom": "1714ebe612e22c6495103453",
-      "events": "09c6246037af237d97947ec0"
+      "dom": "2f52bb9e6ae2b8e3e7bd1087",
+      "events": "12ae671c869af4258dae82e9"
     },
     "mount/toggles-off-svg": {
       "dom": "ac9c60149ee8952075f1363d",
-      "events": "592ace0a1fbf88650f0413ca"
+      "events": "968850d6a12893ab6cc4b4fd"
     },
     "mount/single-point-line-svg": {
-      "dom": "a1f61e1445cd1661f1aca794",
-      "events": "42a491355c770685c0310229"
+      "dom": "be9d97c40a898fc842bc732e",
+      "events": "97d14dadf0840039fce76031"
     },
     "mount/time-canvas": {
-      "dom": "145756e8f4e1cb762243c845",
-      "events": "3cbb657bf4d686921f17314b"
+      "dom": "6472f643204ede73c430c7d3",
+      "events": "edfb315c9964dd291ed8d2d0"
     },
     "mount/time-chrome-canvas": {
-      "dom": "3a032e99682c0d38619cf6cc",
-      "events": "921c136fcb9be930f1c8e23e"
+      "dom": "a5a35c7f8601f98c5eff8988",
+      "events": "8cca69d826cf759437f77428"
     },
     "mount/time-static-canvas": {
-      "dom": "5503be61447fb44facb87e57",
-      "events": "2b11a1bbb07518e4dbd5550b"
+      "dom": "0d30349496271c4124773193",
+      "events": "3825d892a450d4294fd1c27c"
     },
     "mount/basic-mixed-canvas": {
-      "dom": "88c1de16610932a74ad6e07e",
-      "events": "5ba69c79443cb92230dcd465"
+      "dom": "483dda7b0825f4019bce4728",
+      "events": "9e29b5959af62bf31433e3df"
     },
     "mount/stacked-canvas": {
-      "dom": "4c4a734c1ca79b12bef0b3a0",
+      "dom": "e492320ea3915e67ccd432ea",
       "events": "0ce65ff5b449042b5ea28dac"
     },
     "mount/area-points-canvas": {
-      "dom": "ab53515f31c08e2f8281b4ac",
-      "events": "66b7b0b1e79074145f7adeec"
+      "dom": "0cfd3c775d85169f4fc083c8",
+      "events": "c4b504fcd0bd889d8414cece"
     },
     "mount/plugin-lollipop-canvas": {
-      "dom": "7ae13f99429664b8b13ddb68",
+      "dom": "333b7c93316350f8de58a8cf",
       "events": "1ff7bf9c97c8b5551d92bc68"
     },
     "mount/plugin-band-probe-canvas": {
-      "dom": "78e7a65bda8873e3c5628507",
-      "events": "3ba2261d8b6679ca9c00ce16"
+      "dom": "f49516759b29432ce5a6b855",
+      "events": "6e0fab908cf0eda125782eac"
     },
     "mount/plugin-annotations-canvas": {
-      "dom": "0a3d42bb7e94102d536513b5",
-      "events": "a2320b068b9d11a2149599d9"
+      "dom": "4e0a44943683fa8971fc153b",
+      "events": "4df1a56b3aa6cfdfa8c68f68"
     },
     "mount/dense-128-canvas": {
-      "dom": "65592609bca33db5a9dbbc6c",
-      "events": "5bd68ea3cfdfb25f4be30bbb"
+      "dom": "0516cb1f54176e092479acf6",
+      "events": "146658f06e2c46196af79f2f"
     },
     "mount/hidden-series-canvas": {
-      "dom": "960d158e053834f3bc3f08df",
-      "events": "89b28ee21eccc14ab0d98283"
+      "dom": "4ec860ff13a62d4837e4e4d6",
+      "events": "5278b72d2d4dd956033ce427"
     },
     "mount/curves-canvas": {
-      "dom": "18a97d0fe83115cc86389878",
-      "events": "860b182878c12f35718bd655"
+      "dom": "cd8a7ee5e48c26b266763f89",
+      "events": "9888ad2b7ece07764a71f975"
     },
     "mount/rule-x-canvas": {
-      "dom": "c650d42424212cf9f0952645",
-      "events": "2815b8c4ad9da40fb9525ec1"
+      "dom": "0169d2ef1ad7671707e28916",
+      "events": "27fa21b87ea0acd1d897c13f"
     },
     "mount/typed-categories-canvas": {
-      "dom": "a1fa687cbc41a26f11732221",
-      "events": "112d43d20ac71b6d27ff5043"
+      "dom": "cb2548552c919b7c27dbcd7a",
+      "events": "be7a55332c94492618bbb617"
     },
     "mount/heatmap-basic-canvas": {
       "dom": "d8810dc91edaf9016382f841",
@@ -1078,59 +1078,59 @@
       "events": "9d2db855099e319be1fcc908"
     },
     "mount/bars-negative-canvas": {
-      "dom": "6698ffd7e9ddbf41f4db3d90",
+      "dom": "1f3f55d8858e1c3179eb449c",
       "events": "58c737b9ceecf2c00dde62e2"
     },
     "mount/bars-numeric-canvas": {
-      "dom": "7bcf399d4efa27a4eac0647c",
+      "dom": "e6697ca5e1174d1db4f41fe5",
       "events": "5c6b427b179fec8d9dc97b1a"
     },
     "mount/histogram-fade-canvas": {
-      "dom": "100321bcec2764e45cf7024e",
-      "events": "65a5ca2e973c100156054113"
+      "dom": "6e72653eba9a7453bcc9da79",
+      "events": "22ae21c23cd49b50045762e8"
     },
     "mount/pie-empty-canvas": {
       "dom": "335ae9d151a6f48f6f377be5",
       "events": "0aa845ecd20144eaa8ad405b"
     },
     "mount/pie-dashboard-canvas": {
-      "dom": "0e3f1da010295cf6efefd11e",
+      "dom": "71a21fce68ee01f8a27bd1be",
       "events": "b401762454642256d15840a4"
     },
     "mount/radar-multi-canvas": {
-      "dom": "79008499646e8cf0395722fb",
-      "events": "b994ccae61f97f8fda83f746"
+      "dom": "e188f181f252464dc00ddc3c",
+      "events": "e90ad8bc00633056856f2418"
     },
     "mount/radar-dashboard-canvas": {
       "dom": "33179450aef3523dcc37cf67",
-      "events": "ee5de7881afc610457c49810"
+      "events": "be1832e64c025ef4a01bdece"
     },
     "mount/log-y-canvas": {
-      "dom": "dc6d304c6d8c32e1383522dd",
-      "events": "a992cc29278a0beb9589ddb2"
+      "dom": "72ab9a53bf1711a05e17908d",
+      "events": "7f9c153f69b950c085615cee"
     },
     "mount/theme-light-canvas": {
-      "dom": "d0afb5ff4c721a1cbbbc28f5",
-      "events": "43d47915af3b766495a326b0"
+      "dom": "094d19ae09fdd92cf6237dd4",
+      "events": "8ab3c3881b3b6708c5e85617"
     },
     "mount/theme-custom-canvas": {
-      "dom": "8206dccd5f565bb4d37dc076",
-      "events": "c29f6dd99bcb53cbd89a06ea"
+      "dom": "3735bb0c167dc71756e52283",
+      "events": "ad0a31acafacee5018d4df5c"
     },
     "mount/dashboard-scatter-canvas": {
-      "dom": "bfdc164e063d00a7c97cd3c2",
-      "events": "09c6246037af237d97947ec0"
+      "dom": "d1ce0e5b9b3427b57d1ef337",
+      "events": "12ae671c869af4258dae82e9"
     },
     "mount/toggles-off-canvas": {
       "dom": "9b868c9d09966e936cf6e1df",
-      "events": "592ace0a1fbf88650f0413ca"
+      "events": "968850d6a12893ab6cc4b4fd"
     },
     "mount/single-point-line-canvas": {
-      "dom": "df7c1a3bda0fd39751338d99",
-      "events": "dc214da03c8c98dffa536bbf"
+      "dom": "cab6d2df99295072ba058dd9",
+      "events": "85fc54fa0d5e17743a42343b"
     },
     "mount/auto-ids": {
-      "dom": "16f77ac09a11c84fc0e02b4f",
+      "dom": "aded4bbe3d1719aef7011550",
       "events": "4f53cda18c2baa0c0354bb5f"
     }
   }

@@ -1,11 +1,13 @@
 // compileChart(): the orchestration pipeline from a ChartDefinition to a
 // renderer-neutral CompiledChart. Each stage lives in its own module:
 //
-//   validate -> legend (hidden series) -> domain (viewport window)
-//   -> plugin domains -> axes (margins, plot) -> domain/heatmap (scales)
-//   -> axes (ticks) -> cartesian/polar/heatmap/plugin marks -> legend rows
+//   validate -> legend (series ids, hidden series) -> domain (viewport window)
+//   -> plugin domains -> axes + legend band (margins, plot) -> domain/heatmap
+//   (scales) -> axes (ticks) -> cartesian/polar/heatmap/plugin marks
+//   -> legend rows and layout
 
 import type { AnyScale } from "../scales";
+import type { SceneHoverSample } from "../sceneTypes";
 import { resolveChartTheme, type DashboardTheme } from "../theme";
 import { buildTicks, plotArea, resolveMargin } from "./axes";
 import { compileBar, compileLineArea, compilePoint, compileRuleX, compileRuleY, createBarState, planBars } from "./cartesian";
@@ -23,18 +25,25 @@ import { ChartCompileError } from "./errors";
 import { axisFormatters } from "./format";
 import { compileHeatmap, heatmapLayout } from "./heatmap";
 import {
-  filterHiddenSeries,
-  finalizeLegend,
-  markSeriesName,
-  pushSeriesLegend,
+  growTopMargin,
+  layoutLegend,
+  legendEntries,
+  markSeries,
+  mergeLegendRows,
+  planTopLegend,
   resolveLegendPlacement,
-  seriesColor,
+  resolveSeries,
+  seriesLegendRow,
+  stampLegendRow,
+  type LegendRowDraft,
+  type SeriesInfo,
 } from "./legend";
 import { isBuiltinKind, isBuiltinMark, isPluginMark, type CartesianChartMark } from "./marks";
+import type { MarkCompileContext } from "./context";
 import { compilePluginMark, resolvePluginDomains } from "./plugin";
-import { compilePie, compileRadar, createRadarState } from "./polar";
+import { compilePie, compileRadar, createRadarState, pieLegendRows } from "./polar";
 import { isRecord, isRuntimeArray } from "./shared";
-import type { ChartDefinition, CompiledChart } from "./types";
+import type { ChartDefinition, CompiledChart, HoverSample } from "./types";
 import { validateChartSpec } from "./validate";
 
 export function compileChart(definition: ChartDefinition, size: { width: number; height: number }): CompiledChart {
@@ -57,23 +66,38 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     throw new ChartCompileError("E_CHART_SPEC", "viewport is supported on Cartesian charts only.");
   }
   const sourceRows = inputSpec.marks.reduce((total, mark) => total + mark.data.length, 0);
-  const spec = windowChartSpec(inputSpec, filterHiddenSeries(inputSpec));
-  const visibleRows = spec.marks.reduce((total, mark) => total + mark.data.length, 0);
   // Every compiled scene owns its theme. Exported presets are immutable
   // inputs, never shared mutable runtime state.
-  const theme: DashboardTheme = { ...resolveChartTheme(spec.theme) };
-  const polar = spec.marks.some((m) => m.kind === "pie" || m.kind === "radar");
+  const theme: DashboardTheme = { ...resolveChartTheme(inputSpec.theme) };
+  // Series identity (ids, names, palette colours) comes from the input marks,
+  // so hiding a series never renames, recolours, or re-keys another one.
+  const seriesTable = resolveSeries(inputSpec, theme);
+  const visibleSeries = seriesTable.series.filter((series) => !series.hidden);
+  const spec = windowChartSpec(
+    inputSpec,
+    visibleSeries.length === inputSpec.marks.length ? inputSpec.marks : visibleSeries.map((series) => series.mark),
+  );
+  const visibleRows = spec.marks.reduce((total, mark) => total + mark.data.length, 0);
+  // The chart family follows the input marks as well: hiding every radar or
+  // pie series leaves an empty polar chart, not a Cartesian one.
+  const polar = inputSpec.marks.some((m) => m.kind === "pie" || m.kind === "radar");
   const heatmap = spec.marks.some((m) => m.kind === "heatmap");
-  const isPie = spec.marks.some((m) => m.kind === "pie");
-  const isRadar = spec.marks.some((m) => m.kind === "radar");
+  const isPie = inputSpec.marks.some((m) => m.kind === "pie");
   const hideLegend = spec.legend === false;
-  const pieHasLegendRows = isPie && spec.marks.some((mark) => mark.kind === "pie" && mark.data.length > 0);
+  const pieHasLegendRows = isPie && inputSpec.marks.some((mark) => mark.kind === "pie" && mark.data.length > 0);
   const hasBar = spec.marks.some((m) => m.kind === "bar");
   const hasArea = spec.marks.some((m) => m.kind === "area");
   const bars = planBars(spec.marks);
   const pluginDomains = resolvePluginDomains(spec.marks);
+  const legendPlacement = resolveLegendPlacement(hideLegend, isPie);
 
-  const margin = resolveMargin(spec, { polar, isPie, heatmap, hideLegend, pieHasLegendRows, isHist: bars.isHist });
+  const baseMargin = resolveMargin(spec, { polar, isPie, heatmap, hideLegend, pieHasLegendRows, isHist: bars.isHist });
+  // A wrapping top legend grows the top margin one row at a time.
+  const legendBand = planTopLegend(
+    legendPlacement === "top" ? previewLegendRows(seriesTable.series) : [],
+    spec, width, height, baseMargin, theme.font,
+  );
+  const margin = growTopMargin(baseMargin, legendBand, spec);
   let plot = plotArea(width, height, margin);
 
   const cartesianMarks = spec.marks.filter((mark): mark is CartesianChartMark => (
@@ -103,33 +127,56 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
   const ctx = createMarkContext({ spec, width, height, plot, theme, xScale, yScale, xType, ...formatters });
   const barState = createBarState(ctx, bars);
   const radarState = createRadarState(spec.marks);
-  let colorI = 0;
+  let visibleIndex = 0;
 
-  for (const m of spec.marks) {
-    const color = seriesColor(m, colorI++, theme);
-    const name = markSeriesName(m);
-    if (isPluginMark(m)) {
-      compilePluginMark(ctx, m, name, color);
+  for (const series of seriesTable.series) {
+    if (series.hidden) {
+      // Hidden series keep their legend rows so a toggle can bring them back.
+      if (series.mark.kind === "pie") {
+        for (const row of pieLegendRows(ctx, series, seriesTable.isHidden)) ctx.legend.push(row);
+      } else {
+        const row = seriesLegendRow(series);
+        if (row) ctx.legend.push(row);
+      }
       continue;
     }
-    pushSeriesLegend(ctx, m, name, color);
-    if (m.kind === "line" || m.kind === "area") compileLineArea(ctx, m, name, color);
-    else if (m.kind === "point") compilePoint(ctx, m, name);
-    else if (m.kind === "ruleY") compileRuleY(ctx, m, name, color);
-    else if (m.kind === "ruleX") compileRuleX(ctx, m, name, color);
-    else if (m.kind === "bar") compileBar(ctx, m, name, color, barState);
+    const m = spec.marks[visibleIndex++]!;
+    const ms = markSeries(series, m.data);
+    if (isPluginMark(m)) {
+      const legendStart = ctx.legend.length;
+      const sampleStart = ctx.samples.length;
+      compilePluginMark(ctx, m, ms.name, ms.color);
+      for (let k = legendStart; k < ctx.legend.length; k++) ctx.legend[k] = stampLegendRow(ctx.legend[k]!, ms);
+      for (let k = sampleStart; k < ctx.samples.length; k++) {
+        ctx.samples[k] = pluginHoverSample(ctx, ctx.samples[k]!, ms, k - sampleStart);
+      }
+      continue;
+    }
+    const row = seriesLegendRow(ms);
+    if (row) ctx.legend.push(row);
+    if (m.kind === "line" || m.kind === "area") compileLineArea(ctx, m, ms);
+    else if (m.kind === "point") compilePoint(ctx, m, ms);
+    else if (m.kind === "ruleY") compileRuleY(ctx, m, ms);
+    else if (m.kind === "ruleX") compileRuleX(ctx, m, ms);
+    else if (m.kind === "bar") compileBar(ctx, m, ms, barState);
     else if (m.kind === "heatmap") compileHeatmap(ctx, m);
-    else if (m.kind === "pie") compilePie(ctx, m, name);
-    else if (m.kind === "radar") compileRadar(ctx, m, name, color, radarState);
+    else if (m.kind === "pie") compilePie(ctx, m, ms, seriesTable.isHidden);
+    else if (m.kind === "radar") compileRadar(ctx, m, ms, radarState);
   }
 
   const { nodes, samples } = ctx;
+  const legendRows = hideLegend ? [] : mergeLegendRows(ctx.legend.map((item) => item as LegendRowDraft));
   return {
     width, height, margin, plot,
     xScale, yScale, xTicks, yTicks,
     grid: heatmap ? spec.grid === true : spec.grid !== false,
-    legend: finalizeLegend(ctx.legend, hideLegend),
-    legendPlacement: resolveLegendPlacement(hideLegend, isPie, isRadar),
+    legend: legendEntries(legendRows),
+    legendPlacement,
+    legendLayout: layoutLegend(legendRows, {
+      placement: legendPlacement, width, height, plot, margin, font: theme.font, maxLines: legendBand.maxLines,
+    }),
+    formatters: { x: formatters.formatX, y: formatters.formatY },
+    hoverSamples: samples as SceneHoverSample[],
     nodes,
     tooltip: spec.tooltip !== false,
     ariaLabel: spec.ariaLabel?.trim() || "Chart",
@@ -148,5 +195,28 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       hoverSamples: samples.length,
       decimatedPoints: ctx.decimatedPoints,
     },
+  };
+}
+
+/** Rows the top legend will show, known before any mark compiles (plugins count as one row). */
+function previewLegendRows(series: readonly SeriesInfo[]): LegendRowDraft[] {
+  const rows: LegendRowDraft[] = [];
+  for (const entry of series) {
+    const row = seriesLegendRow(entry);
+    if (row) rows.push(row);
+  }
+  return mergeLegendRows(rows);
+}
+
+/** Structured fields for a plugin's hover sample, recovered from its pixel position. */
+function pluginHoverSample(ctx: MarkCompileContext, sample: HoverSample, s: SeriesInfo, index: number): SceneHoverSample {
+  return {
+    ...sample,
+    seriesId: s.id,
+    markIndex: s.markIndex,
+    index,
+    datum: undefined,
+    xValue: ctx.xScale.kind === "linear" ? ctx.xScale.invert(sample.x) : undefined,
+    yValue: ctx.yScale.kind === "linear" ? ctx.yScale.invert(sample.y) : null,
   };
 }

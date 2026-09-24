@@ -69,14 +69,17 @@ registry created there is standalone; pass definitions to a widget through
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Line, area, bar, point/scatter | **Yes** | Cartesian marks infer scales when omitted. An explicit X scale object requires `type`. |
+| Line, area, bar, point/scatter | **Yes** | Cartesian marks infer scales when omitted. An explicit X scale object requires `type`. Points paint in the series colour at one radius (`fill`/`r` override). A zero bar paints nothing yet stays hoverable; `minBarHeight` opts into a stub for tiny values. `bar({ fade })` fades toward the theme background. |
+| Ranged area (`area({ y0 })`) | **Yes** | Both band edges follow the mark's `curve`, so the fill meets its strokes; `stroke0` strokes the lower edge. |
+| Series identity | **Yes** | Each mark has a stable id: `id`, else `mark-<index>`. Default names that collide are numbered (`value`, `value (2)`); marks sharing an explicit `name` share one legend row. Duplicate ids throw `E_MARK_OPTION`. |
+| Axis formatters | **Yes** | `scales.*.tickFormat` formats ticks, tooltips, last-value chips, bar chips and rule labels; `CompiledChart.formatters` and `hoverSamples` (raw `xValue`/`yValue`, `datum`, source `index`, `seriesId`) let hover chips format the datum value. |
 | Stacked and grouped bars | **Yes** | `stackId` opts into stacking; positive and negative totals diverge around zero and equivalent quantitative X values share a group. |
 | Pie/donut | **Yes** | Renderer-neutral polar scene nodes; a pie chart is a standalone composition. |
 | Radar | **Yes** | Multiple layers may overlay when their category axes match; Cartesian scales and non-radar marks are rejected. |
 | Heatmap | **Yes** | Standalone composition with configured band-domain layout, a diverging color scale, square cells, and labels where space permits. |
-| Reference rules | **Yes** | `ruleY` / `ruleX`; React `ReferenceLine` accepts exactly one of `y` or `x`. |
+| Reference rules | **Yes** | `ruleY` / `ruleX` label the formatted value (prefixed by `name` when set); `label` text or `false`, `labelPosition` (`start`/`middle`/`end`), and `dashed: false` for a solid rule. React `ReferenceLine` accepts exactly one of `y` or `x`. |
 | Tooltip and crosshair | **Yes** | Pointer interaction in `mountChart`; native default is enabled unless set to `false`. Structured tooltip payloads are exposed through `onTooltip`. |
-| Legend | **Yes** | Built from series metadata; click hides a series on a mount. |
+| Legend | **Yes** | Built from series metadata and keyed by series id; click toggles a series on an SVG mount, and hidden series stay listed (dimmed, hollow swatch) so the toggle is reversible. The top legend wraps and grows the top margin (up to ~30% of the height, then `+N more`); the pie legend compacts to 20px rows, then shows `+N more` with the hidden names as its tooltip. Pie slices hide individually through `hiddenSeries` (`<seriesId>/<label>` or the label). |
 | Responsive mount | **Yes** | `ResizeObserver` when an explicit width is not supplied. |
 | Custom mark plugin | **Yes** | Typed domain contribution and scene compilation through `defineMarkPlugin`; contexts are isolated and returned domains/scene geometry are validated. |
 | Runtime definition validation | **Yes** | `ChartCompileError` carries stable codes for malformed specs, composition, scales, sizes, mark-specific options, channels, and plugins. |

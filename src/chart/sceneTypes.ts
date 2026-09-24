@@ -68,6 +68,18 @@ export interface SceneLegendRow {
   readonly markIndex: number;
   /** Swatch shape matching the painted mark. */
   readonly symbol: "line" | "area" | "rect" | "circle";
+  /** Row box in scene pixels: where renderers paint it and where a toggle hit-tests. */
+  readonly box?: SceneLegendBox;
+  /** Painted name after ellipsis truncation; `name` stays complete. */
+  readonly label?: string;
+}
+
+/** An axis-aligned rectangle in scene pixels. */
+export interface SceneLegendBox {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
 }
 
 /** Legend layout measured by the compiler (wrapping rows, `+N more`). */
@@ -78,6 +90,18 @@ export interface SceneLegendLayout {
   readonly size: number;
   /** Rows that did not fit and are summarised as `+N more`. */
   readonly overflow: number;
+  /**
+   * How a row paints inside its box: `inline` (swatch, name, then detail on
+   * one line), `stacked` (detail on a second line), or `compact` (one line
+   * with the detail right-aligned).
+   */
+  readonly rowStyle?: "inline" | "stacked" | "compact";
+  /** The `+N more` summary for rows that did not fit; `names` feeds its tooltip. */
+  readonly more?: {
+    readonly box: SceneLegendBox;
+    readonly label: string;
+    readonly names: readonly string[];
+  };
 }
 
 /**

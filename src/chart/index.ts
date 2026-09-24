@@ -49,6 +49,7 @@ export type {
   HeatmapYScaleSpec,
   HoverSample,
   LastValue,
+  LegendEntry,
   LinearScaleSpec,
   LineChartMark,
   LineMarkOptions,
@@ -62,6 +63,8 @@ export type {
   PointMarkOptions,
   RadarMarkOptions,
   RadarChartMark,
+  RuleLabelPosition,
+  RuleMarkOptions,
   RuleYMarkOptions,
   RuleYChartMark,
   RuleXMarkOptions,
@@ -75,6 +78,20 @@ export type {
   XScaleSpec,
   YScaleSpec,
 } from "./defineChart";
+// Scene contract v2 (see docs/seams.md): the measured legend layout, structured
+// hover samples and axis formatters that CompiledChart carries.
+export type {
+  CompiledSceneV2Fields,
+  SceneAxes,
+  SceneAxis,
+  SceneFormatters,
+  SceneHoverSample,
+  SceneLegendBox,
+  SceneLegendLayout,
+  SceneLegendRow,
+  SceneTick,
+  SceneValueFormatter,
+} from "./sceneTypes";
 export { scaleLinear, scaleBand, scaleTime, scaleLog, extent } from "./scales";
 export type { LinearScale, BandScale, AnyScale } from "./scales";
 export {

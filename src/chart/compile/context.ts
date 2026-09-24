@@ -4,13 +4,13 @@
 import type { AnyScale } from "../scales";
 import type { DashboardTheme } from "../theme";
 import type { AxisFormatters } from "./format";
+import type { LegendRowInput } from "./legend";
 import type { RuleYChartMark, XYChartMark } from "./marks";
 import { asNumber, readChannel } from "./shared";
 import type {
   ChartSpec,
   HoverSample,
   LastValue,
-  LegendEntry,
   PlotRect,
   SceneNode,
   XScaleKind,
@@ -19,7 +19,8 @@ import type {
 /** Scene output accumulated in mark order (flattened onto the mark context). */
 export interface SceneOutput {
   nodes: SceneNode[];
-  legend: LegendEntry[];
+  /** Rows in mark order; the pipeline stamps series ids onto plugin rows. */
+  legend: LegendRowInput[];
   lastValues: LastValue[];
   samples: HoverSample[];
   /** Valid line/area points omitted by extrema decimation. */

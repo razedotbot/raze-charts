@@ -108,6 +108,11 @@ Pie and heatmap are standalone compositions. Multiple radar layers may be
 overlaid when they share the same axes; Cartesian scales cannot be mixed into
 a polar chart.
 
+Every mark is a series with a stable id (its `id` option, else `mark-<index>`).
+Legend clicks and `hiddenSeries` use that id, and a hidden series stays in the
+legend, dimmed, so it can be shown again. `scales.y.tickFormat` formats
+tooltips, value chips and rule labels as well as ticks.
+
 Dense line and area geometry is reduced by a pixel-aware extrema envelope by
 default. Tune it with `performance.maxRenderedPoints`, opt out with
 `performance.decimation: "none"`, and inspect `CompiledChart.diagnostics`.

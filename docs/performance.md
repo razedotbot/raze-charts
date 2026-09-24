@@ -67,11 +67,11 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
 | | Scenario: Widget only | `import { widget }` | 63 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 44 KiB |
-| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33 KiB |
-| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 23 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 50 KiB |
+| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 38 KiB |
+| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 27 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
-| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 37 KiB |
+| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 41 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
 | Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 5 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
@@ -94,6 +94,18 @@ The native artifact allowance grew from 42 to 44 KiB when the compiler and
 renderers were split into `src/chart/compile/*` and `src/chart/render/*`: the
 unminified artifact keeps every function and property name, so the module
 boundaries added about 2.2 KiB with byte-identical output.
+
+Wave 1B package W1B-02 (native marks and legend) raised the native artifact
+from 44 to 50 KiB, its "Line-only mount" and "Static line SVG" scenarios from
+33 to 38 KiB and from 23 to 27 KiB, and the React "React LineChart" scenario
+from 37 to 41 KiB. Measured on that branch, the artifact grew from 42.96 to
+49.19 KiB (unminified, so every name counts). The growth is the measured legend
+layout (wrapping rows, the compacting side column, `+N more`, text metrics and
+ellipsis) and its shared SVG/Canvas painter (about 2.9 KiB), stable series ids
+with disambiguated names and reversible hidden rows (about 1 KiB), structured
+hover samples, rule-label options, zero-bar hit proxies and the curve-following
+ranged-area fill (about 1.5 KiB), and the validation of the new mark options
+(about 0.8 KiB).
 
 The root artifact budget was raised from 55 KiB to the 72 KiB hard cap set by
 architecture decision AD-01, and the "Widget only" scenario from 49 KiB to

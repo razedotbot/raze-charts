@@ -5,6 +5,7 @@
 import type { AnyScale } from "../scales";
 import type { ChartThemeInput, DashboardTheme } from "../theme";
 import type { ChartMark } from "./marks";
+import type { CompiledSceneV2Fields } from "../sceneTypes";
 
 export type Accessor<T> = keyof T & string | ((row: T) => unknown);
 
@@ -149,7 +150,12 @@ export interface ChartSpec {
   theme?: ChartThemeInput;
   /** Visible X/Y window applied before geometry and decimation. */
   viewport?: ChartViewport;
-  /** Series names omitted from geometry (legend toggle). */
+  /**
+   * Series omitted from geometry (legend toggle). Each entry matches a series
+   * id (the mark's `id`, else `mark-<index>`), a legend row id (pie slices use
+   * `<seriesId>/<label>`), or a series name. Hidden series keep their legend
+   * row, flagged `hidden`, so the toggle can always be reversed.
+   */
   hiddenSeries?: readonly string[];
 }
 
@@ -235,9 +241,17 @@ export interface LastValue {
 
 /** One legend row. Plugins may contribute their own rows. */
 export interface LegendEntry {
+  /**
+   * Stable row id, the value a legend toggle adds to `hiddenSeries`: the
+   * mark's `id`, else `mark-<index>`. Pie slices use `<seriesId>/<label>`.
+   * Marks sharing an explicit `name` share the first mark's row.
+   */
+  id: string;
   name: string;
   color: string;
   detail?: string;
+  /** The series is hidden; its row stays so the toggle can be reversed. */
+  hidden: boolean;
 }
 
 /** One axis tick: source value, plot-space pixel, and formatted label. */
@@ -247,7 +261,7 @@ export interface AxisTick {
   label: string;
 }
 
-export interface CompiledChart {
+export interface CompiledChart extends CompiledSceneV2Fields {
   width: number;
   height: number;
   margin: Margin;
@@ -257,7 +271,8 @@ export interface CompiledChart {
   xTicks: { value: unknown; px: number; label: string }[];
   yTicks: { value: unknown; px: number; label: string }[];
   grid: boolean;
-  legend: { name: string; color: string; detail?: string }[];
+  /** Every legend row in mark order, hidden series included (`hidden: true`). */
+  legend: LegendEntry[];
   nodes: SceneNode[];
   tooltip: boolean;
   ariaLabel: string;

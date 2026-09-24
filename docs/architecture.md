@@ -316,11 +316,13 @@ src/chart/compile/
   marks.ts      mark shapes, options, builders, defineMarkPlugin/customMark
   define.ts     defineChart() and typed composition rules
   validate.ts   runtime ChartSpec, scale, mark, and composition validation
-  legend.ts     series names/colours, hidden series, legend rows and placement
+  legend.ts     series ids/names/colours, hidden series, legend rows, measured
+                legend layout (wrapping rows, compact side column, +N more)
   domain.ts     viewport windowing, X-type inference, domain checks, X/Y scales
   axes.ts       margins, plot rectangle, time/band/linear ticks
   format.ts     number, date, and signed formatting; axis formatters
   cartesian.ts  line/area, point, ruleY/ruleX, grouped and stacked bars
+  curve.ts      monotone/step curve flattening shared with ranged-area fills
   decimate.ts   extrema decimation and per-series budget allocation
   polar.ts      pie and radar
   heatmap.ts    square-cell layout and colour cells
@@ -332,7 +334,7 @@ src/chart/compile/
 src/chart/render/
   svg.ts        SVG nodes, grid, axes, colour bar, document assembly
   canvas.ts     Canvas painter for the same scene
-  legend.ts     top/right legend for both renderers
+  legend.ts     paints the compiled legend layout for both renderers
   chips.ts      last-value chip layout and crosshair chip labels
   hit.ts        hit testing, hover-sample index, tooltip text
   primitives.ts shared paths, arcs, rounded bars, shading, escaping
