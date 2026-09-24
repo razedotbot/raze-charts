@@ -1,6 +1,6 @@
 {
   "name": "@razedotbot/charts",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Dependency-free financial and dashboard charts with a documented TradingView-shaped compatibility subset, typed native grammar, and React adapter.",
   "license": "MIT",
   "author": "Raze",
