@@ -9,6 +9,9 @@
 // per frame and commits one `points_changed` and one undo entry.
 
 import type { StoredShape } from "../../core/ShapeStore";
+import { DEFAULT_DRAWING_COLOR } from "../../core/theme";
+import { drawingToolDefaults } from "../../drawings/registry";
+import { TEXT_PAD } from "../../drawings/tools/text";
 import type { DrawingHit } from "../../drawings/types";
 import { t } from "../../i18n";
 import type { ShapePoint } from "../../types/charting_library";
@@ -101,15 +104,18 @@ function finishDraft(h: GestureHost, x: number, y: number): void {
     h.onToolDone?.("cursor");
   };
   const create = (text: string): void => {
-    const theme = h.context.theme;
+    // The draft preview paints with the tool's schema defaults and the theme's
+    // drawingDefault; the committed drawing keeps exactly that look. Text
+    // keeps the theme label colour (>= 4.5:1 on its backdrop), as API text does.
+    const { linestyle, linewidth } = drawingToolDefaults(tool);
     void h.shapes.createPoints(points, {
       shape: tool,
       text,
       lock: false,
       overrides: {
-        linecolor: theme.drawingDefault ?? (tool === "fib_retracement" ? "#f5a623" : "#66d89e"),
-        linewidth: 1,
-        linestyle: tool === "horizontal_line" || tool === "vertical_line" ? 2 : 0,
+        ...(tool === "text" ? {} : { linecolor: h.context.theme.drawingDefault ?? DEFAULT_DRAWING_COLOR }),
+        linewidth: typeof linewidth === "number" ? linewidth : 1,
+        linestyle: typeof linestyle === "number" ? linestyle : 0,
         showPrice: tool === "horizontal_line",
       },
     }).then((id) => {
@@ -125,7 +131,7 @@ function finishDraft(h: GestureHost, x: number, y: number): void {
     window.clearTimeout(session.timer);
     session.timer = window.setTimeout(() => {
       session.timer = undefined;
-      editText(h, anchor, "", 12, (text) => {
+      editText(h, anchor, "", textFontSize(undefined), (text) => {
         if (text?.trim()) create(text);
         resetTool();
       });
@@ -137,7 +143,14 @@ function finishDraft(h: GestureHost, x: number, y: number): void {
   h.requestPaint();
 }
 
-/** Open the inline editor over the chart; `done` receives the text, or null when cancelled. */
+/** The painted font size of a text drawing (the text tool's schema default when unset). */
+function textFontSize(size: unknown): number {
+  const fallback = drawingToolDefaults("text").fontsize;
+  const value = typeof size === "number" && Number.isFinite(size) ? size : typeof fallback === "number" ? fallback : 14;
+  return Math.max(6, Math.min(200, value));
+}
+
+/** Open the inline editor over the chart at a text drawing's anchor (its label box's top-left corner); `done` receives the text, or null when cancelled. */
 function editText(h: GestureHost, at: { x: number; y: number }, value: string, fontSize: number, done: (text: string | null) => void): void {
   const parent = h.context.overlayHost;
   if (!parent) {
@@ -156,8 +169,9 @@ function editText(h: GestureHost, at: { x: number; y: number }, value: string, f
   // Opening first commits an editor already open in this overlay; its `finish` runs before this assignment.
   session.editor = editor = openInlineTextEditor({
     parent,
-    x: at.x,
-    y: at.y,
+    // `at` is the top-left corner of the painted label box; its text starts TEXT_PAD inside it.
+    x: at.x + TEXT_PAD,
+    y: at.y + TEXT_PAD,
     value,
     fontSize,
     fontFamily: h.context.fontFamily,
@@ -172,8 +186,7 @@ function editText(h: GestureHost, at: { x: number; y: number }, value: string, f
 /** Re-edit a drawing's text in place: one undo entry and `properties_changed`. */
 function editShapeText(h: GestureHost, { id, points, overrides, text: value }: StoredShape): void {
   const at = pointXY(h.financeView(), points[0]!);
-  const size = overrides.fontsize;
-  if (at) editText(h, at, value, typeof size === "number" ? size : 12, (text) => {
+  if (at) editText(h, at, value, textFontSize(overrides.fontsize), (text) => {
     const shape = h.shapes.get(id);
     if (!shape || !text?.trim() || text === shape.text) return;
     const before = h.shapes.capture(id);

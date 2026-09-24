@@ -548,7 +548,10 @@ assert(prompts.length === 0, "the text tool no longer calls window.prompt");
   const editor = h.host.context.overlayHost.querySelector("textarea.raze-chart-inline-editor");
   assert(editor && document.activeElement === editor && editor.getAttribute("aria-label") === "Drawing text",
     "clicking with the Text tool opens a focused, labelled editor at the click point");
-  assert(editor.style.left === "96.5px" && editor.style.top !== "", "the editor is positioned at the bar-snapped anchor");
+  // The text drawing's label box has its top-left corner at the anchor and its
+  // text 4px inside; the editor's text (1px border, 5px/2px padding) lines up with it.
+  assert(editor.style.left === "100.5px" && Math.abs(parseFloat(editor.style.top) - 151) < 1,
+    "the editor's text sits where the painted label's text starts, at the bar-snapped anchor");
   editor.value = "Hi";
   editor.dispatchEvent(new window.Event("input"));
   const shift = new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true });

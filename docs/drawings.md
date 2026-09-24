@@ -31,9 +31,10 @@ Conventions shared by every tool:
   `3` large dashed and `4` sparse dotted. Dash lengths scale with `linewidth`.
 - An empty or unset colour follows the theme. Lines use the
   `drawingDefault` token (`#2962ff`) and text uses `labelText`. Drawings
-  created through the API use the token now. Drawings created from the
-  toolbar still get an explicit colour (see Current limits), so the two
-  share one default colour only once the drafting interaction reads the token.
+  created through the API and from the toolbar share it: a toolbar drawing
+  is committed with the token as its `linecolor` and the tool's default line
+  style and width, exactly as its draft preview painted it (text keeps
+  `labelText`).
 - `transparency` runs from `0` (opaque) to `100` (invisible), as in TradingView.
 - Every drawing is clipped to the price plot. Rays and extended lines are
   clipped exactly at the plot edges (Liang-Barsky), so they stay visible at
@@ -170,11 +171,6 @@ Other registry functions: `getDrawingTool(idOrAlias)`, `listDrawingTools()`,
   Once created, they select, drag, undo and save/load like built-ins.
 - Free-form tools (`anchors: { min, finish }`) collect points, but finishing
   them with a double-click or Enter depends on the drafting interaction.
-- Drawings created from the toolbar are still committed with an explicit
-  `linecolor` (`#66d89e`, or `#f5a623` for a fib) rather than the
-  `drawingDefault` token. Until the drafting interaction reads the token, set
-  `drawings.defaultColor` for API drawings and restyle toolbar drawings through
-  their properties if the two must match.
 - `validateProps` and `describe` are declared by the contract, but nothing
   calls them yet. `createShape()` and `load()` pass props to `paint()`
   unvalidated, and the objects tree names drawings by their tool id.

@@ -28,7 +28,7 @@ export { ChartApi } from "./core/ChartApi";
 export type { ChartApiDeps } from "./core/ChartApi";
 export { ShapeStore } from "./core/ShapeStore";
 export type { ShapeKind, StoredShape } from "./core/ShapeStore";
-export { builtinShapeCatalog, createShapeKindCatalog, ShapeError } from "./core/ShapeStore";
+export { builtinShapeCatalog, createShapeKindCatalog, registryShapeCatalog, ShapeError } from "./core/ShapeStore";
 export type { ShapeCreateInput, ShapeKindCatalog, ShapeKindInfo, ShapeRestoreInput, ShapeToolDescriptor } from "./core/ShapeStore";
 export { TradingStore } from "./core/TradingStore";
 export type { StoredTradingLine } from "./core/TradingStore";

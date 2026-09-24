@@ -105,9 +105,11 @@ export {
 export { buildTheme, DEFAULT_DRAWING_COLOR, isLightColor } from "./src/core/theme";
 export { ShapeStore } from "./src/core/ShapeStore";
 export { CommandStack } from "./src/core/CommandStack";
+export { IdAllocator } from "./src/core/ids";
 export { Delegate } from "./src/util/delegate";
 export { createPriceFormatter } from "./src/util/format";
 export { drawingDraftHandler, drawingEditHandler } from "./src/engine/interaction/drawing";
+export { hitTestAt, hoveredShapePart } from "./src/engine/interaction/hitTest";
 `;
 const bundled = await build({
   stdin: { contents: entry, resolveDir: root, loader: "ts", sourcefile: "drawing-tools-entry.ts" },
@@ -145,6 +147,7 @@ function makeWorld({ theme = "dark", overrides = {}, pricescale = 100 } = {}) {
     formatPrice: D.createPriceFormatter(null, symbolInfo),
     theme: D.buildTheme({ theme, overrides }),
     drawingEvent: new D.Delegate(),
+    ids: new D.IdAllocator(),
     selectedShapeId: null,
     requestPaint() {},
   };
@@ -565,7 +568,8 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
 {
   const world = makeWorld();
   const top = await add(world, "trend_line", [[10, 100], [20, 150]], { linecolor: "#0000ff" }, { zOrder: "top" });
-  const bottom = await add(world, "horizontal_line", [[5, 125]], { linecolor: "#ff0000" }, { text: "Limit" });
+  // Created later, but sent to the bottom of the store's integer z order.
+  const bottom = await add(world, "horizontal_line", [[5, 125]], { linecolor: "#ff0000" }, { text: "Limit", zOrder: "bottom" });
   const ctx = world.paint();
   const order = strokes(ctx).map((call) => call.state.strokeStyle);
   assert(order.indexOf("#ff0000") < order.indexOf("#0000ff"), "a bottom horizontal line paints before a top trend line (store z order for every kind)");
@@ -587,9 +591,16 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
   // A horizontal line without a price paints nothing. Gestures match
   // horizontal lines by y alone, so publishing one (at a fallback y) would
   // hover and select an invisible line near the bottom of the plot.
+  // The store rejects such points from createShape, so they arrive the way a
+  // hand-edited or older saved layout does: through restore().
   const world = makeWorld();
-  const priceless = await world.shapes.createPoints([{ time: timeOf(50) }], { shape: "horizontal_line", overrides: {} });
-  const nan = await add(world, "horizontal_line", [[60, Number.NaN]]);
+  const seed = async (point) => {
+    const shape = await add(world, "horizontal_line", [[50, 100]]);
+    world.shapes.restore({ ...shape, points: [point] });
+    return world.shapes.get(shape.id);
+  };
+  const priceless = (await seed({ time: timeOf(50) })).id;
+  const nan = await seed({ time: timeOf(60), price: Number.NaN });
   const ctx = world.paint();
   assert(strokes(ctx).length === 0 && world.view.axisTags.length === 0, "a horizontal line without a finite price paints nothing");
   assert(world.view.shapeScreen.length === 0, "and publishes no hit target");
@@ -614,7 +625,8 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
 // ── Robustness: unknown kinds and throwing tools never break the frame ────────
 {
   const world = makeWorld();
-  await add(world, "arrow_up", [[10, 100]]);
+  // createShape rejects unknown kinds; a saved layout's unknown kind is kept through restore().
+  world.shapes.restore({ ...(await add(world, "horizontal_line", [[10, 100]])), shape: "arrow_up" });
   await add(world, "trend_line", [[10, 100], [20, 150]]);
   const broken = D.defineDrawingTool({ ...valid, id: "probe_broken", paint() { throw new Error("boom"); } });
   await add(world, "probe_broken", [[10, 100], [20, 150]]);
@@ -706,6 +718,15 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
     requestPaint() {},
     plotScale: () => world.view,
     financeView: () => world.view,
+    // Hover hit-testing reads the painted hit lists and the plot box.
+    get shapeScreen() {
+      return world.view.shapeScreen;
+    },
+    tradingScreen: [],
+    markScreen: [],
+    timescaleMarkScreen: [],
+    plotT: 0,
+    plotH: 400,
   };
   const zone = { inPlot: true, inPriceAxis: false, inTimeAxis: false, contentBottom: 400 };
   const clicks = [[xOf(10), yOf(100)], [xOf(30), yOf(200)], [xOf(50), yOf(100)]];
@@ -728,7 +749,11 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
   const centre = { x: xOf(30), y: yOf(140) };
   assert(D.hitComplexShape(world.view, drawn, centre.x, centre.y), "the triangle is selectable through its own hitTest");
 
-  host.hoverShapeId = String(drawn.id);
+  // A drag fires drawing_event "move" at most once per animation frame.
+  globalThis.window ??= { requestAnimationFrame: (callback) => setTimeout(callback, 0) };
+  D.hitTestAt(host, xOf(50), yOf(100), zone, 1);
+  assert(host.hoverShapeId === String(drawn.id) && D.hoveredShapePart(host)?.kind === "anchor" && D.hoveredShapePart(host)?.index === 2,
+    "hovering the triangle's third handle hits that anchor through the tool's hitTest");
   const before = drawn.points.map((p) => ({ ...p }));
   const session = D.drawingEditHandler.pointerDown(host, { x: xOf(50), y: yOf(100), zone, pointerType: "mouse" });
   session.move(xOf(60), yOf(80));

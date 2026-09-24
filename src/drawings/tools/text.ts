@@ -7,7 +7,9 @@ import type { Rect, ScreenPoint } from "../../engine/paint/view";
 import type { DrawingEnv } from "../types";
 import { type AnyState, colorOr, crisp, hitAnchor, inRect, measurer, num, type ToolDef, wrapText } from "./common";
 
-const PAD = 4;
+/** Padding between a text drawing's box and its text (CSS px); the inline editor aligns to it. */
+export const TEXT_PAD = 4;
+const PAD = TEXT_PAD;
 
 /** Font, lines, line height and box of a text drawing anchored at `origin`. */
 export function textLayout(drawing: AnyState, origin: ScreenPoint, env: DrawingEnv, ctx?: CanvasRenderingContext2D) {

@@ -25,7 +25,7 @@ export interface InlineTextEditorOptions {
   parent: HTMLElement;
   /** Left edge of the text in `parent` CSS pixels. */
   x: number;
-  /** Text baseline in `parent` CSS pixels (the anchor text drawings paint at). */
+  /** Top of the first line of text in `parent` CSS pixels (text drawings paint their label box from their anchor down). */
   y: number;
   /** Initial text (re-editing an existing label). */
   value?: string;
@@ -33,7 +33,7 @@ export interface InlineTextEditorOptions {
   label: string;
   placeholder?: string;
   fontFamily?: string;
-  /** CSS pixels; defaults to 12. */
+  /** CSS pixels; defaults to 14 (the text tool's default size). */
   fontSize?: number;
   /** Receives the edited text (unchanged whitespace) on Enter or focus loss. */
   onCommit(text: string): void;
@@ -61,7 +61,7 @@ export function activeInlineTextEditor(parent: HTMLElement | null | undefined): 
 /** Open a focused editor at the anchor. An editor already open in `parent` commits first. */
 export function openInlineTextEditor(options: InlineTextEditorOptions): InlineTextEditorHandle {
   const { parent, x, y } = options;
-  const size = options.fontSize ?? 12;
+  const size = options.fontSize ?? 14;
   activeInlineTextEditor(parent)?.commit();
   adoptStyles(parent, INLINE_EDITOR_STYLES);
   const el = parent.ownerDocument.createElement("textarea");
@@ -75,13 +75,14 @@ export function openInlineTextEditor(options: InlineTextEditorOptions): InlineTe
   if (options.fontFamily) el.style.fontFamily = options.fontFamily;
 
   let open = true;
-  // Grow with the text. The first line's box sits above the baseline, like the painted label.
+  // Grow with the text. The first line starts at `y`, like the painted label
+  // (1px border + 2px top padding above it, 1px border + 5px left padding beside it).
   const place = (): void => {
     const lines = el.value.split("\n");
     el.rows = lines.length;
     el.style.width = `${Math.max(el.placeholder.length, ...lines.map((line) => line.length)) + 1}ch`;
     el.style.left = `${Math.max(4, Math.min(x - 6, (parent.clientWidth || Infinity) - el.offsetWidth - 4))}px`;
-    el.style.top = `${Math.max(4, y - size * 1.3 - 4)}px`;
+    el.style.top = `${Math.max(0, y - 3)}px`;
   };
   const close = (commit: boolean): void => {
     if (!open) return;

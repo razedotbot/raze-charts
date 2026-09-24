@@ -24,6 +24,7 @@ import type {
   ShapePoint,
   ShapeProperties,
 } from "../types/charting_library";
+import { listDrawingTools } from "../drawings/registry";
 import type { DrawingAnchorSpec } from "../drawings/types";
 import type { ChartContext } from "./context";
 import type { CommandStack } from "./CommandStack";
@@ -175,11 +176,18 @@ export function createShapeKindCatalog(tools: () => Iterable<ShapeToolDescriptor
   };
 }
 
-/** The default catalog: built-in kinds plus TradingView aliases (indexed once; built-ins never change). */
+/** Built-in kinds plus TradingView aliases only (indexed once; built-ins never change). */
 export const builtinShapeCatalog: ShapeKindCatalog = (() => {
   const { byName, kinds } = indexTools(BUILTIN_SHAPE_TOOLS);
   return { resolve: (name) => byName.get(name), kinds: () => kinds };
 })();
+
+/**
+ * The default catalog: every tool in the drawing-tool registry (the built-ins,
+ * their TradingView aliases and host tools from `defineDrawingTool()`), read
+ * live so tools registered after a store exists are accepted.
+ */
+export const registryShapeCatalog: ShapeKindCatalog = /* @__PURE__ */ createShapeKindCatalog(listDrawingTools);
 
 // ── Validation helpers ──────────────────────────────────────────────────────
 
@@ -239,7 +247,7 @@ export class ShapeStore {
     private readonly context: ChartContext,
     private readonly commands?: CommandStack,
     /** Accepted kinds; the drawing-tool registry passes a catalog that includes host tools. */
-    readonly catalog: ShapeKindCatalog = builtinShapeCatalog,
+    readonly catalog: ShapeKindCatalog = registryShapeCatalog,
   ) {}
 
   create(point: ShapePoint, options: ShapeCreateInput): Promise<EntityId> {
