@@ -91,6 +91,11 @@ function tickBudget(count: number | undefined): number {
  * budget by two ticks or more (e.g. 0-1.2e12 at five ticks gets 0, 250B,
  * 500B, 750B, 1T rather than 0, 500B, 1T). Ties prefer the denser step.
  */
+/** True when a span has a finite decimal step for `count` ticks (tickStep's exponent search terminates). */
+function hasDecimalStep(span: number, count: number): boolean {
+  return span > 0 && Number.isFinite(Math.log10(span / count));
+}
+
 function tickStep(lo: number, hi: number, count: number): TickStep {
   const span = hi - lo;
   const min = Math.ceil(count / 2);
@@ -146,8 +151,9 @@ function linearTicks(lo: number, hi: number, count: number): number[] {
 function orderedTicks(d0: number, d1: number, count: number, ticks: (lo: number, hi: number, count: number) => number[]): number[] {
   if (!Number.isFinite(d0) || !Number.isFinite(d1)) return [];
   if (d0 === d1) return [d0];
-  // A span that overflows (e.g. -1e308 to 1e308) has no representable step.
-  if (!Number.isFinite(d1 - d0)) return [d0, d1];
+  // A span that overflows (e.g. -1e308 to 1e308), or one so small that
+  // span / count underflows (subnormal domains), has no representable step.
+  if (!Number.isFinite(d1 - d0) || !hasDecimalStep(Math.abs(d1 - d0), count)) return [d0, d1];
   const out = ticks(Math.min(d0, d1), Math.max(d0, d1), count);
   return d1 < d0 ? out.reverse() : out;
 }
@@ -171,12 +177,18 @@ function niceDomain(domain: [number, number], count = DEFAULT_TICK_COUNT): [numb
   if (!Number.isFinite(hi - lo)) return domain;
   let previous: TickStep | null = null;
   for (let round = 0; round < 4; round++) {
+    if (!hasDecimalStep(hi - lo, count)) break;
     const step = tickStep(lo, hi, count);
     if (previous && previous.size === step.size) break;
     previous = step;
     const slack = TICK_EPSILON * Math.max(1, (hi - lo) / step.size);
-    lo = decimal(Math.floor(lo / step.size + slack) * step.mantissa, step.exponent) + 0;
-    hi = decimal(Math.ceil(hi / step.size - slack) * step.mantissa, step.exponent) + 0;
+    const nextLo = decimal(Math.floor(lo / step.size + slack) * step.mantissa, step.exponent) + 0;
+    const nextHi = decimal(Math.ceil(hi / step.size - slack) * step.mantissa, step.exponent) + 0;
+    // Rounding out near the float limits can overflow (1.7e308 up to 2e308):
+    // keep the last finite domain.
+    if (!Number.isFinite(nextLo) || !Number.isFinite(nextHi)) break;
+    lo = nextLo;
+    hi = nextHi;
   }
   return ascending ? [lo, hi] : [hi, lo];
 }

@@ -199,4 +199,37 @@ assert.deepEqual(extent([Number.NaN, 2, Infinity, 5]), [2, 5], "non-finite value
   assert.deepEqual(chart.yTicks.map((tick) => tick.value).slice(0, 2), [0.1, 0.105], "y ticks step by 0.005 without artefacts");
 }
 
+// ---------------------------------------------------------------------------
+// Extreme finite domains return instead of looping (W1B-04 review): a
+// subnormal span underflows span / count, and nice() near the float limit
+// rounds up past Number.MAX_VALUE. Run in a child so a regression fails
+// instead of hanging the suite.
+
+{
+  const { spawnSync } = await import("node:child_process");
+  const probe = [
+    'import { scaleLinear } from "./dist/chart.esm.js";',
+    "const out = [",
+    "  scaleLinear({ domain: [5e-324, 1.5e-323] }).ticks(5),",
+    "  scaleLinear({ domain: [0, 5e-324] }).ticks(5),",
+    "  scaleLinear({ domain: [1e308, 1.7e308], nice: true }).domain,",
+    "  scaleLinear({ domain: [0, 1.7e308], nice: true }).domain,",
+    "];",
+    "process.stdout.write(JSON.stringify(out));",
+  ].join("\n");
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", probe], {
+    cwd: new URL("..", import.meta.url), timeout: 10_000, encoding: "utf8",
+  });
+  assert.equal(result.error, undefined, `extreme domains return promptly: ${result.error?.message}`);
+  assert.equal(result.status, 0, result.stderr);
+  const [subnormal, tiny, nearMax, wide] = JSON.parse(result.stdout);
+  assert.deepEqual(subnormal, [5e-324, 1.5e-323], "a subnormal span keeps its endpoints");
+  assert.deepEqual(tiny, [0, 5e-324]);
+  for (const domain of [nearMax, wide]) {
+    assert.ok(domain.every(Number.isFinite), `nice() keeps a finite domain: ${domain}`);
+  }
+  assert.ok(nearMax[0] <= 1e308 && nearMax[1] >= 1.7e308, "the nice domain still covers the data");
+  assert.ok(wide[0] <= 0 && wide[1] >= 1.7e308);
+}
+
 console.log("native scale regression tests passed");
