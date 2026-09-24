@@ -291,6 +291,69 @@ function makeContext(info = symbolInfo()) {
   assert(grid.numerator === 25 && grid.denominator === 100 && roundToPriceGrid(3.38, grid) === 3.5, "price grids are exact decimal fractions");
 }
 
+// ── Trading: tiny, fractional and noisy price steps ─────────────────────────
+{
+  const store = new TradingStore(makeContext());
+  const tiny = store.create({ price: 1.23e-8, priceStep: 1e-10 });
+  assert(store.priceStep(tiny.id) === 1e-10, `a sub-cent priceStep (1e-10) is kept exactly (got ${store.priceStep(tiny.id)})`);
+  store.move(tiny.id, 1.2401e-8, "moving", "drag");
+  store.move(tiny.id, tiny.getPrice(), "moved", "drag");
+  assert(tiny.getPrice() === 1.24e-8, `a drag from 1.23e-8 lands on 1.24e-8, never 0 (got ${tiny.getPrice()})`);
+  store.move(tiny.id, tiny.getPrice() + 1e-10, "moved", "keyboard");
+  assert(tiny.getPrice() === 1.25e-8, `a nudge on a 1e-10 grid moves one step (got ${tiny.getPrice()})`);
+  const odd = store.create({ price: 3e-9, priceStep: 1.5e-9 });
+  assert(store.priceStep(odd.id) === 1.5e-9, `priceStep 1.5e-9 is kept exactly, not widened to 2e-9 (got ${store.priceStep(odd.id)})`);
+  store.move(odd.id, 5.9e-9, "moving", "drag");
+  assert(odd.getPrice() === 6e-9, `drags land on multiples of 1.5e-9 (got ${odd.getPrice()})`);
+  const wei = priceGridFromStep(1e-18);
+  assert(wei.numerator === 1 && wei.denominator === 1e18 && roundToPriceGrid(2.0000000000000004e-15, wei) === 2e-15, "an 18-decimal (wei) step is an exact grid");
+  assert(priceGridFromStep(500).numerator === 500 && priceGridFromStep(500).denominator === 1, "whole-number steps are exact grids");
+
+  const third = store.create({ price: 1, priceStep: 1 / 3 });
+  const thirdGrid = priceGridFromStep(1 / 3);
+  assert(thirdGrid.numerator === 1 && thirdGrid.denominator === 3 && store.priceStep(third.id) === 1 / 3, "a fractional step (1 / 3) becomes the exact fraction 1/3");
+  assert(roundToPriceGrid(1, thirdGrid) === 1 && roundToPriceGrid(10, thirdGrid) === 10, "1 and 10 stay exactly on a 1/3 grid (never 0.999999999)");
+  store.move(third.id, 1.1, "moving", "drag");
+  store.move(third.id, 1.1, "moved", "drag");
+  assert(third.getPrice() === 1, "a drag near 1 on a 1/3 grid commits exactly 1");
+  store.move(third.id, 1.01, "moved", "keyboard");
+  store.move(third.id, third.getPrice() + 0.01, "moved", "keyboard");
+  store.move(third.id, third.getPrice() + 0.01, "moved", "keyboard");
+  assert(third.getPrice() === 2, `three nudges on a 1/3 grid from 1 reach exactly 2 (got ${third.getPrice()})`);
+
+  throwsLike(() => store.create({ price: 1, priceStep: 0.1 + 0.2 }), RangeError, /floating-point noise.*for example 0\.3$/, "a noisy step (0.1 + 0.2) is rejected with the intended value, not silently rounded");
+  throwsLike(() => store.create({ price: 1, priceStep: 1e-23 }), RangeError, /more than 22 decimal places/, "steps finer than 22 decimals are rejected with the limit");
+  throwsLike(() => store.create({ price: 1, priceStep: 1e21 }), RangeError, /too large/, "steps beyond the safe-integer range are rejected");
+  throwsLike(() => store.createBracket({ side: "buy", entryPrice: 1, priceStep: 0.1 * 3 }), RangeError, /bracket priceStep/, "bracket priceSteps get the same checks");
+}
+
+// ── Trading: nudges at BTC scale (pricescale 1e8) ───────────────────────────
+{
+  const store = new TradingStore(makeContext(symbolInfo({ minmov: 1, pricescale: 1e8 })));
+  // Found by a randomized probe: with a fixed epsilon these on-grid prices
+  // floor to the unit below, so a nudge up (or down) did not move at all.
+  const up = store.create({ price: 39276.48831068 });
+  store.move(up.id, up.getPrice() + 1e-8, "moved", "keyboard");
+  assert(up.getPrice() === 39276.48831069, `a nudge up from 39276.48831068 moves one satoshi (got ${up.getPrice()})`);
+  const down = store.create({ price: 43149.46306888 });
+  store.move(down.id, down.getPrice() - 1e-8, "moved", "keyboard");
+  assert(down.getPrice() === 43149.46306887, `a nudge down from 43149.46306888 moves one satoshi (got ${down.getPrice()})`);
+  let drift = null;
+  for (const start of [65000.12345678, 98765.43210987, 12345678.12345678, 0.00001234]) {
+    const line = store.create({ price: start });
+    const units = Math.round(start * 1e8);
+    for (let i = 1; i <= 25 && !drift; i++) {
+      store.move(line.id, line.getPrice() + 1e-8, "moved", "keyboard");
+      if (line.getPrice() !== (units + i) / 1e8) drift = `${start} +${i} -> ${line.getPrice()}`;
+    }
+    for (let i = 24; i >= 0 && !drift; i--) {
+      store.move(line.id, line.getPrice() - 1e-8, "moved", "keyboard");
+      if (line.getPrice() !== (units + i) / 1e8) drift = `${start} back to +${i} -> ${line.getPrice()}`;
+    }
+  }
+  assert(drift === null, `25 nudges up and back land on exact satoshi prices at every magnitude${drift ? ` (${drift})` : ""}`);
+}
+
 // ── Trading: callback overloads ─────────────────────────────────────────────
 {
   const store = new TradingStore(makeContext());
@@ -392,6 +455,22 @@ const P = (offset = 0, price = 100) => ({ time: NOW_SECONDS + offset * 60, price
   assert((await rejection(store.createPoints("nope", { shape: "text" })))?.code === "E_SHAPE_POINTS", "non-array points reject");
   assert((await rejection(store.create(P(), { shape: "text", text: 5 })))?.code === "E_SHAPE_OPTION", "non-string text rejects");
   assert((await rejection(store.create(P(), { zOrder: "middle" })))?.code === "E_SHAPE_OPTION", "unknown zOrder values reject");
+  const arrayOverrides = await rejection(store.create(P(), { shape: "horizontal_line", overrides: [] }));
+  assert(arrayOverrides?.code === "E_SHAPE_OPTION" && /got an array/.test(arrayOverrides.message), "array overrides reject");
+
+  const extra = await rejection(store.createPoints([P(0), P(1), P(2)], { shape: "trend_line" }));
+  assert(extra?.code === "E_SHAPE_POINTS" && /trend_line takes exactly 2 points, got 3/.test(extra.message), "extra anchor points reject instead of being saved but never painted");
+  assert((await rejection(store.createPoints([P(0), P(1)], { shape: "horizontal_line" })))?.code === "E_SHAPE_POINTS", "single-point kinds reject a second point");
+  const textNoPrice = await rejection(store.create({ time: NOW_SECONDS }, { shape: "text", text: "Note" }));
+  assert(textNoPrice?.code === "E_SHAPE_POINTS" && /text needs a price on every point \(point 0 has none\)/.test(textNoPrice.message), "a text label without a price rejects instead of sticking to the bottom edge");
+  const trendNoPrice = await rejection(store.createPoints([P(0), { time: NOW_SECONDS + 60 }], { shape: "trend_line" }));
+  assert(trendNoPrice?.code === "E_SHAPE_POINTS" && /point 1 has none/.test(trendNoPrice.message), "every anchor of a price-anchored kind needs a price, not only the first");
+  const channel = await rejection(store.create({ time: NOW_SECONDS, channel: "high" }, { shape: "text", text: "Top" }));
+  assert(/`channel` is not supported, pass the bar's high as price/.test(channel?.message ?? ""), "TradingView's channel fallback is named in the error instead of being ignored");
+  const vertical = await store.create({ time: NOW_SECONDS }, { shape: "vertical_line" });
+  assert(store.get(vertical).points[0].price === undefined, "vertical_line still takes a time alone");
+  store.remove(vertical);
+  assert(store.list().length === 0, "rejected shapes leave nothing behind");
   takeWarnings();
 
   const ms = (NOW_SECONDS + 30) * 1000;
@@ -402,6 +481,8 @@ const P = (offset = 0, price = 100) => ({ time: NOW_SECONDS + offset * 60, price
   const adapter = store.adapter(converted);
   throwsLike(() => adapter.setPoints([{ time: NOW_SECONDS, price: Number.NaN }, P(1)]), ShapeError, /non-finite price/, "setPoints validates like createShape");
   throwsLike(() => adapter.setPoints([P(0)]), ShapeError, /needs 2 points/, "setPoints keeps the kind's anchor count");
+  throwsLike(() => adapter.setPoints([P(0), P(1), P(2)]), ShapeError, /takes exactly 2 points, got 3/, "setPoints rejects extra anchors");
+  throwsLike(() => adapter.setPoints([P(0), { time: NOW_SECONDS }]), ShapeError, /needs a price on every point/, "setPoints requires prices like createShape");
   throwsLike(() => store.adapter(defaultedId()).setPriceLevel(Number.NaN), ShapeError, /finite price/, "setPriceLevel rejects non-finite prices");
   function defaultedId() { return store.list()[0].id; }
 }
@@ -439,6 +520,17 @@ const P = (offset = 0, price = 100) => ({ time: NOW_SECONDS + offset * 60, price
   }
   const id = store.list()[0].id;
   throwsLike(() => store.adapter(id).setProperties({ text: 12 }), ShapeError, /text must be a string/, "non-string text is rejected");
+  throwsLike(() => store.adapter(id).setProperties(["x"]), ShapeError, /got an array/, "array properties are rejected");
+
+  const label = store.get(id).text;
+  events.length = 0;
+  const pushes = pushed.length;
+  store.adapter(id).setProperties({ text: undefined });
+  assert(store.get(id).text === label && events.length === 0 && pushed.length === pushes, "setProperties({ text: undefined }) leaves the label unchanged and records nothing");
+  const adapter = store.adapter(id);
+  const maybe = undefined;
+  adapter.setProperties({ ...adapter.getProperties(), text: maybe, linewidth: 4 });
+  assert(store.get(id).text === label && store.get(id).overrides.linewidth === 4 && !("text" in store.get(id).overrides), "the { ...getProperties(), text: maybe } idiom updates overrides and keeps the label");
 }
 
 // ── Shapes: integer z-order ─────────────────────────────────────────────────
@@ -519,6 +611,26 @@ const P = (offset = 0, price = 100) => ({ time: NOW_SECONDS + offset * 60, price
   assert(custom.store.get(arrow).shape === "arrow_marker", "a live catalog accepts tools registered after the store exists, aliases included");
   const free = shapeStore(createShapeKindCatalog(() => [{ id: "path", anchors: { min: 3, finish: "enter" } }]));
   assert((await rejection(free.store.createPoints([P(0), P(1)], { shape: "path" })))?.message.includes("needs 3 points"), "free-form anchor specs enforce their minimum");
+  const many = Array.from({ length: 40 }, (_, i) => P(i, 100 + i));
+  assert(free.store.get(await free.store.createPoints(many, { shape: "path" })).points.length === 40, "free-form specs without max take any number of points");
+  const bounded = shapeStore(createShapeKindCatalog(() => [{ id: "polyline", anchors: { min: 2, max: 4, finish: "either" } }]));
+  const overMax = await rejection(bounded.store.createPoints(many.slice(0, 5), { shape: "polyline" }));
+  assert(overMax?.code === "E_SHAPE_POINTS" && /polyline takes at most 4 points, got 5/.test(overMax.message), "free-form specs enforce their max");
+
+  // A catalog built from tool definitions that do not declare requiresPrice (the drawing-tool registry).
+  const registryLike = shapeStore(createShapeKindCatalog(() => BUILTIN_SHAPE_TOOLS.map(({ id, anchors, aliases }) => ({ id, anchors, aliases })).concat({ id: "marker", anchors: 1 })));
+  assert(typeof await registryLike.store.create({ time: NOW_SECONDS }, { shape: "vertical_line" }) === "string", "vertical_line stays time-only when the catalog omits requiresPrice");
+  assert((await rejection(registryLike.store.create({ time: NOW_SECONDS }, { shape: "text" })))?.code === "E_SHAPE_POINTS", "built-in text still needs a price when the catalog omits requiresPrice");
+  assert((await rejection(registryLike.store.create({ time: NOW_SECONDS }, { shape: "marker" })))?.code === "E_SHAPE_POINTS", "custom tools need prices unless they declare requiresPrice: false");
+  const timeOnly = shapeStore(createShapeKindCatalog(() => [{ id: "session_break", anchors: 1, requiresPrice: false }]));
+  assert(typeof await timeOnly.store.create({ time: NOW_SECONDS }, { shape: "session_break" }) === "string", "a custom tool with requiresPrice: false takes a time alone");
+
+  const kept = shapeStore();
+  takeWarnings();
+  kept.store.restore({ id: "shape_5", shape: "flag", points: [P(0)], text: "", lock: false, disableSelection: false, disableUndo: false, showInObjectsTree: true, hidden: false, zOrder: "top", overrides: {} });
+  kept.store.adapter("shape_5").setPoints([P(1), P(2)]);
+  assert(kept.store.get("shape_5").points.length === 2, "a loaded unregistered kind keeps editable points (no count rule to apply)");
+  takeWarnings();
 }
 
 // ── Widget integration ──────────────────────────────────────────────────────
@@ -589,6 +701,21 @@ const P = (offset = 0, price = 100) => ({ time: NOW_SECONDS + offset * 60, price
   window.dispatchEvent(pointer("pointerup", y + 17.3));
   const dragged = order.getPrice();
   assert(dragged < 101.57 && Math.round(dragged * 100) / 100 === dragged && String(dragged).split(".")[1]?.length <= 2, `a pointer drag commits an on-tick price (${dragged})`);
+
+  // Screen readers hear the committed price: on a 0.25 grid, ArrowUp from 101.25 lands on 101.50, not 101.26.
+  order.remove();
+  const stepped = await chart.createOrderLine({ side: "buy", price: 101.25, priceStep: 0.25, text: "Stepped" });
+  flushFrames();
+  const steppedState = window.__razeChartState;
+  const steppedY = (steppedState.priceMax - stepped.getPrice()) / (steppedState.priceMax - steppedState.priceMin) * 338;
+  canvas.dispatchEvent(pointer("pointermove", steppedY));
+  canvas.dispatchEvent(pointer("pointerdown", steppedY));
+  window.dispatchEvent(pointer("pointerup", steppedY));
+  canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+  await new Promise((resolveTimer) => setTimeout(resolveTimer, 0));
+  const announced = host.querySelector(".raze-chart-a11y-status")?.textContent ?? "";
+  assert(stepped.getPrice() === 101.5, `ArrowUp on a 0.25 priceStep line moves one full step (got ${stepped.getPrice()})`);
+  assert(announced === "Stepped moved to 101.50.", `the nudge announces the committed price (got "${announced}")`);
   window.__RAZE_DEBUG = false;
   instance.remove();
 }

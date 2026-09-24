@@ -90,26 +90,75 @@ const safely = (label: string, callback: () => void): void => {
 
 /** Tolerance, in grid units, for floating-point noise when flooring or ceiling onto the grid. */
 const GRID_EPSILON = 1e-7;
+/** Significant digits a double always round-trips: a step written as a decimal literal has at most this many. */
+const MAX_DECIMAL_DIGITS = 15;
+/** Largest power of ten a double holds exactly, so a decimal grid's division stays correctly rounded. */
+const MAX_GRID_DECIMALS = 22;
+/** Largest denominator tried when a step is a fraction such as 1 / 3 rather than a decimal. */
+const MAX_FRACTION_DENOMINATOR = 1_000_000;
 
 /**
- * Validate a host price step and express it as an exact decimal fraction
- * (`0.25` -> 25/100), so on-grid prices are built from integers and one
- * correctly rounded division instead of accumulating float error.
+ * Validate a host price step and express it as an exact fraction of integers,
+ * so on-grid prices are built from integers and one correctly rounded
+ * division instead of accumulating float error. A decimal step is read from
+ * its shortest round-trip form, which is the literal the host wrote, at any
+ * magnitude (`0.25` -> 25/100, `1.5e-9` -> 15/10^10). A step that is exactly
+ * the double nearest a small fraction becomes that fraction (`1 / 3` -> 1/3).
+ * Anything else carries floating-point noise (`0.1 + 0.2`) and is rejected
+ * with the intended value suggested, never silently rounded.
  */
 export function priceGridFromStep(step: number, source = "priceStep"): PriceGrid {
   if (typeof step !== "number" || !Number.isFinite(step) || step <= 0) {
     throw new TypeError(`[raze-charts] ${source} must be a positive finite number (got ${String(step)}), for example 0.25`);
   }
-  let decimals = 0;
-  while (decimals < 15 && Math.abs(Math.round(step * 10 ** decimals) - step * 10 ** decimals) > 1e-9 * 10 ** decimals) {
-    decimals += 1;
+  if (step > Number.MAX_SAFE_INTEGER) {
+    throw new RangeError(`[raze-charts] ${source} ${step} is too large (max ${Number.MAX_SAFE_INTEGER})`);
   }
-  const denominator = 10 ** decimals;
-  return { numerator: Math.max(1, Math.round(step * denominator)), denominator };
+  const grid = decimalGrid(step, source) ?? fractionGrid(step);
+  if (grid) return grid;
+  throw new RangeError(
+    `[raze-charts] ${source} ${step} looks like floating-point noise; pass the intended step, for example ${Number(step.toPrecision(12))}`,
+  );
+}
+
+/** `step` as digits / 10^decimals when its shortest decimal form has at most 15 significant digits. */
+function decimalGrid(step: number, source: string): PriceGrid | undefined {
+  // String(step) is the shortest decimal that round-trips: "0.25", "1.5e-9", "500".
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(step));
+  if (!match) return undefined;
+  const fraction = match[2] ?? "";
+  const digits = `${match[1]}${fraction}`.replace(/^0+/, "");
+  const significant = digits.replace(/0+$/, "");
+  if (significant.length > MAX_DECIMAL_DIGITS) return undefined;
+  const exponent = Number(match[3] ?? 0) - fraction.length + (digits.length - significant.length);
+  const decimals = Math.max(0, -exponent);
+  if (decimals > MAX_GRID_DECIMALS) {
+    throw new RangeError(`[raze-charts] ${source} ${step} has more than ${MAX_GRID_DECIMALS} decimal places`);
+  }
+  // Number("1e22") parses exactly, where 10 ** n may not in every engine.
+  return { numerator: Number(significant) * 10 ** Math.max(0, exponent), denominator: Number(`1e${decimals}`) };
+}
+
+/** `step` as p/q (q <= 10^6) when `p / q` is exactly `step`, found through its continued fraction. */
+function fractionGrid(step: number): PriceGrid | undefined {
+  let [p0, q0, p1, q1] = [0, 1, 1, 0];
+  let x = step;
+  for (let term = 0; term < 64; term++) {
+    const a = Math.floor(x);
+    const p = a * p1 + p0;
+    const q = a * q1 + q0;
+    if (q > MAX_FRACTION_DENOMINATOR || !Number.isSafeInteger(p)) return undefined;
+    if (p > 0 && p / q === step) return { numerator: p, denominator: q };
+    [p0, q0, p1, q1] = [p1, q1, p, q];
+    if (x === a) return undefined;
+    x = 1 / (x - a);
+  }
+  return undefined;
 }
 
 const toGridUnits = (price: number, grid: PriceGrid): number => price * grid.denominator / grid.numerator;
-// Integer * integer / integer: one correctly rounded division, so 10157 * 1 / 100 is exactly 101.57.
+// Integer * integer / integer: one correctly rounded division, so 10157 * 1 / 100 is exactly 101.57
+// (exact while units * numerator is a safe integer, i.e. for any price a double resolves on this grid).
 const fromGridUnits = (units: number, grid: PriceGrid): number => units * grid.numerator / grid.denominator;
 
 /** The on-grid price nearest to `price`. */
@@ -466,7 +515,13 @@ export class TradingStore {
     const direction = delta > 0 ? 1 : -1;
     const steps = Math.max(1, Math.round(Math.abs(delta) * grid.denominator / grid.numerator));
     const current = toGridUnits(line.price, grid);
-    const base = direction > 0 ? Math.floor(current + GRID_EPSILON) : Math.ceil(current - GRID_EPSILON);
+    const nearest = Math.round(current);
+    // An on-grid price steps from its own grid unit, exactly at any magnitude
+    // (BTC-scale unit counts carry more float noise than GRID_EPSILON); an
+    // off-grid price steps from the next grid price in the direction of travel.
+    const base = fromGridUnits(nearest, grid) === line.price
+      ? nearest
+      : direction > 0 ? Math.floor(current + GRID_EPSILON) : Math.ceil(current - GRID_EPSILON);
     return fromGridUnits(base + direction * steps, grid);
   }
 

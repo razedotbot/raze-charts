@@ -33,8 +33,11 @@ export interface TradingLineOptions {
   price?: number;
   /**
    * Price grid for drag and keyboard moves, for example `0.25` for a futures
-   * contract. Defaults to the symbol tick (`minmov / pricescale`). Must be a
-   * positive finite number. Prices set through the API are never rounded.
+   * contract or `1e-10` for a sub-cent token. Defaults to the symbol tick
+   * (`minmov / pricescale`). Must be a positive decimal (at most 22 decimal
+   * places) or a simple fraction such as `1 / 3`; a value carrying
+   * floating-point noise (`0.1 + 0.2`) throws a RangeError naming the intended
+   * step. Prices set through the API are never rounded.
    */
   priceStep?: number;
   quantity?: string | number;
@@ -112,7 +115,7 @@ export interface BracketOrderOptions {
   currency?: string;
   editable?: boolean;
   includeInAutoScale?: boolean;
-  /** Price grid for dragging or nudging every leg; defaults to the symbol tick. */
+  /** Price grid for dragging or nudging every leg; defaults to the symbol tick. Same rules as `TradingLineOptions.priceStep`. */
   priceStep?: number;
   entryText?: string;
   stopLossText?: string;

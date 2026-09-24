@@ -4,7 +4,12 @@
 export interface ShapePoint {
   /** Unix time in seconds. Millisecond timestamps (above 1e11) are converted with a warning. */
   time: number;
+  /** Required by every price-anchored kind (all built-ins except `vertical_line`); a point without one rejects. */
   price?: number;
+  /**
+   * TradingView's bar-price fallback (`open`/`high`/`low`/`close`) for a point
+   * without a price. Not supported: pass `price` instead.
+   */
   channel?: string;
 }
 export type ShapeStyle = string;

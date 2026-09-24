@@ -6,8 +6,10 @@
 // The store is the runtime gate for createShape/createMultipointShape: kinds
 // are validated against a ShapeKindCatalog (built-ins plus TradingView
 // aliases by default; the drawing-tool registry plugs in its own), points must
-// be finite, and millisecond timestamps are converted to seconds with a
-// warning. Nothing is accepted that would be saved but never painted.
+// be finite, match the kind's anchor count and carry a price unless the kind is
+// time-only, and millisecond timestamps are converted to seconds with a
+// warning. Nothing is accepted that would be saved but never painted, or
+// painted somewhere the host did not ask for.
 
 import type {
   AvailableZOrderOperations,
@@ -87,9 +89,14 @@ export class ShapeError extends Error {
 export interface ShapeKindInfo {
   /** Canonical id stored in snapshots. */
   readonly id: string;
-  /** Anchor count, as declared by the drawing tool. */
+  /** Anchor count, as declared by the drawing tool: the store enforces its minimum and maximum. */
   readonly anchors: DrawingAnchorSpec;
-  /** Whether the first anchor must carry a finite price (price-level tools). */
+  /**
+   * Whether every point must carry a finite price. Treated as true unless it
+   * is `false`: a price-anchored drawing given a point without a price would
+   * paint at the bottom edge of the pane. Only time-only kinds
+   * (`vertical_line`) opt out.
+   */
   readonly requiresPrice?: boolean;
 }
 
@@ -110,14 +117,18 @@ export interface ShapeToolDescriptor {
   readonly id: string;
   readonly anchors: DrawingAnchorSpec;
   readonly aliases?: readonly string[];
+  /**
+   * Set to `false` for a time-only tool whose points may omit the price.
+   * Omitted, every point needs a price (built-in ids keep their own rule).
+   */
   readonly requiresPrice?: boolean;
 }
 
-/** Built-in kinds with their anchor counts, in sidebar order. */
+/** Built-in kinds with their anchor counts, in sidebar order. Every kind but vertical_line is price-anchored. */
 export const BUILTIN_SHAPE_TOOLS: readonly (ShapeToolDescriptor & { readonly id: BuiltinShapeName })[] = Object.freeze([
   { id: "trend_line", anchors: 2 },
-  { id: "horizontal_line", anchors: 1, requiresPrice: true },
-  { id: "vertical_line", anchors: 1 },
+  { id: "horizontal_line", anchors: 1 },
+  { id: "vertical_line", anchors: 1, requiresPrice: false },
   { id: "ray", anchors: 2 },
   { id: "extended_line", anchors: 2, aliases: ["extended"] },
   { id: "measure", anchors: 2, aliases: ["date_and_price_range"] },
@@ -132,12 +143,22 @@ export const SHAPE_NAME_ALIASES: Readonly<Record<ShapeNameAlias, BuiltinShapeNam
   date_and_price_range: "measure",
 });
 
+/**
+ * Built-in ids whose points may omit the price. Kept by id so a catalog built
+ * from tool definitions that do not declare `requiresPrice` (the drawing-tool
+ * registry) still accepts a time-only vertical line.
+ */
+const TIME_ONLY_BUILTINS: ReadonlySet<string> = new Set(
+  BUILTIN_SHAPE_TOOLS.filter((tool) => tool.requiresPrice === false).map((tool) => tool.id),
+);
+
 /** Index a tool list by canonical id and alias; aliases never shadow a canonical id. */
 function indexTools(tools: Iterable<ShapeToolDescriptor>): { byName: Map<string, ShapeKindInfo>; kinds: readonly string[] } {
   const byName = new Map<string, ShapeKindInfo>();
   const aliases = new Map<string, ShapeKindInfo>();
   for (const tool of tools) {
-    const info: ShapeKindInfo = { id: tool.id, anchors: tool.anchors, requiresPrice: tool.requiresPrice };
+    const requiresPrice = tool.requiresPrice ?? !TIME_ONLY_BUILTINS.has(tool.id);
+    const info: ShapeKindInfo = { id: tool.id, anchors: tool.anchors, requiresPrice };
     byName.set(tool.id, info);
     for (const alias of tool.aliases ?? []) aliases.set(alias, info);
   }
@@ -166,6 +187,15 @@ export const builtinShapeCatalog: ShapeKindCatalog = (() => {
 const MILLISECOND_THRESHOLD = 1e11;
 
 const minAnchorCount = (spec: DrawingAnchorSpec): number => typeof spec === "number" ? spec : spec.min;
+/** Most points a kind takes: its fixed count, or a free-form tool's `max` (unbounded when absent). */
+const maxAnchorCount = (spec: DrawingAnchorSpec): number => typeof spec === "number" ? spec : spec.max ?? Infinity;
+
+/** Kind info for a loaded drawing whose kind is not registered: kept as-is, so no count or price rule applies. */
+const unknownKind = (id: string): ShapeKindInfo => ({ id, anchors: { min: 1, finish: "either" }, requiresPrice: false });
+
+/** A non-null, non-array object: what `overrides` and `setProperties` accept. */
+const isPropertyBag = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
 
 function cloneShape(shape: StoredShape): StoredShape {
   return {
@@ -496,19 +526,26 @@ export class ShapeStore {
     return kind;
   }
 
-  /** Copy and check points: finite values, enough anchors, seconds rather than milliseconds. */
+  /** Copy and check points: the kind's anchor count, finite values, prices where anchored, seconds rather than milliseconds. */
   private normalizePoints(points: unknown, kind: ShapeKindInfo, method: string): ShapePoint[] {
     if (!Array.isArray(points)) {
       throw new ShapeError("E_SHAPE_POINTS", `${method} needs an array of { time, price } points`);
     }
     const needed = minAnchorCount(kind.anchors);
+    const pointCount = (count: number): string => `${count} point${count === 1 ? "" : "s"}`;
     if (points.length < needed) {
       const hint = needed > 1 && method === "createShape" ? "; use createMultipointShape for multi-point kinds" : "";
+      throw new ShapeError("E_SHAPE_POINTS", `${kind.id} needs ${pointCount(needed)}, got ${points.length}${hint}`);
+    }
+    const most = maxAnchorCount(kind.anchors);
+    if (points.length > most) {
+      // Extra points would be saved but never painted or hit-tested.
       throw new ShapeError(
         "E_SHAPE_POINTS",
-        `${kind.id} needs ${needed} point${needed === 1 ? "" : "s"}, got ${points.length}${hint}`,
+        `${kind.id} takes ${most === needed ? "exactly" : "at most"} ${pointCount(most)}, got ${points.length}`,
       );
     }
+    const needsPrice = kind.requiresPrice !== false;
     return points.map((raw: unknown, index) => {
       const point = raw as Partial<ShapePoint> | null;
       if (!point || typeof point !== "object") {
@@ -521,8 +558,10 @@ export class ShapeStore {
       if (point.price !== undefined && (typeof point.price !== "number" || !Number.isFinite(point.price))) {
         throw new ShapeError("E_SHAPE_POINTS", `point ${index} has a non-finite price (${String(point.price)})`);
       }
-      if (index === 0 && kind.requiresPrice && point.price === undefined) {
-        throw new ShapeError("E_SHAPE_POINTS", `${kind.id} needs a price on its point`);
+      if (needsPrice && point.price === undefined) {
+        // TradingView's `channel` (take the bar's open/high/low/close) is named, not silently ignored.
+        const hint = point.channel !== undefined ? `; \`channel\` is not supported, pass the bar's ${String(point.channel)} as price` : "";
+        throw new ShapeError("E_SHAPE_POINTS", `${kind.id} needs a price on every point (point ${index} has none)${hint}`);
       }
       if (Math.abs(time) > MILLISECOND_THRESHOLD) {
         const seconds = Math.round(time / 1000);
@@ -543,8 +582,11 @@ export class ShapeStore {
     if (options.zOrder !== undefined && options.zOrder !== "top" && options.zOrder !== "bottom") {
       throw new ShapeError("E_SHAPE_OPTION", `zOrder must be "top" or "bottom" (got ${JSON.stringify(options.zOrder)})`);
     }
-    if (options.overrides !== undefined && (options.overrides === null || typeof options.overrides !== "object")) {
-      throw new ShapeError("E_SHAPE_OPTION", "overrides must be an object of drawing properties");
+    if (options.overrides !== undefined && !isPropertyBag(options.overrides)) {
+      throw new ShapeError(
+        "E_SHAPE_OPTION",
+        `overrides must be an object of drawing properties (got ${Array.isArray(options.overrides) ? "an array" : String(options.overrides)})`,
+      );
     }
   }
 
@@ -585,7 +627,7 @@ export class ShapeStore {
       },
       setPoints(points: ShapePoint[]): void {
         const shape = live();
-        const kind = store.catalog.resolve(shape.shape) ?? { id: shape.shape, anchors: 1 };
+        const kind = store.catalog.resolve(shape.shape) ?? unknownKind(shape.shape);
         const normalized = store.normalizePoints(points, kind, "setPoints");
         edit((s) => { s.points = normalized; });
       },
@@ -610,11 +652,15 @@ export class ShapeStore {
       },
       setProperties(props: ShapeProperties): void {
         live();
-        if (!props || typeof props !== "object") {
-          throw new ShapeError("E_SHAPE_OPTION", "setProperties needs an object of drawing properties");
+        if (!isPropertyBag(props)) {
+          throw new ShapeError(
+            "E_SHAPE_OPTION",
+            `setProperties needs an object of drawing properties (got ${Array.isArray(props) ? "an array" : String(props)})`,
+          );
         }
+        // `text: undefined` (the `{ ...getProperties(), text: maybe }` idiom) leaves the label unchanged.
         const { text, ...overrides } = props;
-        if ("text" in props && typeof text !== "string") {
+        if (text !== undefined && typeof text !== "string") {
           throw new ShapeError("E_SHAPE_OPTION", `text must be a string (got ${typeof text})`);
         }
         edit((s) => {
