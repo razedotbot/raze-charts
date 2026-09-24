@@ -412,13 +412,15 @@ const byLabel = Object.fromEntries(presetButtons.map((btn) => [btn.textContent, 
 assert.equal(Boolean(byLabel["1D"] && byLabel.ALL), true, "range preset bar renders named buttons");
 assert.equal(byLabel["3M"]?.hidden, true, "3M hides when it cannot zoom the series");
 assert.equal(byLabel.YTD?.hidden, true, "YTD hides when it cannot zoom the series");
-byLabel["1D"].dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientX: 24, clientY: 190 }));
+// Daily rows: 1D is narrower than the three-point minimum zoom span, so it is not offered.
+assert.equal(byLabel["1D"]?.hidden, true, "1D hides when it is narrower than the zoom minimum");
+byLabel["1W"].dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientX: 24, clientY: 190 }));
 assert.equal(rangeWrap.style.cursor, "", "clicking a range preset does not start a pan");
-byLabel["1D"].dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-const dayView = rangeMount.getViewport()?.x;
-assert(Array.isArray(dayView) && dayView.length === 2, "1D preset writes a viewport");
-assert(Number(dayView[1]) - Number(dayView[0]) <= 86_400_000 * 1.05, "1D preset windows about one day");
-assert.equal(byLabel["1D"].getAttribute("aria-pressed"), "true", "the active range preset is pressed");
+byLabel["1W"].dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+const weekView = rangeMount.getViewport()?.x;
+assert(Array.isArray(weekView) && weekView.length === 2, "1W preset writes a viewport");
+assert(Math.abs(Number(weekView[1]) - Number(weekView[0]) - 7 * 86_400_000) <= 86_400_000 * 0.05, "1W preset windows about one week");
+assert.equal(byLabel["1W"].getAttribute("aria-pressed"), "true", "the active range preset is pressed");
 byLabel.ALL.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 assert.equal(byLabel.ALL.getAttribute("aria-pressed"), "true", "ALL restores the full window");
 

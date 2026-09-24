@@ -35,8 +35,9 @@ export interface LastValueChipLayout {
  * centred on their value and clamped to the plot, then a forward pass pushes
  * colliding chips down and a backward pass bumps the stack up from the plot
  * bottom. When more chips exist than fit, the first series keep theirs and
- * the rest collapse into one `…+N` chip placed near the dropped values.
- * O(n log n), and it always terminates.
+ * the rest collapse into one `…+N` chip placed near the dropped values; when
+ * only one chip fits, that chip is the summary. O(n log n), and it always
+ * terminates.
  */
 export function layoutLastValueChips(c: CompiledChart): LastValueChipLayout {
   const { plot } = c;
@@ -52,12 +53,11 @@ export function layoutLastValueChips(c: CompiledChart): LastValueChipLayout {
   });
 
   // Keep every chip when they fit; otherwise the leading series plus a summary.
-  const keep = count <= capacity ? count : Math.max(1, capacity - 1);
+  const keep = count <= capacity ? count : capacity - 1;
   const dropped = count - keep;
   const items: { key: number; want: number }[] = [];
   for (let i = 0; i < keep; i++) items.push({ key: i, want: wanted[i]! });
-  const summary = dropped > 0 && capacity > 1;
-  if (summary) {
+  if (dropped > 0) {
     let sum = 0;
     for (let i = keep; i < count; i++) sum += wanted[i]!;
     items.push({ key: -1, want: sum / dropped });

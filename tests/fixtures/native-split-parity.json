@@ -899,15 +899,15 @@
     },
     "mount/time-svg": {
       "dom": "5378f49f8c39aee9d14329ca",
-      "events": "9c78db36af64fb0337f8bd39"
+      "events": "1a2e179c0539ba9e3652bcc5"
     },
     "mount/time-chrome-svg": {
-      "dom": "96a81996183da7eab0a5db55",
-      "events": "59ae12a3cc31e7957cf372a8"
+      "dom": "fa217ca5fd39d523c650b3bf",
+      "events": "c2ce3681a6ec0b671239d498"
     },
     "mount/time-static-svg": {
       "dom": "b82532c4810898c699f2f5de",
-      "events": "fa49cdeee46570ada1621a58"
+      "events": "928fb181bbf08059b35862fd"
     },
     "mount/basic-mixed-svg": {
       "dom": "7ff2fd4724519b1af37d6d8c",
@@ -1015,15 +1015,15 @@
     },
     "mount/time-canvas": {
       "dom": "4fed52fcbdf09056d9367c91",
-      "events": "294e1e05fcbccc73efc62f0f"
+      "events": "5115351ca7c8bdf876e7481d"
     },
     "mount/time-chrome-canvas": {
-      "dom": "a27d366df9b2f924e9a9b575",
-      "events": "ecbd1efa16745c4586167fcb"
+      "dom": "fe9b84745ee80c0be4f15910",
+      "events": "7fb09dee6c6f9b8c5806788e"
     },
     "mount/time-static-canvas": {
       "dom": "5d697de1dc76a105ce684721",
-      "events": "fa49cdeee46570ada1621a58"
+      "events": "928fb181bbf08059b35862fd"
     },
     "mount/basic-mixed-canvas": {
       "dom": "ec5002917df81c136ee97296",

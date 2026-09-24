@@ -191,18 +191,19 @@ test.describe("native dashboard range presets", () => {
       { timeout: 30_000 },
     );
     const line = page.locator("#line");
-    const oneDay = line.getByRole("button", { name: "Range 1D" });
+    const oneWeek = line.getByRole("button", { name: "Range 1W" });
     const threeMonths = line.getByRole("button", { name: "Range 3M" });
     const ytd = line.getByRole("button", { name: "Range YTD" });
     const all = line.getByRole("button", { name: "Range ALL" });
-    await expect(oneDay).toBeVisible();
-    await expect(line.getByRole("button", { name: "Range 1W" })).toBeVisible();
+    // Daily rows: 1D is narrower than the three-point minimum zoom span, so it is not offered.
+    await expect(line.getByRole("button", { name: "Range 1D", includeHidden: true })).toBeHidden();
+    await expect(oneWeek).toBeVisible();
     await expect(line.getByRole("button", { name: "Range 1M" })).toBeVisible();
     await expect(threeMonths).toBeVisible();
     await expect(ytd).toBeVisible();
     const before = await line.locator("svg").evaluate((svg) => svg.innerHTML);
-    await oneDay.click();
-    await expect(oneDay).toHaveAttribute("aria-pressed", "true");
+    await oneWeek.click();
+    await expect(oneWeek).toHaveAttribute("aria-pressed", "true");
     await expect.poll(async () => line.locator("svg").evaluate((svg) => svg.innerHTML)).not.toBe(before);
     await threeMonths.click();
     await expect(threeMonths).toHaveAttribute("aria-pressed", "true");

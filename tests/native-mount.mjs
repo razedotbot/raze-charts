@@ -5,10 +5,14 @@
 // edge-anchored tick labels, tooltips that survive repaints, themed range
 // presets, rAF-coalesced wheel and resize, the cached navigator scene, and the
 // mount lifecycle (every listener, observer, and frame released on destroy
-// and on a failed update).
+// and on a failed update). The internal window maths (src/chart/viewport.ts)
+// is bundled from source with esbuild for direct unit tests.
 
 import assert from "node:assert/strict";
-import { dirname, resolve } from "node:path";
+import { build } from "esbuild";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
 
@@ -17,6 +21,31 @@ const chart = await import(pathToFileURL(resolve(root, "dist/chart.esm.js")).hre
 const {
   bar, compileChart, defineChart, line, mountChart, paintChartCanvas, pie, radar, svgFromCompiled,
 } = chart;
+
+async function importInternals() {
+  const bundled = await build({
+    stdin: {
+      contents: 'export { clampXWindow, panXWindow, zoomXWindow } from "./src/chart/viewport";',
+      resolveDir: root,
+      loader: "ts",
+      sourcefile: "native-mount-internals.ts",
+    },
+    bundle: true,
+    format: "esm",
+    platform: "neutral",
+    write: false,
+    logLevel: "silent",
+  });
+  const scratch = mkdtempSync(join(tmpdir(), "raze-native-mount-"));
+  try {
+    const file = join(scratch, "internals.mjs");
+    writeFileSync(file, bundled.outputFiles[0].text);
+    return await import(pathToFileURL(file).href);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+const { clampXWindow, panXWindow, zoomXWindow } = await importInternals();
 
 let failures = 0;
 async function check(name, run) {
@@ -690,6 +719,246 @@ await check("ResizeObserver bursts repaint once per frame", () => {
   flushFrames();
   assert.equal(canvasPaints - paintsBefore, 1, "an unchanged size does not repaint");
   fixture.cleanup();
+});
+
+// ---------------------------------------------------------------------------
+// Review round 1: re-entrant onTooltip, same-definition updates, preset
+// limits, log-axis limits, a one-chip value axis, and the window maths.
+
+await check("an onTooltip that repaints the chart terminates, and the repaint keeps its overlay", () => {
+  const emphasis = (name) => defineChart({
+    marks: [line([{ x: 0, y: 1 }, { x: 1, y: 3 }, { x: 2, y: 2 }], { x: "x", y: "y", name })],
+    legend: false,
+  });
+  let calls = 0;
+  let fixture = null;
+  fixture = mountFixture(emphasis("A"), {
+    width: 480,
+    height: 280,
+    onTooltip: (event) => {
+      calls++;
+      if (calls > 20) throw new Error("runaway onTooltip");
+      // Emphasise the hovered series by repainting from inside the callback.
+      fixture.handle.update(emphasis(event ? "A*" : "A"));
+    },
+  });
+  const sample = fixture.handle.getScene().samples[1];
+  fixture.fire("pointermove", { clientX: sample.x, clientY: sample.y });
+  assert.equal(calls, 1, "the move reports once; the repaint it starts does not call back");
+  assert.equal(fixture.handle.getScene().samples[1].series, "A*", "the repaint from onTooltip is applied");
+  assert.match(fixture.el.tip.textContent, /A\*/, "the tooltip shows the repainted scene");
+  fixture.fire("pointerleave");
+  assert.equal(calls, 2, "leaving reports null once, and its repaint does not call back");
+  assert.equal(fixture.el.tip.style.display, "none");
+  fixture.cleanup();
+
+  // A host that repaints on the next frame with rebuilt, equal rows settles too.
+  let deferred = 0;
+  const rebuilt = () => defineChart({
+    marks: [line([{ x: 0, y: 1 }, { x: 1, y: 3 }, { x: 2, y: 2 }], { x: "x", y: "y", name: "B" })],
+    legend: false,
+  });
+  const later = mountFixture(rebuilt(), {
+    width: 480,
+    height: 280,
+    onTooltip: () => {
+      deferred++;
+      requestAnimationFrame(() => later.handle.update(rebuilt()));
+    },
+  });
+  const target = later.handle.getScene().samples[1];
+  later.fire("pointermove", { clientX: target.x, clientY: target.y });
+  for (let frame = 0; frame < 5; frame++) flushFrames();
+  assert.equal(deferred, 1, "equal rows rebuilt on every repaint do not re-report the tooltip");
+  assert.equal(frames.size, 0, "no repaint loop is left scheduled");
+  later.cleanup();
+});
+
+await check("repaints re-report onTooltip only when the hovered values change", () => {
+  const events = [];
+  const series = (value) => defineChart({
+    marks: [line([{ x: 0, y: 10 }, { x: 1, y: value }, { x: 2, y: 30 }], { x: "x", y: "y", name: "Live" })],
+    legend: false,
+  });
+  const fixture = mountFixture(series(20), { width: 480, height: 280, onTooltip: (event) => events.push(event) });
+  const sample = fixture.handle.getScene().samples[1];
+  fixture.fire("pointermove", { clientX: sample.x, clientY: sample.y });
+  assert.equal(events.length, 1);
+  fixture.handle.update(series(20));
+  fixture.handle.update(series(20), { width: 480 });
+  assert.equal(events.length, 1, "a repaint with the same values does not call onTooltip");
+  fixture.handle.update(series(21));
+  assert.equal(events.length, 2, "a changed value is reported once");
+  assert.equal(events.at(-1).y, 21);
+  fixture.fire("pointermove", { clientX: sample.x, clientY: sample.y });
+  assert.equal(events.length, 3, "pointer moves keep reporting every move");
+  fixture.cleanup();
+});
+
+await check("an onTooltip error during update() surfaces after the update is applied", () => {
+  let failing = false;
+  const series = (value) => defineChart({
+    marks: [line([{ x: 0, y: 10 }, { x: 1, y: value }, { x: 2, y: 30 }], { x: "x", y: "y", name: "Live" })],
+    legend: false,
+  });
+  const fixture = mountFixture(series(20), {
+    width: 480,
+    height: 280,
+    idPrefix: "tooltip-error",
+    onTooltip: () => {
+      if (failing) throw new Error("host tooltip failed");
+    },
+  });
+  const sample = fixture.handle.getScene().samples[1];
+  fixture.fire("pointermove", { clientX: sample.x, clientY: sample.y });
+  failing = true;
+  assert.throws(() => fixture.handle.update(series(25)), /host tooltip failed/);
+  const scene = fixture.handle.getScene();
+  assert.equal(scene.samples[1].yValue, 25, "the scene is the updated one");
+  assert.match(fixture.el.tip.textContent, /25/, "the tooltip shows the same scene as getScene()");
+  const expected = document.createElement("div");
+  expected.innerHTML = svgFromCompiled(scene, { idPrefix: "tooltip-error" });
+  assert.equal(fixture.stage.innerHTML, expected.innerHTML, "the stage holds the scene getScene() returns");
+  failing = false;
+  fixture.handle.update(series(26));
+  assert.equal(fixture.handle.getScene().samples[1].yValue, 26, "the mount keeps working");
+  fixture.cleanup();
+});
+
+await check("update() with the same definition sees mutated rows: extent, bounds, and navigator follow", () => {
+  const rows = Array.from({ length: 50 }, (_, i) => ({ x: i, y: i % 7 }));
+  let specCalls = 0;
+  const definition = defineChart(() => {
+    specCalls++;
+    return { marks: [line(rows, { x: "x", y: "y", name: "S" })], legend: false };
+  });
+  const fixture = mountFixture(definition, { width: 480, height: 280, viewport: { x: [30, 49] }, interaction: { navigator: true } });
+  for (let i = 50; i < 100; i++) rows.push({ x: i, y: i % 7 });
+  let before = specCalls;
+  fixture.handle.update(definition);
+  assert.equal(specCalls - before, 2, "the window and the full-data scene recompile once");
+  for (let i = 0; i < 40; i++) fixture.fire("wheel", { clientX: 240, clientY: 140, deltaY: 100 });
+  flushFrames();
+  let [lo, hi] = fixture.handle.getViewport().x.map(Number);
+  assert(lo <= 0 && hi >= 99, `zooming out reaches the appended rows ([${lo}, ${hi}])`);
+  fixture.handle.setViewport({ x: [70, 90] });
+  fixture.fire("pointerdown", { clientX: 300, clientY: 140 });
+  fixture.fire("pointermove", { clientX: 100, clientY: 140 });
+  fixture.fire("pointerup", { clientX: 100, clientY: 140 });
+  const panned = fixture.handle.getViewport().x.map(Number);
+  assert(panned[1] > 95 && Math.abs(panned[1] - panned[0] - 20) < 1e-6, `panning reaches the appended rows ([${panned}])`);
+
+  before = specCalls;
+  fixture.handle.update(definition, { viewport: { x: [60, 80] } });
+  assert.equal(specCalls - before, 1, "a viewport-only update (a controlled echo) reuses the full-data scene");
+
+  for (let i = 100; i < 150; i++) rows.push({ x: i, y: i % 7 });
+  before = specCalls;
+  fixture.handle.setViewport({ x: [100, 140] });
+  assert.equal(specCalls - before, 2, "appended rows invalidate the cached full-data scene without update()");
+  for (let i = 0; i < 40; i++) fixture.fire("wheel", { clientX: 240, clientY: 140, deltaY: 100 });
+  flushFrames();
+  [lo, hi] = fixture.handle.getViewport().x.map(Number);
+  assert(hi >= 149, `the extent grows with the rows ([${lo}, ${hi}])`);
+
+  before = specCalls;
+  rows[rows.length - 1].y = 42;
+  fixture.handle.update(definition);
+  assert.equal(specCalls - before, 2, "an in-place edit refreshes the navigator scene on update()");
+  fixture.cleanup();
+});
+
+await check("range presets stay inside the zoom limits", () => {
+  const fixture = mountFixture(revenueDefinition, { width: 480, height: 280, interaction: { rangePresets: true } });
+  const button = (label) => [...fixture.el.presetsBar.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
+  assert.equal(button("1D").hidden, true, "1D is hidden on daily rows: it is narrower than three data points");
+  assert.equal(button("1W").hidden, false, "1W is offered");
+
+  fixture.handle.update(revenueDefinition, { interaction: { rangePresets: true, zoom: { minSpan: 20 * DAY } } });
+  assert.equal(button("1W").hidden, true, "presets narrower than zoom.minSpan are hidden");
+  assert.equal(button("1M").hidden, false, "wider presets stay");
+  button("1M").click();
+  let [lo, hi] = fixture.handle.getViewport().x.map(Number);
+  assert(hi - lo >= 20 * DAY - 1e-6, "a preset window is never narrower than minSpan");
+  assert.equal(button("1M").getAttribute("aria-pressed"), "true");
+
+  fixture.handle.update(revenueDefinition, { interaction: { rangePresets: true, zoom: { maxSpan: 20 * DAY } } });
+  assert.equal(button("1M").hidden, true, "presets wider than zoom.maxSpan are hidden");
+  fixture.handle.setViewport(null);
+  const extentEnd = Math.max(...fixture.handle.getScene().xScale.domain);
+  button("ALL").click();
+  [lo, hi] = fixture.handle.getViewport().x.map(Number);
+  assert(Math.abs(hi - lo - 20 * DAY) < 1e-3, "ALL is fitted to maxSpan");
+  assert(Math.abs(hi - extentEnd) < 1e-3, "ALL keeps the latest data in view");
+  assert.equal(button("ALL").getAttribute("aria-pressed"), "true", "the fitted ALL window reads as ALL");
+  fixture.cleanup();
+});
+
+await check("log X axes bound zoom in decades, around the pointer", () => {
+  const rows = Array.from({ length: 50 }, (_, i) => ({ x: 10 ** (1 + i / 10), y: i }));
+  const definition = defineChart({
+    marks: [line(rows, { x: "x", y: "y", name: "S" })],
+    scales: { x: { type: "log", domain: [10, 1e6] } },
+    legend: false,
+  });
+  const fixture = mountFixture(definition, { width: 480, height: 280 });
+  const scene = fixture.handle.getScene();
+  const clientX = scene.plot.x + scene.plot.w * 0.25;
+  const anchor = scene.xScale.invert(clientX);
+  for (let i = 0; i < 300; i++) fixture.fire("wheel", { clientX, clientY: 140, deltaY: -100 });
+  flushFrames();
+  let [lo, hi] = fixture.handle.getViewport().x.map(Number);
+  assert(Math.abs(Math.log10(hi) - Math.log10(lo) - 0.2) < 1e-9, `the default minimum is three data points, in decades ([${lo}, ${hi}])`);
+  assert(Math.abs(fixture.handle.getScene().xScale.invert(clientX) / anchor - 1) < 1e-6, "the value under the pointer stays put");
+  for (let i = 0; i < 300; i++) fixture.fire("wheel", { clientX, clientY: 140, deltaY: 100 });
+  flushFrames();
+  assert.deepEqual(fixture.handle.getViewport().x.map(Number), [10, 1e6], "zooming out recovers the exact extent");
+  fixture.handle.update(definition, { interaction: { zoom: { minSpan: 1 } } });
+  for (let i = 0; i < 300; i++) fixture.fire("wheel", { clientX, clientY: 140, deltaY: -100 });
+  flushFrames();
+  [lo, hi] = fixture.handle.getViewport().x.map(Number);
+  assert(Math.abs(Math.log10(hi) - Math.log10(lo) - 1) < 1e-9, "zoom.minSpan is measured in decades on log axes");
+  fixture.cleanup();
+});
+
+await check("when only one last-value chip fits, it summarises every series", () => {
+  const marks = ["A", "B", "C"].map((name, i) => line([{ x: 0, y: 5 }, { x: 1, y: i }], { x: "x", y: "y", name }));
+  let scene = null;
+  for (let height = 30; height <= 90 && !scene; height += 2) {
+    const candidate = compileChart(defineChart({ marks, legend: false }), { width: 400, height });
+    if (candidate.plot.h >= 15 && candidate.plot.h - 15 < 16) scene = candidate;
+  }
+  assert(scene, "a plot shorter than two chip pitches exists");
+  assert.equal(scene.lastValues.length, 3, "all three series have a last value");
+  const markup = svgFromCompiled(scene);
+  assert.equal(chipTops(markup, scene).length, 1, "one chip is drawn");
+  assert.match(markup, /…\+3</, "the chip counts all three series");
+  const ctx = stubContext();
+  paintChartCanvas(ctx, scene);
+  const labels = ctx.texts.map((text) => text.text);
+  assert(labels.includes("…+3"), "Canvas draws the same summary chip");
+});
+
+await check("window maths: ordering, invalid spans, narrow extents, anchors, and pans", () => {
+  const limits = { extent: [0, 10], minSpan: 1, maxSpan: 10, bounded: true };
+  const near = (actual, expected, message) => {
+    assert(actual.length === 2 && actual.every((value, i) => Math.abs(value - expected[i]) < 1e-9), `${message} (${actual})`);
+  };
+  near(clampXWindow([5, 1], limits), [1, 5], "an inverted range is ordered");
+  near(clampXWindow([Number.NaN, 5], limits), [0, 10], "a NaN span falls back to the extent");
+  near(clampXWindow([4, 4.2], limits), [3.6, 4.6], "a narrow window widens to minSpan around its centre");
+  near(clampXWindow([9.5, 9.7], limits), [9, 10], "a widened window is kept inside the data");
+  near(clampXWindow([1, 2], { extent: [0, 5], minSpan: 10, maxSpan: 10, bounded: true }), [0, 5], "an extent narrower than minSpan is shown whole");
+  near(clampXWindow([1, 2], { extent: [0, 5], minSpan: 4, maxSpan: 10, bounded: false }), [-0.5, 3.5], "unbounded windows may leave the data");
+  near(zoomXWindow([0, 10], 2.5, 0.5, limits), [1.25, 6.25], "zoom keeps the anchor's relative position");
+  near(zoomXWindow([0, 10], 2.5, 0.01, limits), [2.25, 3.25], "zoom-in stops at minSpan around the anchor");
+  near(zoomXWindow([2, 4], 3, 100, limits), [0, 10], "zoom-out stops at the extent");
+  near(zoomXWindow([2, 4], 3, Number.NaN, limits), [2, 4], "an invalid factor only clamps");
+  near(zoomXWindow([3, 3], 3, 0.5, limits), [2.5, 3.5], "an empty window is widened to minSpan");
+  near(panXWindow([2, 4], 3, limits), [5, 7], "pan shifts by the delta");
+  near(panXWindow([2, 4], 10, limits), [8, 10], "a bounded pan stops at the data");
+  near(panXWindow([2, 4], 10, { ...limits, bounded: false }), [12, 14], "an unbounded pan does not");
+  near(panXWindow([2, 4], Number.NaN, limits), [2, 4], "a NaN delta does not move the window");
 });
 
 // ---------------------------------------------------------------------------

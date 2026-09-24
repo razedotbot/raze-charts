@@ -3,10 +3,19 @@
 
 import { t } from "../../i18n";
 import { asNumber } from "../compile/shared";
-import type { CompiledChart } from "../compile/types";
+import type { ChartViewport, CompiledChart } from "../compile/types";
 import { chartColorWithOpacity, parseChartColor, type DashboardTheme, type ParsedChartColor } from "../theme";
-import { RANGE_PRESETS, clampXWindow, presetZoomsIn, viewportFromPreset, type RangePreset } from "../viewport";
+import {
+  RANGE_PRESETS,
+  clampXWindow,
+  isQuantitativeViewportX,
+  presetZoomsIn,
+  quantitativeRange,
+  viewportFromPreset,
+  type RangePreset,
+} from "../viewport";
 import type { MountRuntime } from "./types";
+import { axisSpan, fitPresetWindow, type AxisWindowLimits } from "./zoom";
 
 export interface RangeChrome {
   /** Show or hide the preset bar and navigator for the scene family. */
@@ -57,6 +66,27 @@ export function linearExtent(scene: CompiledChart | null): [number, number] | nu
   return [asNumber(scene.xScale.domain[0]), asNumber(scene.xScale.domain[1])];
 }
 
+/** The window a preset selects: its range fitted to the zoom limits when they exist. */
+export function presetViewport(preset: RangePreset, extent: readonly [number, number], limits: AxisWindowLimits | null): ChartViewport {
+  const viewport = viewportFromPreset(preset, extent);
+  if (!limits || !viewport.x || !isQuantitativeViewportX(viewport.x)) return viewport;
+  return { x: fitPresetWindow(quantitativeRange(viewport.x), limits) };
+}
+
+/**
+ * Whether a preset is offered: ALL always is; others must narrow the extent
+ * and fit within [minSpan, maxSpan], so a preset never selects a window that
+ * zooming could not reach.
+ */
+export function presetOffered(preset: RangePreset, extent: readonly [number, number], limits: AxisWindowLimits | null): boolean {
+  if (preset === "ALL") return true;
+  if (!presetZoomsIn(preset, extent)) return false;
+  const viewport = viewportFromPreset(preset, extent);
+  if (!limits || !viewport.x || !isQuantitativeViewportX(viewport.x)) return true;
+  const span = axisSpan(quantitativeRange(viewport.x), limits);
+  return span >= limits.space.minSpan * (1 - 1e-9) && span <= limits.space.maxSpan * (1 + 1e-9);
+}
+
 export function createRangeChrome(rt: MountRuntime): RangeChrome {
   const { state } = rt;
   const { presetsBar, nav } = rt.dom;
@@ -67,16 +97,18 @@ export function createRangeChrome(rt: MountRuntime): RangeChrome {
   );
 
   const syncPresets = (theme: DashboardTheme): void => {
+    if (!presetsBar.childElementCount) return;
     const indicator = presetIndicatorColor(theme);
     const extent = resolvedExtent();
+    const limits = rt.windowLimits();
     const vp = state.viewport?.x;
     for (const btn of presetsBar.querySelectorAll("button")) {
       const preset = btn.textContent as RangePreset;
       if (!RANGE_PRESETS.includes(preset)) continue;
-      btn.hidden = extent != null && preset !== "ALL" && !presetZoomsIn(preset, extent);
+      btn.hidden = extent != null && !presetOffered(preset, extent, limits);
       let on = preset === "ALL" && !vp;
       if (vp && vp.length === 2 && extent && Number.isFinite(asNumber(vp[0]))) {
-        const want = viewportFromPreset(preset, extent);
+        const want = presetViewport(preset, extent, limits);
         if (want.x && want.x.length === 2) {
           const span = Math.max(Math.abs(extent[1] - extent[0]), 1);
           on = Math.abs(asNumber(vp[0]) - asNumber(want.x[0])) / span < 0.02
@@ -122,14 +154,20 @@ export function createRangeChrome(rt: MountRuntime): RangeChrome {
     if (!extent) return;
     const box = nav.getBoundingClientRect();
     const t = (ev.clientX - box.left) / Math.max(1, box.width);
-    const mid = extent[0] + t * (extent[1] - extent[0]);
+    // The sparkline is drawn on the axis, so the click maps in axis space (log10 on log axes).
+    const limits = rt.windowLimits();
+    const to = limits ? limits.transform.to : (value: number): number => value;
+    const from = limits ? limits.transform.from : to;
+    const lo = to(extent[0]);
+    const hi = to(extent[1]);
+    const mid = lo + t * (hi - lo);
     const viewport = state.viewport;
     const span = (viewport?.x && viewport.x.length === 2)
-      ? Math.abs(asNumber(viewport.x[1]) - asNumber(viewport.x[0]))
-      : (extent[1] - extent[0]) * 0.25;
-    const limits = rt.windowLimits();
-    const centred: [number, number] = [mid - span / 2, mid + span / 2];
-    rt.emitViewport({ x: limits ? clampXWindow(centred, limits) : centred });
+      ? Math.abs(to(asNumber(viewport.x[1])) - to(asNumber(viewport.x[0])))
+      : (hi - lo) * 0.25;
+    let centred: [number, number] = [mid - span / 2, mid + span / 2];
+    if (limits) centred = clampXWindow(centred, limits.space);
+    rt.emitViewport({ x: [from(centred[0]), from(centred[1])] });
   };
 
   const paintNavigator = (compiled: CompiledChart, fullScene: CompiledChart | null): void => {
@@ -183,7 +221,7 @@ export function createRangeChrome(rt: MountRuntime): RangeChrome {
     ev.stopPropagation();
     const extent = resolvedExtent();
     if (!extent) return;
-    rt.emitViewport(viewportFromPreset(preset, extent));
+    rt.emitViewport(presetViewport(preset, extent, rt.windowLimits()));
   };
 
   const attach = (): (() => void) => {

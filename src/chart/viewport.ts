@@ -166,7 +166,7 @@ export function zoomXWindow(
   return clampXWindow([nextLo, nextLo + target], limits);
 }
 
-/** Shift a window by `delta` data units, keeping its span and the data bounds. */
+/** Shift a window by `delta` (in the limits' units), keeping its span within the limits and the data bounds. */
 export function panXWindow(range: readonly [number, number], delta: number, limits: XWindowLimits): [number, number] {
   const [lo, hi] = orderedWindow(range);
   const shift = Number.isFinite(delta) ? delta : 0;

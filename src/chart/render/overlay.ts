@@ -12,7 +12,7 @@ import { clientToScene, cssX, cssY, type StageFrame } from "./frame";
 import { layoutLegend } from "./legend";
 import { pointerEventFor, resolvePointer, type PointerTarget } from "./pointer";
 import { tooltipText } from "./hit";
-import type { MountDom, MountRuntime } from "./types";
+import type { ChartPointerEvent, MountDom, MountRuntime } from "./types";
 
 /** Height of a crosshair axis chip (15px line box + 1px padding). */
 const AXIS_CHIP_HEIGHT = 17;
@@ -201,27 +201,54 @@ function updateCrosshair(dom: MountDom, compiled: CompiledChart, target: Pointer
 export interface HoverController {
   /** Pointer-move handler: records the pointer and drives the overlay. */
   move(ev: PointerEvent): void;
-  /** Re-run hover at the retained pointer after a repaint; hides the overlay when there is none. */
+  /**
+   * Re-run hover at the retained pointer after a repaint; hides the overlay
+   * when there is none. onTooltip runs only when the target or its values
+   * changed, and never from a repaint that onTooltip itself started.
+   */
   refresh(): void;
   /** Forget the retained pointer and hide the overlay (pointer left the mount). */
   leave(): void;
+}
+
+/** Values of a payload that the host can observe; identities are left out on purpose. */
+function payloadSignature(event: ChartPointerEvent, text: string): string {
+  return [event.series, event.seriesId, event.markIndex, event.index, typeof event.x, String(event.x), event.y, text].join("\u0000");
 }
 
 /** Hover overlay and onTooltip for one mount. */
 export function createHoverController(rt: MountRuntime): HoverController {
   const { dom, state } = rt;
   const { stage, hairV, hairH, chipY, chipX, tip, dot, cell } = dom;
-  let tooltipShown = false;
+  /** Signature of the last payload onTooltip received; "" after null or before any. */
+  let reported = "";
+  /** True while onTooltip runs. A repaint it starts updates the overlay without calling back. */
+  let notifying = false;
 
-  const clear = (): void => {
-    rt.hideOverlay();
-    if (tooltipShown) {
-      tooltipShown = false;
-      state.options.onTooltip?.(null);
+  /**
+   * Report to onTooltip. Pointer moves always report; repaints (`changesOnly`)
+   * report only a changed target, so a host that repaints from onTooltip, or
+   * rebuilds equal rows on every render, cannot loop.
+   */
+  const notify = (event: ChartPointerEvent | null, signature: string, changesOnly: boolean): void => {
+    if (notifying || (changesOnly && signature === reported)) return;
+    reported = signature;
+    const handler = state.options.onTooltip;
+    if (!handler) return;
+    notifying = true;
+    try {
+      handler(event);
+    } finally {
+      notifying = false;
     }
   };
 
-  const show = (clientX: number, clientY: number): void => {
+  const clear = (): void => {
+    rt.hideOverlay();
+    notify(null, "", true);
+  };
+
+  const show = (clientX: number, clientY: number, changesOnly: boolean): void => {
     const compiled = state.scene;
     const frame = rt.frame();
     if (!compiled?.tooltip || !frame || state.dragging) {
@@ -285,14 +312,11 @@ export function createHoverController(rt: MountRuntime): HoverController {
     }
     if (!text) {
       tip.style.display = "none";
-      tooltipShown = false;
-      state.options.onTooltip?.(null);
+      notify(null, "", changesOnly);
       return;
     }
     tip.textContent = text;
     tip.style.display = "block";
-    tooltipShown = true;
-    state.options.onTooltip?.(pointerEventFor(resolved));
     const pointerX = clientX - frame.clientLeft + frame.left;
     const pointerY = clientY - frame.clientTop + frame.top;
     const { bounds } = frame;
@@ -306,6 +330,9 @@ export function createHoverController(rt: MountRuntime): HoverController {
     tip.style.top = `${Math.max(bounds.top + 4, top)}px`;
     tip.style.background = theme.chipBg;
     tip.style.boxShadow = `inset 2px 0 0 ${accent}, 0 0 0 1px ${theme.axis}`;
+    // Last, so a repaint started by onTooltip leaves its own overlay in place.
+    const event = pointerEventFor(resolved);
+    notify(event, payloadSignature(event, text), changesOnly);
   };
 
   return {
@@ -315,7 +342,7 @@ export function createHoverController(rt: MountRuntime): HoverController {
         clear();
         return;
       }
-      show(ev.clientX, ev.clientY);
+      show(ev.clientX, ev.clientY, false);
     },
     refresh() {
       const pointer = state.pointer;
@@ -323,7 +350,7 @@ export function createHoverController(rt: MountRuntime): HoverController {
         rt.hideOverlay();
         return;
       }
-      show(pointer.clientX, pointer.clientY);
+      show(pointer.clientX, pointer.clientY, true);
     },
     leave() {
       state.pointer = null;

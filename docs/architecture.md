@@ -340,7 +340,7 @@ src/chart/render/
   hit.ts        hit testing, hover-sample index, tooltip text
   pointer.ts    pointer targets with data-space values; onTooltip/onSelect payloads
   frame.ts      stage frame: where the scene sits on screen, for pointer mapping
-  zoom.ts       interaction option validation, zoom limits, log-axis transform
+  zoom.ts       interaction option validation, zoom limits in axis space (decades on log axes), shared window maths
   primitives.ts shared paths, arcs, rounded bars, shading, escaping
   mount.ts      mountChart() lifecycle, compile/paint, rAF resize, cached full scene, handle
   overlay.ts    mount DOM, hover crosshair/tooltip overlay, legend toggle buttons

@@ -5,11 +5,13 @@
 // Repaints are cheap to request and expensive to run, so high-frequency
 // sources are coalesced: wheel zoom and resize paint at most once per frame,
 // and the full-data scene behind the navigator and the zoom limits is cached
-// per definition and size instead of being recompiled on every viewport change.
+// per content and size instead of being recompiled on every viewport change.
+// Content is the definition, a revision that update() bumps (rows may have
+// been mutated in place), and a fingerprint of the rows the spec returns, so
+// appended data is seen even by paints that only move the viewport.
 
 import { compileChart } from "../compile/chart";
 import type { ChartDefinition, ChartSpec, ChartViewport, CompiledChart } from "../compile/types";
-import type { XWindowLimits } from "../viewport";
 import { paintChartCanvas } from "./canvas";
 import { createRangeChrome, linearExtent } from "./chrome";
 import { stageFrame, type StageFrame } from "./frame";
@@ -23,7 +25,7 @@ import {
 } from "./overlay";
 import { nextRenderSequence, safeId, svgFromCompiled } from "./svg";
 import type { MountChartOptions, MountHandle, MountRuntime, MountState, ResolvedInteraction } from "./types";
-import { estimateDataStep, resolveInteraction, resolveWindowLimits } from "./zoom";
+import { estimateDataStep, resolveInteraction, resolveWindowLimits, type AxisTransform, type AxisWindowLimits } from "./zoom";
 
 /** Accessible text for the Canvas renderer: description, series, and up to 50 tooltips. */
 function canvasSummary(compiled: CompiledChart): string[] {
@@ -54,12 +56,38 @@ interface CapturedScene {
   spec: ChartSpec | null;
 }
 
-function compileCapturing(definition: ChartDefinition, size: { width: number; height: number }): CapturedScene {
+/**
+ * What the full-data state was derived from: the definition, the update()
+ * revision, and per mark the row count plus the first and last rows.
+ */
+interface ContentKey {
+  definition: ChartDefinition;
+  revision: number;
+  rows: unknown[];
+}
+
+function rowFingerprint(spec: ChartSpec | null): unknown[] {
+  const parts: unknown[] = [];
+  for (const mark of spec?.marks ?? []) parts.push(mark.data.length, mark.data[0], mark.data[mark.data.length - 1]);
+  return parts;
+}
+
+function sameContent(a: ContentKey | null, b: ContentKey): boolean {
+  return !!a && a.definition === b.definition && a.revision === b.revision
+    && a.rows.length === b.rows.length && a.rows.every((part, i) => Object.is(part, b.rows[i]));
+}
+
+/** Compile `definition`, letting `extend` add to its spec, and keep the spec as defined. */
+function compileCapturing(
+  definition: ChartDefinition,
+  size: { width: number; height: number },
+  extend: (spec: ChartSpec) => ChartSpec = (spec) => spec,
+): CapturedScene {
   let spec: ChartSpec | null = null;
   const scene = compileChart({
     spec: (input) => {
       spec = definition.spec(input);
-      return spec;
+      return extend(spec);
     },
   }, size);
   return { scene, spec };
@@ -87,9 +115,14 @@ export function mountChart(
   const autoId = `mounted-${nextRenderSequence()}`;
   const dom = createMountDom(el);
   const { wrap, stage, a11y, presetsBar, nav, legend } = dom;
-  /** Full-data scene keyed by definition and size (navigator sparkline, extent). */
-  let fullCache: { definition: ChartDefinition; width: number; height: number; captured: CapturedScene } | null = null;
-  let stepCache: { spec: ChartSpec | null; step: number | null } = { spec: null, step: null };
+  /** Bumped by update(); cached full-data state from an older revision is stale. */
+  let revision = 0;
+  /** Content that state.fullXExtent and state.fullSpec describe. */
+  let fullKey: ContentKey | null = null;
+  /** Full-data scene keyed by content and size (navigator sparkline, extent). */
+  let fullCache: { key: ContentKey; width: number; height: number; captured: CapturedScene } | null = null;
+  /** Data spacing for the zoom defaults, per full-data content and axis transform. */
+  let stepCache: { key: ContentKey | null; transform: AxisTransform; step: number | null } | null = null;
   let resizeRaf = 0;
   /** Stage size the live scene was compiled for (before explicit width/height). */
   let compiledStage = { width: Number.NaN, height: Number.NaN };
@@ -113,12 +146,16 @@ export function mountChart(
 
   const frame = (): StageFrame | null => (state.scene ? stageFrame(wrap, stage, state.scene) : null);
 
-  const windowLimits = (): XWindowLimits | null => {
-    const scene = state.scene;
-    if (!scene) return null;
-    if (stepCache.spec !== state.fullSpec) stepCache = { spec: state.fullSpec, step: estimateDataStep(state.fullSpec) };
-    return resolveWindowLimits(scene, state.fullXExtent, flags(), state.fullSpec, stepCache);
+  const stepFor = (transform: AxisTransform): number | null => {
+    if (stepCache?.key !== fullKey || stepCache.transform !== transform) {
+      stepCache = { key: fullKey, transform, step: estimateDataStep(state.fullSpec, transform) };
+    }
+    return stepCache.step;
   };
+
+  const windowLimits = (): AxisWindowLimits | null => (
+    state.scene ? resolveWindowLimits(state.scene, state.fullXExtent, flags(), stepFor) : null
+  );
 
   const emitViewport = (next: ChartViewport): void => {
     state.viewport = next;
@@ -138,17 +175,26 @@ export function mountChart(
   const chrome = createRangeChrome(rt);
   const hover = createHoverController(rt);
 
-  /** Full-data scene for the current definition at `size`, compiled once per definition and size. */
-  function fullSceneFor(current: ChartDefinition, size: { width: number; height: number }): CapturedScene {
-    if (fullCache && fullCache.definition === current && fullCache.width === size.width && fullCache.height === size.height) {
+  /** Full-data scene for `key` at `size`, compiled once per content and size. */
+  function fullSceneFor(key: ContentKey, size: { width: number; height: number }): CapturedScene {
+    if (fullCache && sameContent(fullCache.key, key) && fullCache.width === size.width && fullCache.height === size.height) {
       return fullCache.captured;
     }
-    const captured = compileCapturing(current, size);
-    fullCache = { definition: current, width: size.width, height: size.height, captured };
+    const captured = compileCapturing(key.definition, size);
+    fullCache = { key, width: size.width, height: size.height, captured };
     return captured;
   }
 
+  /** Recompile and repaint, then re-run hover at the retained pointer. */
   function paint(): void {
+    render();
+    // A tooltip under a stationary pointer survives streaming updates,
+    // resizes, and viewport changes: hover re-runs at the retained pointer.
+    hover.refresh();
+  }
+
+  /** Recompile and repaint the scene and chrome, and commit it to state. */
+  function render(): void {
     if (state.destroyed) throw new Error("[@razedotbot/charts] Cannot paint a destroyed chart mount.");
     const renderer = state.options.renderer ?? "svg";
     const idPrefix = safeId(state.options.idPrefix ?? autoId);
@@ -164,42 +210,30 @@ export function mountChart(
     const hidden = state.hidden.size ? Array.from(state.hidden) : state.options.hiddenSeries;
     const viewport = state.viewport ?? state.options.viewport;
     const overlayed = Boolean(viewport) || Boolean(hidden?.length);
-    let compiled: CompiledChart;
-    let fullScene: CompiledChart | null = null;
-    let fullSpec: ChartSpec | null = state.fullSpec;
-    if (overlayed) {
-      compiled = compileChart({
-        spec: (size) => ({
-          ...current.spec(size),
-          ...(viewport ? { viewport } : {}),
-          ...(hidden?.length ? { hiddenSeries: hidden } : {}),
-        }),
-      }, { width: w, height: h });
-    } else {
-      const captured = compileCapturing(current, { width: w, height: h });
-      compiled = captured.scene;
-      fullScene = compiled;
-      fullSpec = captured.spec;
-    }
+    const captured = compileCapturing(current, stageSize, (spec) => (overlayed ? {
+      ...spec,
+      ...(viewport ? { viewport } : {}),
+      ...(hidden?.length ? { hiddenSeries: hidden } : {}),
+    } : spec));
+    const compiled = captured.scene;
+    const key: ContentKey = { definition: current, revision, rows: rowFingerprint(captured.spec) };
     if (compiled.polar || compiled.heatmap) {
       chrome.prepare(true, true);
     }
     const showNav = Boolean(interact.navigator && !compiled.polar && !compiled.heatmap);
-    if (overlayed && (!state.fullXExtent || showNav)) {
-      const full = fullSceneFor(current, {
+    let full: CapturedScene | null = overlayed ? null : captured;
+    if (overlayed && (showNav || !sameContent(fullKey, key))) {
+      full = fullSceneFor(key, {
         width: Math.max(32, showNav ? nav.clientWidth || w : 64),
         height: Math.max(24, showNav ? nav.clientHeight || 40 : 32),
       });
-      fullScene = full.scene;
-      fullSpec = full.spec;
     }
-    const source = fullScene ?? compiled;
-    if (source.xScale.kind === "linear" && (!state.fullXExtent || !overlayed)) {
-      state.fullXExtent = linearExtent(source);
+    if (full && !sameContent(fullKey, key)) {
+      state.fullXExtent = linearExtent(full.scene);
+      state.fullSpec = full.spec;
+      fullKey = key;
     }
-    state.fullSpec = fullSpec;
-    chrome.syncPresets(compiled.theme);
-    if (showNav && compiled.xScale.kind === "linear") chrome.paintNavigator(compiled, fullScene);
+    if (showNav && compiled.xScale.kind === "linear") chrome.paintNavigator(compiled, full?.scene ?? null);
     if (renderer === "canvas") {
       let canvas = stage.querySelector("canvas");
       if (!canvas) {
@@ -240,10 +274,9 @@ export function mountChart(
     state.lastInputWidth = wrapSize.width;
     state.lastInputHeight = wrapSize.height;
     compiledStage = stageSize;
+    // Presets read the zoom limits, which need the committed scene.
+    chrome.syncPresets(compiled.theme);
     syncLegendToggles(rt);
-    // A tooltip under a stationary pointer survives streaming updates, resizes,
-    // and viewport changes: hover re-runs at the retained pointer position.
-    hover.refresh();
   }
 
   const onResizeFrame = (): void => {
@@ -300,21 +333,27 @@ export function mountChart(
       const previousHiddenSeries = state.hidden;
       const previousFullXExtent = state.fullXExtent;
       const previousFullSpec = state.fullSpec;
-      const definitionChanged = next !== state.definition;
+      const previousRevision = revision;
+      const previousFullKey = fullKey;
       state.definition = next;
-      if (definitionChanged) state.fullXExtent = null;
+      let navigation = false;
       if (nextOptions) {
         state.options = { ...state.options, ...nextOptions };
         if (Object.prototype.hasOwnProperty.call(nextOptions, "viewport")) {
           const requested = nextOptions.viewport ?? null;
           // An echo of the live window (controlled mode) keeps a pending wheel zoom.
-          if (!sameViewport(requested, state.viewport)) gestures?.cancelWheel();
+          navigation = !sameViewport(requested, state.viewport);
+          if (navigation) gestures?.cancelWheel();
           state.viewport = requested;
         }
         if (nextOptions.hiddenSeries) state.hidden = new Set(nextOptions.hiddenSeries);
       }
+      // Rows may have been mutated in place, so the full-data extent and the
+      // navigator are recomputed. Moving the viewport is navigation (such as a
+      // controlled zoom echo), where the row fingerprint still catches appends.
+      if (!navigation) revision++;
       try {
-        paint();
+        render();
       } catch (error) {
         state.definition = previous;
         state.options = previousOptions;
@@ -323,10 +362,14 @@ export function mountChart(
         state.hidden = previousHiddenSeries;
         state.fullXExtent = previousFullXExtent;
         state.fullSpec = previousFullSpec;
+        revision = previousRevision;
+        fullKey = previousFullKey;
         // The failed paint may have re-laid the chrome for the rejected options.
         chrome.prepare(previousScene?.polar ?? false, previousScene?.heatmap ?? false);
         throw error;
       }
+      // After the commit, so an onTooltip error cannot split state from the DOM.
+      hover.refresh();
     },
     getScene() { return state.destroyed ? null : state.scene; },
     setViewport(viewport) {

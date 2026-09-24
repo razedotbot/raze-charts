@@ -164,6 +164,11 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
  * Give a mark's hover samples their series identity and source row index.
  * Samples are emitted in row order and the viewport window keeps row order,
  * so one forward identity walk over the source rows resolves every index.
+ *
+ * TODO(W2-13, perf-native-viewport-index): the walk starts at row 0, so a
+ * narrow window at the end of a large mark costs O(rows before the window).
+ * That is below the O(n) windowing today; once windowing binary-searches,
+ * have windowChartSpec report each window's source offset and start there.
  */
 function stampSampleIdentity(samples: HoverSample[], from: number, source: ChartMark, markIndex: number): void {
   if (from >= samples.length) return;

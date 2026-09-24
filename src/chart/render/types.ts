@@ -2,8 +2,8 @@
 // runtime shared by the mount, overlay, range-chrome, and gesture modules.
 
 import type { ChartDefinition, ChartSpec, ChartViewport, CompiledChart, HoverSample, SceneNode } from "../compile/types";
-import type { XWindowLimits } from "../viewport";
 import type { StageFrame } from "./frame";
+import type { AxisWindowLimits } from "./zoom";
 
 /**
  * Pointer payload for `onTooltip` and `onSelect`. Values are structured and
@@ -38,10 +38,14 @@ export interface MountInteraction {
   brush?: boolean;
   /**
    * Wheel and pinch zoom. Pass an object to bound it, in X data units
-   * (milliseconds on time axes):
+   * (milliseconds on time axes, decades on log axes, where zoom steps are
+   * ratios):
    * - `minSpan`: narrowest window. Default: three data points, or two plot
    *   pixels of the full extent when the data spacing is unknown.
    * - `maxSpan`: widest window. Default: the full data extent.
+   *
+   * Range presets outside [minSpan, maxSpan] are hidden, and ALL selects the
+   * latest `maxSpan` of data when the full extent is wider.
    */
   zoom?: boolean | { minSpan?: number; maxSpan?: number };
   pan?: boolean;
@@ -81,7 +85,16 @@ export interface MountChartOptions {
 }
 
 export interface MountHandle {
-  /** Update in place. The mounted host and interaction state are preserved. */
+  /**
+   * Update in place. The mounted host and interaction state are preserved.
+   * Every call counts as a content change, because the rows a definition
+   * reads may have been mutated in place, so the full-data extent and the
+   * navigator are recomputed. A call that moves the viewport is navigation
+   * and keeps them unless rows were added or removed. A tooltip under a
+   * stationary pointer is refreshed afterwards, and `onTooltip` runs only
+   * when its target or values changed. An error thrown there propagates
+   * after the update has been applied.
+   */
   update(definition: ChartDefinition, options?: MountChartOptions): void;
   /** Latest renderer-neutral scene, useful for diagnostics and deterministic tests. */
   getScene(): CompiledChart | null;
@@ -143,7 +156,7 @@ export interface MountRuntime {
   /** Where the painted scene sits in the viewport, for pointer mapping. */
   frame(): StageFrame | null;
   /** Zoom and pan limits for the live scene, or null when the X axis is not quantitative. */
-  windowLimits(): XWindowLimits | null;
+  windowLimits(): AxisWindowLimits | null;
   /** Recompile and repaint; throws after destroy(). */
   paint(): void;
   /** Commit a viewport, notify onViewportChange, and repaint. */

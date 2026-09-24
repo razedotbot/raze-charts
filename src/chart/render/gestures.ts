@@ -5,13 +5,13 @@
 
 import type { ChartViewport, CompiledChart } from "../compile/types";
 import type { LinearScale } from "../scales";
-import { clampXWindow, isQuantitativeViewportX, quantitativeRange, zoomXWindow, type XWindowLimits } from "../viewport";
+import { isQuantitativeViewportX, quantitativeRange } from "../viewport";
 import { clientToScene } from "./frame";
 import { layoutLegend, legendEntryAt } from "./legend";
 import { pointerEventFor, resolvePointer } from "./pointer";
 import type { HoverController } from "./overlay";
 import type { MountRuntime } from "./types";
-import { axisTransform } from "./zoom";
+import { axisTransform, clampWindow, panWindow, zoomWindow, type AxisWindowLimits } from "./zoom";
 
 type PanDrag = {
   kind: "pan";
@@ -94,34 +94,14 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
     if (id && typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
   };
 
-  /** Zoom `range` by `factor` around `anchor`, in the axis' linear space. */
-  const zoomWindow = (
-    scene: CompiledChart,
-    range: [number, number],
-    anchor: number,
-    factor: number,
-    limits: XWindowLimits,
-  ): [number, number] => {
-    const transform = axisTransform(scene.xScale as LinearScale);
-    if (transform.linear) return zoomXWindow(range, anchor, factor, limits);
-    const { to } = transform;
-    const zoomed = zoomXWindow([to(range[0]), to(range[1])], to(anchor), factor, {
-      extent: [to(limits.extent[0]), to(limits.extent[1])],
-      minSpan: 0,
-      maxSpan: Infinity,
-      bounded: limits.bounded,
-    });
-    return clampXWindow([transform.from(zoomed[0]), transform.from(zoomed[1])], limits);
-  };
-
-  /** Shift `range` by a fraction of its width, in the axis' linear space. */
-  const shiftWindow = (scene: CompiledChart, range: [number, number], fraction: number, limits: XWindowLimits | null): [number, number] => {
+  /** Shift `range` by a fraction of its width in the axis' linear space, within the limits when known. */
+  const shiftWindow = (scene: CompiledChart, range: [number, number], fraction: number, limits: AxisWindowLimits | null): [number, number] => {
+    if (limits) return panWindow(range, fraction, limits);
     const transform = axisTransform(scene.xScale as LinearScale);
     const t0 = transform.to(range[0]);
     const t1 = transform.to(range[1]);
     const delta = fraction * (t1 - t0);
-    const shifted: [number, number] = [transform.from(t0 + delta), transform.from(t1 + delta)];
-    return limits ? clampXWindow(shifted, limits) : shifted;
+    return [transform.from(t0 + delta), transform.from(t1 + delta)];
   };
 
   const applyPanPreview = (userDx: number): void => {
@@ -214,7 +194,7 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
       const fraction = Math.min(1, Math.max(0, (x - compiled.plot.x) / (compiled.plot.w || 1)));
       const t0 = transform.to(base[0]);
       const anchor = transform.from(t0 + fraction * (transform.to(base[1]) - t0));
-      pendingWheel = zoomWindow(compiled, base, anchor, wheelZoomFactor(dy), limits);
+      pendingWheel = zoomWindow(base, anchor, wheelZoomFactor(dy), limits);
     }
     if (!wheelRaf) {
       wheelRaf = schedule(() => {
@@ -336,7 +316,7 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
       if (span && span[1] - span[0] > 0) {
         const limits = rt.windowLimits();
         const range: [number, number] = [scale.invert(span[0]), scale.invert(span[1])];
-        rt.emitViewport({ x: limits ? clampXWindow(range, limits) : range });
+        rt.emitViewport({ x: limits ? clampWindow(range, limits) : range });
       }
     } else if (finished?.kind === "pan" && finished.moved && compiled && compiled.xScale.kind === "linear") {
       const { viewport } = panShift(compiled, finished, ev.clientX);
