@@ -2,7 +2,7 @@
 // Raze-specific `raze` chrome configuration.
 
 import type { ResolutionString, ThemeName, Timezone } from "./common";
-import type { IBasicDataFeed, LibrarySymbolInfo } from "./datafeed";
+import type { IBasicDataFeed, LibrarySymbolInfo, TimeFrameValue } from "./datafeed";
 import type { IndicatorPreset, StudyDefinition } from "./studies";
 
 // ── Loading screen & overrides ──────────────────────────────────────────────
@@ -106,19 +106,8 @@ export interface CustomAliasedTimezone {
 }
 
 // ── Timeframe ───────────────────────────────────────────────────────────────
-/** A period counted back from the latest bar, such as `"3M"`, `"5D"`, `"YTD"` or `"ALL"`. */
-export interface TimeFramePeriodBack {
-  type: "period-back";
-  value: string;
-}
-/** An absolute window in unix seconds. */
-export interface TimeFrameTimeRange {
-  type: "time-range";
-  from: number;
-  to: number;
-}
-/** TradingView `TimeFrameValue`. */
-export type TimeFrameValue = TimeFramePeriodBack | TimeFrameTimeRange;
+// TimeFramePeriodBack, TimeFrameTimeRange and TimeFrameValue (TradingView's
+// shapes) are declared with the onIntervalChanged payload in ./datafeed.
 /**
  * The earlier Raze range shape, `{ type: "time-range", value: "from,to" }`.
  * @deprecated Use `{ from, to }` or `{ type: "time-range", from, to }`.
