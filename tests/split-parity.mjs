@@ -134,7 +134,7 @@ const {
 // ── Controller registry ─────────────────────────────────────────────────────
 assert(
   WIDGET_CONTROLLERS.map((definition) => definition.id).join(",")
-    === "chrome,layout,api,events,actions,compare,persistence,contextMenu",
+    === "chrome,layout,api,events,actions,compare,persistence,contextMenu,legend",
   "built-in widget controllers are registered in dependency order",
 );
 

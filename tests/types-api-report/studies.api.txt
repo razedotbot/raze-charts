@@ -13,6 +13,7 @@ interface StudyDefinition
   aliases?: string[] | undefined
   compute: (bars: Bar[], inputs: StudyInputs) => StudyComputeResult
   defaults?: undefined | { [key: string]: number | string | undefined; length?: number | undefined; color?: string | undefined; }
+  formatLabel?: ((inputs: StudyInputs) => string) | undefined
   formatValue?: ((value: number) => string) | undefined
   keywords?: string[] | undefined
   label?: string | undefined
@@ -20,6 +21,7 @@ interface StudyDefinition
   name: string
   pane: 'overlay' | 'pane'
   range?: undefined | { min: number; max: number; }
+  shortTitle?: string | undefined
 interface StudyInputs
   [key: string]: number | string
   length: number

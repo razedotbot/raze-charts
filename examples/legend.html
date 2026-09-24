@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts - legend cases</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; }
+    #wrap { position: absolute; inset: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="wrap"></div>
+  <script type="module">
+    // Legend browser cases (tests/legend.spec.ts). Query parameters:
+    //   studies   ;-separated "Name" or "Name:json-inputs" entries
+    //   style     main-series style applied through save()/load(), e.g. heikin_ashi
+    //   overrides JSON object merged over the dark overrides
+    //   session   symbol session string for the market-status dot (default 24x7)
+    //   pricescale symbol pricescale (default 1)
+    import { widget } from "../dist/charting_library.esm.js";
+    import { makeMockDatafeed, VISUAL_NOW } from "./mock-datafeed.mjs";
+
+    const params = new URLSearchParams(location.search);
+    const base = makeMockDatafeed({ bars: 400, startPrice: 6400, now: VISUAL_NOW, live: false });
+    const symbolPatch = {};
+    if (params.get("session")) symbolPatch.session = params.get("session");
+    if (params.get("pricescale")) symbolPatch.pricescale = Number(params.get("pricescale"));
+    const datafeed = {
+      ...base,
+      resolveSymbol: (symbol, onResolve, onError) =>
+        base.resolveSymbol(symbol, (info) => onResolve({ ...info, ...symbolPatch }), onError),
+    };
+
+    const w = new widget({
+      symbol: "MOCK",
+      datafeed,
+      interval: "1",
+      container: document.getElementById("wrap"),
+      library_path: "/",
+      locale: "en",
+      theme: "dark",
+      autosize: true,
+      timezone: "Etc/UTC",
+      custom_font_family: "Arial, Helvetica, sans-serif",
+      loading_screen: { backgroundColor: "#181615", foregroundColor: "#d8aa5b" },
+      disabled_features: ["header_symbol_search", "popup_hints", "countdown"],
+      overrides: {
+        "paneProperties.background": "#181615",
+        "paneProperties.vertGridProperties.color": "rgba(244,238,225,0.04)",
+        "paneProperties.horzGridProperties.color": "rgba(244,238,225,0.04)",
+        "scalesProperties.textColor": "#8b887e",
+        "scalesProperties.backgroundColor": "#181615",
+        "scalesProperties.lineColor": "#3d3935",
+        "mainSeriesProperties.candleStyle.upColor": "#66d89e",
+        "mainSeriesProperties.candleStyle.downColor": "#e57359",
+        "mainSeriesProperties.candleStyle.borderUpColor": "#66d89e",
+        "mainSeriesProperties.candleStyle.borderDownColor": "#e57359",
+        "mainSeriesProperties.candleStyle.wickUpColor": "#66d89e",
+        "mainSeriesProperties.candleStyle.wickDownColor": "#e57359",
+        ...JSON.parse(params.get("overrides") || "{}"),
+      },
+      raze: {
+        custom_studies: [
+          {
+            name: "HL2",
+            pane: "overlay",
+            defaults: { length: 1, color: "#8ecae6" },
+            compute: (bars) => bars.map((b) => (b.high + b.low) / 2),
+          },
+        ],
+      },
+    });
+
+    w.onChartReady(async () => {
+      const chart = w.activeChart();
+      const style = params.get("style");
+      if (style) await w.load({ ...w.save(), chartStyle: style });
+      for (const entry of (params.get("studies") || "").split(";").filter(Boolean)) {
+        const split = entry.indexOf(":");
+        const name = split < 0 ? entry : entry.slice(0, split);
+        const inputs = split < 0 ? undefined : JSON.parse(entry.slice(split + 1));
+        await chart.createStudy(name, false, false, inputs);
+      }
+      window.__razeChart = w;
+      window.__razeReady = true;
+    });
+  </script>
+</body>
+</html>

@@ -3,7 +3,10 @@ import { drawAxisTag } from "./primitives";
 import type { FinanceView } from "./view";
 
 export function drawLastPrice(ctx: CanvasRenderingContext2D, v: FinanceView): void {
-  const bars = v.context.bars;
+  // Heikin-Ashi tags the plotted (HA) close like TradingView, unless
+  // `mainSeriesProperties.haStyle.showRealLastPrice` asks for the real one.
+  const showReal = v.context.options.overrides?.["mainSeriesProperties.haStyle.showRealLastPrice"] === true;
+  const bars = !showReal && v.seriesBars.length === v.context.bars.length ? v.seriesBars : v.context.bars;
   const last = bars[bars.length - 1];
   if (!last || !(last.close > 0)) return;
   const t = v.context.theme;

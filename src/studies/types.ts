@@ -35,7 +35,11 @@ interface StudyInputBase<V> {
   /** Inputs sharing an `inline` key render on one dialog row. */
   readonly inline?: string;
   readonly tooltip?: string;
-  /** Include the value in the legend label (`MACD 12 26 close 9`). Defaults to true for numeric and source inputs. */
+  /**
+   * Include the value in the legend label (`MACD 12 26 hl2 9`). Defaults to
+   * true for int, float and price inputs, and for a source input only while it
+   * differs from its default (`EMA 9`, then `EMA 9 hl2`). See src/studies/label.ts.
+   */
   readonly inLabel?: boolean;
 }
 

@@ -25,6 +25,7 @@ import {
   toDisplay,
 } from "./plotScale";
 import { adjustPriceAxisWidth } from "./paint/axes";
+import { composeLegendSnapshot } from "./paint/legend";
 import type {
   Crosshair,
   DraftShape,
@@ -130,7 +131,8 @@ export class ChartRenderer implements GestureHost {
 
   takeScreenshot(): void {
     try {
-      this.canvas.toBlob((blob) => {
+      // The DOM legend is not in the canvas bitmap; paint it into the export.
+      composeLegendSnapshot(this.canvas, this.financeView()).toBlob((blob) => {
         if (!blob) return;
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");

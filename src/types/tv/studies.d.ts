@@ -42,6 +42,14 @@ export interface StudyDefinition {
   levels?: StudyPaneLevel[];
   /** Sub-pane corner label; defaults to `name`. */
   label?: string;
+  /** Legend and objects-tree title (for example "BB" for Bollinger Bands); defaults to `name`. */
+  shortTitle?: string;
+  /**
+   * Legend and objects-tree label for the given inputs (defaults merged in).
+   * Without it the label is `shortTitle` plus every numeric `defaults` input,
+   * or `shortTitle` alone when `compute` ignores its inputs argument.
+   */
+  formatLabel?: (inputs: StudyInputs) => string;
   /** Legend value formatter; defaults to price formatting (overlay) or 1 decimal (pane). */
   formatValue?: (value: number) => string;
   /** Values aligned 1:1 with `bars`; null = warm-up gap. Arrays stay one line; objects carry MACD/bands. */

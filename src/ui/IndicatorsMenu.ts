@@ -7,6 +7,7 @@ import type { IndicatorPreset, RazeChartsOptions } from "../types/charting_libra
 import type { ChartContext } from "../core/context";
 import type { StudyStore } from "../studies/StudyStore";
 import type { StudyRegistry } from "../studies/registry";
+import { formatStudyLabel } from "../studies/label";
 import { openPopup, popupRow, type PopupHandle } from "./popup";
 
 /** A preset with every field resolved against its study definition. */
@@ -47,7 +48,7 @@ export function resolveIndicatorPresets(
     }
     const length = Math.max(1, Math.floor(p.length ?? def.defaults?.length ?? 14));
     out.push({
-      label: p.label ?? `${def.name} ${length}`,
+      label: p.label ?? formatStudyLabel(def, { length }),
       name: def.name,
       length,
       color: p.color ?? def.defaults?.color ?? "#f5a623",

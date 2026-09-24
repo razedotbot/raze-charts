@@ -89,6 +89,7 @@ const studies = [{
   id: "study-1",
   name: unsafe,
   length: 14,
+  def: { name: unsafe, pane: "overlay", compute: () => [] },
 }];
 const shapeStore = {
   list: () => shapes,

@@ -322,6 +322,10 @@ SMA, and RSI update incrementally for an appended or replaced live bar;
 backfills and custom studies recompute. This distinction matters for high-rate
 feeds and is intentionally documented rather than hidden.
 
+The legend, objects tree and Indicators menu label a study from its definition:
+`MOM 10` above, `EMA 9`, `BB 20 2`, `MACD 12 26 9` or `VWAP` for the built-ins.
+Set `shortTitle` or `formatLabel(inputs)` on the definition to change it.
+
 ### Price formatting
 
 One formatter controls the price axis, last-price tag, OHLC legend, crosshair,
