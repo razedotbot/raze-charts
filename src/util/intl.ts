@@ -89,23 +89,38 @@ export function numberFormat(locale?: string | null, options?: Intl.NumberFormat
   return remember(numberFormats, `${tag}|${optionsKey(options)}`, () => new Intl.NumberFormat(tag, options));
 }
 
+/** `true` when Intl accepts `timeZone` on its own. */
+function isIntlTimeZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat(DEFAULT_LOCALE, { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Cached `Intl.DateTimeFormat` for `(locale, options)`.
  *
- * An invalid `options.timeZone` throws a `RangeError` naming the zone.
+ * An invalid `options.timeZone` throws a `RangeError` naming the zone. Any
+ * other invalid option throws a `RangeError` that quotes the option bag, so
+ * a valid zone is never blamed for, say, a bad `hourCycle`.
  */
 export function dateTimeFormat(locale?: string | null, options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   const tag = resolveLocale(locale);
-  return remember(dateTimeFormats, `${tag}|${optionsKey(options)}`, () => {
+  const key = optionsKey(options);
+  return remember(dateTimeFormats, `${tag}|${key}`, () => {
     try {
       return new Intl.DateTimeFormat(tag, options);
     } catch (error) {
-      if (options?.timeZone !== undefined && error instanceof RangeError) {
+      if (!(error instanceof RangeError)) throw error;
+      const timeZone = options?.timeZone;
+      if (timeZone !== undefined && !isIntlTimeZone(String(timeZone))) {
         throw new RangeError(
-          `Unknown time zone "${options.timeZone}". Use an IANA zone name such as "America/New_York" or "Etc/UTC".`,
+          `Unknown time zone "${timeZone}". Use an IANA zone name such as "America/New_York" or "Etc/UTC".`,
         );
       }
-      throw error;
+      throw new RangeError(`Invalid Intl.DateTimeFormat options for "${tag}" (${key}): ${error.message}`);
     }
   });
 }

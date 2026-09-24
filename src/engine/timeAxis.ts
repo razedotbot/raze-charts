@@ -6,11 +6,29 @@
  * ruler. This adapter owns the per-series weight cache (incremental for
  * appended and live-updated bars), the display zone, and the crosshair
  * label format, so paint code only asks for `ticks()` and `formatCrosshair()`.
+ *
+ * Every call that reads bar times takes the resolution kind
+ * (`parseResolution(resolution).kind`), because the kind decides which
+ * calendar the timestamps belong to:
+ *
+ * - Intraday bars (seconds, minutes, hours) are instants. Ticks, weights and
+ *   crosshair labels use the display zone, so a 14:30Z bar reads 09:30 in
+ *   New York.
+ * - Daily, weekly and monthly bars are calendar dates. The TradingView
+ *   datafeed contract (and this repo's `Bar` type) stamps them 00:00 UTC of
+ *   the trading day, so they are read in UTC whatever the display zone is. A
+ *   1 Feb bar reads "1 Feb" and carries the month boundary in New York and
+ *   Tokyo alike. Reading them in a zone west of UTC would label every bar
+ *   with the previous day.
+ *
+ * {@link FinancialTimeAxis.calendarZone} exposes this rule for session
+ * boundaries and bar flooring.
  */
 
 import {
   DEFAULT_TICK_SPACING,
   DEFAULT_WEEK_START,
+  MAX_DATE_MS,
   barTicks,
   computeTickWeights,
   fieldsFromWall,
@@ -28,11 +46,14 @@ import { DEFAULT_LOCALE, dateTimeFormat, resolveLocale } from "../util/intl";
 /** Resolution kinds as produced by `parseResolution().kind`. */
 export type TimeAxisResolutionKind = "seconds" | "minutes" | "hours" | "days" | "weeks" | "months";
 
+const RESOLUTION_KINDS: readonly TimeAxisResolutionKind[] = ["seconds", "minutes", "hours", "days", "weeks", "months"];
+
 export interface TimeAxisOptions extends TickLabelOptions {
   /**
    * Resolved IANA display zone (use `resolveTimeZoneId(options.timezone,
    * symbolInfo.timezone)` for the widget's `"exchange"` semantics). Default UTC.
-   * An unknown zone throws a RangeError naming it.
+   * An unknown zone throws a RangeError naming it. Daily and coarser bars
+   * are always read in UTC (see the module comment).
    */
   timeZone?: string | null;
   /** Local weekday that starts a week. Default Monday (1). */
@@ -54,6 +75,8 @@ export interface TimeAxisTick {
 }
 
 export interface TimeAxisTickRequest {
+  /** Resolution kind of the bars (`parseResolution(resolution).kind`). */
+  kind: TimeAxisResolutionKind;
   /** First visible logical index (fractional). */
   from: number;
   /** Last visible logical index (fractional). */
@@ -72,11 +95,24 @@ const UNIT_RANK: Record<TickUnit, number> = {
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
-function isIntraday(kind: string): boolean {
+function assertKind(kind: unknown): asserts kind is TimeAxisResolutionKind {
+  if (!RESOLUTION_KINDS.includes(kind as TimeAxisResolutionKind)) {
+    throw new RangeError(
+      `Unknown resolution kind ${JSON.stringify(kind)}. Pass parseResolution(resolution).kind: ` +
+      `${RESOLUTION_KINDS.map((k) => `"${k}"`).join(", ")}.`,
+    );
+  }
+}
+
+/** `true` for seconds, minutes and hours: bars whose timestamps are instants rather than dates. */
+export function isIntradayKind(kind: TimeAxisResolutionKind): boolean {
+  assertKind(kind);
   return kind === "seconds" || kind === "minutes" || kind === "hours";
 }
 
 interface WeightCache {
+  /** Zone the weights were computed in (the display zone or UTC, by resolution kind). */
+  zone: TimeZone;
   weights: Uint8Array;
   length: number;
   firstTime: number;
@@ -129,13 +165,23 @@ export class FinancialTimeAxis {
   }
 
   /**
+   * Zone that bars of `kind` are read in: the display zone for intraday
+   * bars, UTC for daily, weekly and monthly bars (stamped 00:00 UTC of their
+   * trading day). Use it for session boundaries and for flooring bar times.
+   */
+  calendarZone(kind: TimeAxisResolutionKind): TimeZone {
+    return isIntradayKind(kind) ? this.tz : getTimeZone(null);
+  }
+
+  /**
    * Change options at runtime (for example `setTimezone`). The update is
    * atomic: invalid options throw and leave the axis unchanged. Weights are
-   * only recomputed when the zone or week start actually changes.
+   * only recomputed when the zone the bars are read in, or the week start,
+   * actually changes (a new display zone leaves daily weights untouched).
    */
   setOptions(options: TimeAxisOptions): void {
     const next = FinancialTimeAxis.resolve(options, this);
-    if (next.tz !== this.tz || next.weekStart !== this.weekStart) this.cache = null;
+    if (next.weekStart !== this.weekStart) this.cache = null;
     this.tz = next.tz;
     this.weekStart = next.weekStart;
     this.minSpacing = next.minSpacing;
@@ -144,16 +190,19 @@ export class FinancialTimeAxis {
   }
 
   /**
-   * Per-bar boundary weights for `bars`, cached across frames. Appending bars
-   * or replacing the last bar in place only computes the new tail; a prepend
-   * (history page) or any other structural change recomputes everything.
+   * Per-bar boundary weights for `bars` of resolution `kind`, cached across
+   * frames. Appending bars or replacing the last bar in place only computes
+   * the new tail; a prepend (history page), any other structural change, or
+   * a change of the zone the bars are read in recomputes everything.
    */
-  weights(bars: ArrayLike<TimedPoint>): Uint8Array {
+  weights(bars: ArrayLike<TimedPoint>, kind: TimeAxisResolutionKind): Uint8Array {
+    const zone = this.calendarZone(kind);
     const n = bars.length;
     const cache = this.cache;
     let start = 0;
     if (
       cache &&
+      cache.zone === zone &&
       n >= cache.length &&
       cache.length > 0 &&
       bars[0]!.time === cache.firstTime &&
@@ -161,7 +210,7 @@ export class FinancialTimeAxis {
     ) {
       start = cache.length;
     }
-    if (cache && start === n && n === cache.length) return cache.weights;
+    if (cache && cache.zone === zone && start === n && n === cache.length) return cache.weights;
 
     let out = cache?.weights;
     if (!out || out.length < n) {
@@ -169,23 +218,24 @@ export class FinancialTimeAxis {
       if (out && start > 0) grown.set(out.subarray(0, start));
       out = grown;
     }
-    computeTickWeights(bars, this.tz, { weekStart: this.weekStart, out, start });
+    computeTickWeights(bars, zone, { weekStart: this.weekStart, out, start });
     this.cache = n > 0
-      ? { weights: out, length: n, firstTime: bars[0]!.time, lastTime: bars[n - 1]!.time }
+      ? { zone, weights: out, length: n, firstTime: bars[0]!.time, lastTime: bars[n - 1]!.time }
       : null;
     return out;
   }
 
-  /** Ticks for the visible logical range, labelled in the display zone. */
+  /** Ticks for the visible logical range, labelled in the zone the bars are read in. */
   ticks(bars: ArrayLike<TimedPoint>, request: TimeAxisTickRequest): TimeAxisTick[] {
+    const zone = this.calendarZone(request.kind);
     if (!bars.length) return [];
     const ticks = barTicks({
       bars,
-      weights: this.weights(bars),
+      weights: this.weights(bars, request.kind),
       from: request.from,
       to: request.to,
       barSpacing: request.barSpacing,
-      timeZone: this.tz,
+      timeZone: zone,
       minSpacing: this.minSpacing,
       measure: request.measure,
       maxTicks: request.maxTicks,
@@ -205,26 +255,30 @@ export class FinancialTimeAxis {
     }));
   }
 
-  /** Axis label for a single time at a given weight (for custom tick sources). */
-  formatTick(timeMs: number, weight: number): string {
+  /** Axis label for a single bar time at a given weight (for custom tick sources). */
+  formatTick(timeMs: number, weight: number, kind: TimeAxisResolutionKind): string {
+    const zone = this.calendarZone(kind);
     if (!tickLevel(weight)) return "";
-    return tickLabeler({ locale: this.locale, hourCycle: this.hourCycle }).label(this.tz.toWall(timeMs), weight);
+    return tickLabeler({ locale: this.locale, hourCycle: this.hourCycle }).label(zone.toWall(timeMs), weight);
   }
 
   /**
-   * Crosshair / legend time label in the display zone:
-   * "14 Jan '24" for daily and coarser, "14 Jan '24 17:00" intraday and
-   * "14 Jan '24 17:00:05" for seconds. Non-English locales use Intl names.
+   * Crosshair / legend time label: "14 Jan '24" for daily and coarser bars
+   * (their UTC date), "14 Jan '24 17:00" intraday and "14 Jan '24 17:00:05"
+   * for seconds (in the display zone). Non-English locales use Intl names.
    */
-  formatCrosshair(timeMs: number, kind: TimeAxisResolutionKind | string): string {
+  formatCrosshair(timeMs: number, kind: TimeAxisResolutionKind): string {
+    const zone = this.calendarZone(kind);
     if (!Number.isFinite(timeMs)) return "";
-    const wall = this.tz.toWall(timeMs);
+    const wall = zone.toWall(timeMs);
+    // Intl formats only the Date range; the local time of its very ends can fall outside.
+    if (!(Math.abs(wall) <= MAX_DATE_MS)) return "";
     const f = fieldsFromWall(wall);
     const english = this.locale === DEFAULT_LOCALE;
     const date = english
       ? `${f.day} ${EN_MONTHS[f.month]} '${pad2(((f.year % 100) + 100) % 100)}`
       : dateTimeFormat(this.locale, { timeZone: "UTC", day: "numeric", month: "short", year: "2-digit" }).format(wall);
-    if (!isIntraday(kind)) return date;
+    if (!isIntradayKind(kind)) return date;
     if (english && this.hourCycle === "h23") {
       const hm = `${pad2(f.hour)}:${pad2(f.minute)}`;
       return kind === "seconds" ? `${date} ${hm}:${pad2(f.second)}` : `${date} ${hm}`;

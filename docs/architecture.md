@@ -66,16 +66,34 @@ calendar or `Intl` formatting code goes here instead of into a runtime:
 | Module | Responsibility |
 | --- | --- |
 | `src/util/intl.ts` | Bounded cache of `Intl.NumberFormat`, `DateTimeFormat` and `PluralRules` per locale and options. Output is byte-identical to `toLocaleString`. |
-| `src/util/time/zone.ts` | IANA zones built on `Intl`. Offsets are memoised per UTC day and each transition is found to the second. Wall-time conversion follows Temporal's `compatible`, `earlier`, `later` and `reject` rules. Results do not depend on the process `TZ`. |
-| `src/util/time/calendarTicks.ts` | Weighted calendar ticks from 1 ms to 1000 years. `calendarTicks()` handles continuous ranges (native `/chart`) and `barTicks()` handles logical bar axes. Also provides local `floorToCalendar()` and `addCalendar()`. |
-| `src/engine/timeAxis.ts` | `FinancialTimeAxis` caches per-bar weights (appends are incremental) and formats ticks and crosshair labels in the display zone. |
+| `src/util/time/zone.ts` | IANA zones built on `Intl`. Offsets are memoised per UTC day and each transition is found to the second. Wall-time conversion follows Temporal's `compatible`, `earlier`, `later` and `reject` rules. Results do not depend on the process `TZ`. Instants outside the `Date` range (±8.64e15 ms) give `NaN`. |
+| `src/util/time/calendarTicks.ts` | Weighted calendar ticks from 1 ms to 1000 years. `calendarTicks()` handles continuous ranges (native `/chart`) and `barTicks()` handles logical bar axes. Also provides local `floorToCalendar()` and `addCalendar()`; day steps above 1 count days of the month (2 gives odd days, 14 gives the 1st and 15th). |
+| `src/engine/timeAxis.ts` | `FinancialTimeAxis` caches per-bar weights (appends are incremental) and formats ticks and crosshair labels. Every call takes the resolution kind: intraday bars are read in the display zone, daily, weekly and monthly bars in UTC (`calendarZone(kind)`). |
 
-Ticks are selected one whole level at a time, starting from the heaviest.
-When a level's own calendar rhythm no longer fits the minimum spacing
-(40 px by default, or the measured label widths), the core refuses that level
-and every finer one. Labels therefore stay regular ("2025 Apr Jul Oct 2026").
-A collision caused by the data rather than the calendar drops only the finer
-tick, for example a 09:30 session open next to 10:00.
+The tick ladder is 1/2/5/10/20/50/100/200/500 ms, 1/2/5/10/15/30 s and min,
+1/2/3/6/12 h, day, odd days, week, half month, 1/3/6 months and 1/2/5/10…1000
+years. Adjacent rungs are at most 3.5x apart. The ladder is not one nested
+chain, so selection runs on three nested tracks and keeps the densest result:
+TradingView's 1/5/15/30 ladder with weeks and quarters first, then 1/5/10/30,
+then the binary 1/2/10/30 track with odd days, half months and 2-year rungs.
+
+Within a track, ticks are selected one whole level at a time, starting from
+the heaviest. When a level's own calendar rhythm no longer fits the minimum
+spacing (40 px by default, or the measured label widths), the core refuses
+that level and every finer one. Labels therefore stay regular ("2025 Apr Jul
+Oct 2026"). A collision caused by the data rather than the calendar drops only
+the finer tick, for example a 09:30 session open next to 10:00. Two fallbacks
+keep an axis from going blank: holes much wider than the median gap (sparse
+bars, including at either end) are filled from the refused levels, and an axis
+with room for two labels but fewer than two admits refused levels greedily
+until it has two.
+
+Daily, weekly and monthly bars follow the TradingView datafeed contract: they
+are stamped 00:00 UTC of the trading day and are read in UTC whatever the
+display zone. A 1 Feb daily bar therefore reads "1 Feb" and carries the
+month label in New York and Tokyo alike. Intraday bars are instants and are
+read in the display zone. Session boundaries and bar flooring use the same
+rule through `FinancialTimeAxis.calendarZone(kind)`.
 
 ### Async ownership
 

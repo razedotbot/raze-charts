@@ -5,6 +5,7 @@
 export {
   DAY_MS,
   HOUR_MS,
+  MAX_DATE_MS,
   MINUTE_MS,
   SECOND_MS,
   UTC_ZONE_ID,

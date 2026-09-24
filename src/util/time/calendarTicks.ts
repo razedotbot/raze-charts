@@ -5,17 +5,39 @@
  * sits on (or, for bars, the highest boundary crossed since the previous
  * bar) on a ladder that runs from 1 ms to 1000 years:
  *
- *   ms 1/2/5/10/20/50/100/200/500 < s 1/5/15/30 < min 1/5/15/30
- *     < h 1/3/6/12 < day < week < month 1/3/6 < year 1/2/5/10/20/…/1000
+ *   ms 1/2/5/10/20/50/100/200/500 < s 1/2/5/10/15/30 < min 1/2/5/10/15/30
+ *     < h 1/2/3/6/12 < day 1/2 < week < half month < month 1/3/6
+ *     < year 1/2/5/10/20/…/1000
  *
- * Selection walks the ladder from the top and admits a level as a whole or
- * not at all: the first level whose own calendar rhythm no longer fits the
- * minimum spacing is refused and finer levels are not considered, so labels
- * stay calendar-regular ("2025 Apr Jul Oct 2026", never "Jan Feb Apr May").
- * Collisions that come from the data rather than the calendar (a 09:30
- * session open beside 10:00) only drop the finer tick (see admitLevel).
- * Irregular data (sparse bars) can leave holes much wider than the typical
- * gap; those holes are then filled greedily from the refused levels.
+ * Multi-day rungs count days of the month (see {@link floorWall}): "2 days"
+ * marks the odd days 1, 3, …, 31 and "half month" (`day` step 14) marks the
+ * 1st and the 15th, so both nest in months. Adjacent rungs are at most 3.5x
+ * apart, which bounds how far the label count can jump when the axis
+ * narrows by a few pixels (it can never fall from ten labels to one).
+ *
+ * The ladder is not one chain: 2 min does not divide 5 min, 10 min does not
+ * divide 15 min, and weeks do not nest in half months. Selection therefore
+ * runs on three nested *tracks* and keeps the densest result (ties go to the
+ * first):
+ *
+ *   quarter  1/5/15/30 s and min, 1/3/6/12 h, weeks, 5-year rungs (TradingView's ladder)
+ *   decimal  1/5/10/30 s and min, 1/3/6/12 h, weeks, 5-year rungs
+ *   binary   1/2/10/30 s and min, 1/2/6/12 h, odd days, half months, 2-year rungs
+ *
+ * Within a track, selection walks the ladder from the top and admits a level
+ * as a whole or not at all: the first level whose own calendar rhythm no
+ * longer fits the minimum spacing is refused and finer levels are not
+ * considered, so labels stay calendar-regular ("2025 Apr Jul Oct 2026", never
+ * "Jan Feb Apr May"). Collisions that come from the data rather than the
+ * calendar (a 09:30 session open beside 10:00) only drop the finer tick (see
+ * admitLevel).
+ *
+ * Two fallbacks keep the axis from going blank. Irregular data (sparse bars)
+ * can leave holes much wider than the typical gap, including at the axis
+ * edges; those holes are filled greedily from the refused levels. And when
+ * the regular result has fewer than two ticks although the axis has room for
+ * two (a narrow card, or a few sessions squeezed into 120 px), the refused
+ * levels are admitted greedily, heaviest first, until it does.
  *
  * All calendar math happens in wall time for a {@link TimeZone}, so ticks sit
  * on local midnights, month and year starts, and DST days never duplicate or
@@ -27,9 +49,11 @@ import { dateTimeFormat, resolveLocale } from "../intl";
 import {
   DAY_MS,
   HOUR_MS,
+  MAX_DATE_MS,
   MINUTE_MS,
   SECOND_MS,
   civilFromDays,
+  daysFromCivil,
   getTimeZone,
   wallFromFields,
   type TimeZone,
@@ -41,6 +65,7 @@ export interface TickLevel {
   /** 1-based rank on the ladder; a higher weight is a more significant boundary. */
   readonly weight: number;
   readonly unit: TickUnit;
+  /** Step in `unit`s. Day steps above 1 count days of the month (see {@link floorWall}). */
   readonly step: number;
   /** Nominal duration (months and years use the mean Gregorian length). */
   readonly nominalMs: number;
@@ -66,20 +91,25 @@ const UNIT_MS: Record<TickUnit, number> = {
   year: YEAR_MS,
 };
 
-const LADDER: ReadonlyArray<readonly [TickUnit, readonly number[]]> = [
-  ["millisecond", [1, 2, 5, 10, 20, 50, 100, 200, 500]],
-  ["second", [1, 5, 15, 30]],
-  ["minute", [1, 5, 15, 30]],
-  ["hour", [1, 3, 6, 12]],
-  ["day", [1]],
-  ["week", [1]],
-  ["month", [1, 3, 6]],
-  ["year", [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]],
+const rungsOf = (unit: TickUnit, steps: readonly number[]): Array<readonly [TickUnit, number]> =>
+  steps.map((step) => [unit, step] as const);
+
+/** Rungs in ascending nominal length (the half month sits between the week and the month). */
+const LADDER: ReadonlyArray<readonly [TickUnit, number]> = [
+  ...rungsOf("millisecond", [1, 2, 5, 10, 20, 50, 100, 200, 500]),
+  ...rungsOf("second", [1, 2, 5, 10, 15, 30]),
+  ...rungsOf("minute", [1, 2, 5, 10, 15, 30]),
+  ...rungsOf("hour", [1, 2, 3, 6, 12]),
+  ...rungsOf("day", [1, 2]),
+  ["week", 1],
+  ["day", 14],
+  ...rungsOf("month", [1, 3, 6]),
+  ...rungsOf("year", [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]),
 ];
 
 /** The tick ladder in ascending weight order (`TICK_LEVELS[w - 1].weight === w`). */
-export const TICK_LEVELS: readonly TickLevel[] = LADDER.flatMap(([unit, steps]) => steps.map((step) => ({ unit, step })))
-  .map(({ unit, step }, i) => Object.freeze({ weight: i + 1, unit, step, nominalMs: UNIT_MS[unit] * step }));
+export const TICK_LEVELS: readonly TickLevel[] = LADDER
+  .map(([unit, step], i) => Object.freeze({ weight: i + 1, unit, step, nominalMs: UNIT_MS[unit] * step }));
 
 /** Weight of the `(unit, step)` ladder rung. Throws for a rung that is not on the ladder. */
 export function tickWeight(unit: TickUnit, step = 1): number {
@@ -132,19 +162,46 @@ function mod(a: number, n: number): number {
   return ((a % n) + n) % n;
 }
 
+/** Days in a month (`month` 1-12). */
+function daysInMonth(year: number, month: number): number {
+  return month === 12 ? 31 : daysFromCivil(year, month + 1, 1) - daysFromCivil(year, month, 1);
+}
+
 /**
- * Start of the `step × unit` bucket containing a wall time. Sub-day steps
- * that do not divide a day are aligned to the wall epoch (1970-01-01 00:00).
+ * First day (1-based) of the `step`-day period of the month that contains
+ * `day`. Periods start on the 1st; a period shorter than half a step at the
+ * end of the month joins the previous one (step 14 gives the 1st and 15th).
+ */
+function dayOfMonthFloor(day: number, step: number, monthLength: number): number {
+  let start = 1 + Math.floor((day - 1) / step) * step;
+  if (start > 1 && monthLength - start + 1 < step / 2) start -= step;
+  return start;
+}
+
+/**
+ * Start of the `step × unit` bucket containing a wall time.
+ *
+ * Sub-day steps that do not divide a day are aligned to the wall epoch
+ * (1970-01-01 00:00). Day steps above 1 count days of the month like d3's
+ * `timeDay.every(n)`: periods start on the 1st, and a period shorter than
+ * half a step at the month end joins the previous one, so step 2 gives the
+ * odd days and step 14 gives the 1st and 15th. Periods that run across
+ * month ends (for example n-day bars) are plain day arithmetic instead.
  */
 export function floorWall(wallMs: number, unit: TickUnit, step = 1, weekStart: WeekStart = DEFAULT_WEEK_START): number {
   switch (unit) {
     case "millisecond":
     case "second":
     case "minute":
-    case "hour":
-    case "day": {
+    case "hour": {
       const size = UNIT_MS[unit] * step;
       return Math.floor(wallMs / size) * size;
+    }
+    case "day": {
+      const days = Math.floor(wallMs / DAY_MS);
+      if (step === 1 || !Number.isFinite(days)) return days * DAY_MS;
+      const { year, month, day } = civilFromDays(days);
+      return (days - day + dayOfMonthFloor(day, step, daysInMonth(year, month))) * DAY_MS;
     }
     case "week": {
       // Week q starts on day 7q - 4 + weekStart (1970-01-01 was a Thursday).
@@ -179,10 +236,20 @@ export function addWall(wallMs: number, unit: TickUnit, step = 1, count = 1): nu
   return wallMs + UNIT_MS[unit] * step * count;
 }
 
+/** The next `step × unit` bucket start after the bucket start `wallMs`. */
+function nextBoundary(wallMs: number, unit: TickUnit, step: number): number {
+  if (unit !== "day" || step === 1) return addWall(wallMs, unit, step);
+  const next = wallMs + step * DAY_MS;
+  if (floorWall(next, unit, step) === next) return next;
+  // The month ended, or its short tail joined this period: the next period is the 1st.
+  return addWall(floorWall(wallMs, "month"), "month");
+}
+
 /**
  * Start (UTC ms) of the local `step × unit` period containing `utcMs`, for
  * example the local Monday 00:00 of its week or the first of its quarter.
- * A local midnight that does not exist (a DST gap) resolves forward.
+ * A local midnight that does not exist (a DST gap) resolves forward. Day
+ * steps above 1 count days of the month (see {@link floorWall}).
  */
 export function floorToCalendar(
   utcMs: number,
@@ -227,6 +294,8 @@ export function addCalendar(
 const SUB_DAY_LEVELS = TICK_LEVELS.filter((l) => UNIT_MS[l.unit] < DAY_MS).reverse();
 const YEAR_LEVELS = TICK_LEVELS.filter((l) => l.unit === "year").reverse();
 const MONTH_LEVELS = TICK_LEVELS.filter((l) => l.unit === "month").reverse();
+/** Day and week rungs, heaviest first (half month, week, 2 days, day). */
+const DAY_LEVELS = TICK_LEVELS.filter((l) => l.unit === "day" || l.unit === "week").reverse();
 const LEVELS_DESC = [...TICK_LEVELS].reverse();
 
 /**
@@ -250,8 +319,15 @@ export function boundaryWeight(prevWall: number, wall: number, weekStart: WeekSt
     for (const level of MONTH_LEVELS) {
       if (Math.floor(am / level.step) !== Math.floor(bm / level.step)) return level.weight;
     }
-    if (Math.floor((prevDay + 4 - weekStart) / 7) !== Math.floor((day + 4 - weekStart) / 7)) return TickWeight.Week;
-    return TickWeight.Day;
+    // Same month from here on.
+    const length = daysInMonth(b.year, b.month);
+    for (const level of DAY_LEVELS) {
+      if (level.unit === "week") {
+        if (Math.floor((prevDay + 4 - weekStart) / 7) !== Math.floor((day + 4 - weekStart) / 7)) return level.weight;
+      } else if (level.step === 1 || dayOfMonthFloor(a.day, level.step, length) !== dayOfMonthFloor(b.day, level.step, length)) {
+        return level.weight;
+      }
+    }
   }
   for (const level of SUB_DAY_LEVELS) {
     const size = level.nominalMs;
@@ -311,7 +387,11 @@ export interface TickLabelOptions {
 }
 
 export interface TickLabeler {
-  /** Label for a tick of `weight` at wall time `wallMs`: "2025", "Feb", "14", "09:30", "09:30:15", ".250". */
+  /**
+   * Label for a tick of `weight` at wall time `wallMs`: "2025", "Feb", "14",
+   * "09:30", "09:30:15", ".250". Empty for a wall time Intl cannot format
+   * (non-finite, or outside the Date range).
+   */
   label(wallMs: number, weight: number): string;
 }
 
@@ -341,7 +421,7 @@ export function tickLabeler(options: TickLabelOptions = {}): TickLabeler {
 
   const labeler: TickLabeler = {
     label(wallMs, weight) {
-      if (!Number.isFinite(wallMs)) return "";
+      if (!(Math.abs(wallMs) <= MAX_DATE_MS)) return "";
       const unit = tickLevel(weight)?.unit ?? "millisecond";
       switch (unit) {
         case "year": return year.format(wallMs);
@@ -409,6 +489,7 @@ interface Selector {
   labelGap: number;
   measure: ((label: string) => number) | undefined;
   maxTicks: number;
+  weekStart: WeekStart;
   labeler: TickLabeler;
 }
 
@@ -422,11 +503,14 @@ function makeSelector(options: TickSelectionOptions): Selector {
   if (options.measure !== undefined && typeof options.measure !== "function") {
     throw new TypeError("measure must be a function that returns a label width in pixels.");
   }
+  const weekStart = options.weekStart ?? DEFAULT_WEEK_START;
+  assertWeekStart(weekStart);
   return {
     minSpacing,
     labelGap: options.labelGap ?? 8,
     measure: options.measure,
     maxTicks,
+    weekStart,
     labeler: tickLabeler(options),
   };
 }
@@ -478,48 +562,53 @@ function mergeByX(a: Candidate[], b: Candidate[]): Candidate[] {
   return out;
 }
 
-// The ladder is a strict chain (each rung's boundaries are a subset of the
-// next finer rung's) except where the 2- and 5-multiples of years and
-// milliseconds branch: 2015 is a 5-year boundary but not a 2-year one. Mixing
-// both branches yields "2015 2018 2020 2022 2024 2025", so selection runs
-// once per branch and keeps the denser (still regular) result.
-const MS_LEVELS = TICK_LEVELS.filter((l) => l.unit === "millisecond").reverse();
-const branch = (steps: readonly number[]): Set<number> => new Set(
-  TICK_LEVELS.filter((l) => (l.unit === "year" || l.unit === "millisecond") && steps.includes(l.step)).map((l) => l.weight),
-);
-const TWO_BRANCH = branch([2, 20, 200]);
-const FIVE_BRANCH = branch([5, 50, 500]);
+const weightsOf = (unit: TickUnit, steps: readonly number[]): number[] => steps.map((step) => tickWeight(unit, step));
+const TWO_FAMILY = [...weightsOf("millisecond", [2, 20, 200]), ...weightsOf("year", [2, 20, 200])];
+const FIVE_FAMILY = [...weightsOf("millisecond", [5, 50, 500]), ...weightsOf("year", [5, 50, 500])];
+const MONTH_DAYS = weightsOf("day", [2, 14]);
 
-function crossesRung(prevWall: number, wall: number, level: TickLevel): boolean {
-  if (level.unit === "year") {
-    const a = civilFromDays(Math.floor(prevWall / DAY_MS)).year;
-    const b = civilFromDays(Math.floor(wall / DAY_MS)).year;
-    return Math.floor(a / level.step) !== Math.floor(b / level.step);
-  }
-  return Math.floor(prevWall / level.step) !== Math.floor(wall / level.step);
-}
+/** Rungs each track leaves out (see the module comment). Every track is a nested chain apart from weeks in months. */
+const TRACKS: ReadonlyArray<ReadonlySet<number>> = [
+  // quarter: 1/5/15/30 s and min, 1/3/6/12 h, weeks, 5-year rungs.
+  new Set([...TWO_FAMILY, ...weightsOf("second", [2, 10]), ...weightsOf("minute", [2, 10]), tickWeight("hour", 2), ...MONTH_DAYS]),
+  // decimal: 1/5/10/30 s and min, 1/3/6/12 h, weeks, 5-year rungs.
+  new Set([...TWO_FAMILY, ...weightsOf("second", [2, 15]), ...weightsOf("minute", [2, 15]), tickWeight("hour", 2), ...MONTH_DAYS]),
+  // binary: 1/2/10/30 s and min, 1/2/6/12 h, odd days, half months, 2-year rungs.
+  new Set([...FIVE_FAMILY, ...weightsOf("second", [5, 15]), ...weightsOf("minute", [5, 15]), tickWeight("hour", 3), TickWeight.Week]),
+];
+const TRACK_SPECIFIC = new Set(TRACKS.flatMap((track) => [...track]));
 
-/** Re-derive a candidate's weight with the rungs in `excluded` removed from the ladder. */
-function withoutBranch(c: Candidate, excluded: Set<number>): Candidate {
+/** Re-derive a candidate's weight on a track: the heaviest rung of the track it crosses. */
+function onTrack(c: Candidate, excluded: ReadonlySet<number>, weekStart: WeekStart): Candidate {
   if (!excluded.has(c.weight)) return c;
-  const rungs = (tickLevel(c.weight)!.unit === "year" ? YEAR_LEVELS : MS_LEVELS)
-    .filter((l) => l.weight < c.weight && !excluded.has(l.weight));
-  const hit = rungs.find((l) => crossesRung(c.prevWall, c.wall, l)) ?? rungs[rungs.length - 1]!;
-  return { ...c, weight: hit.weight, label: null };
+  for (let w = c.weight - 1; w > NO_TICK; w--) {
+    if (excluded.has(w)) continue;
+    const { unit, step } = TICK_LEVELS[w - 1]!;
+    if (floorWall(c.prevWall, unit, step, weekStart) !== floorWall(c.wall, unit, step, weekStart)) {
+      return { ...c, weight: w, label: null, width: 0 };
+    }
+  }
+  return { ...c, weight: NO_TICK, label: null, width: 0 };
 }
 
-function selectBest(s: Selector, candidates: Candidate[]): Candidate[] {
-  if (!candidates.some((c) => TWO_BRANCH.has(c.weight) || FIVE_BRANCH.has(c.weight))) return select(s, candidates);
-  const twos = select(s, candidates.map((c) => withoutBranch(c, FIVE_BRANCH)));
-  const fives = select(s, candidates.map((c) => withoutBranch(c, TWO_BRANCH)));
-  return fives.length >= twos.length ? fives : twos;
+/** Pixel extent of the visible axis, `[start, end]`. */
+type Extent = readonly [number, number];
+
+function selectBest(s: Selector, candidates: Candidate[], extent: Extent): Candidate[] {
+  if (!candidates.some((c) => TRACK_SPECIFIC.has(c.weight))) return select(s, candidates, extent);
+  let best: Candidate[] | null = null;
+  for (const excluded of TRACKS) {
+    const picked = select(s, candidates.map((c) => onTrack(c, excluded, s.weekStart)), extent);
+    if (!best || picked.length > best.length) best = picked;
+  }
+  return best!;
 }
 
 /**
- * Pick ticks from `candidates` (sorted by x). See the module comment for the
- * level-by-level rule and the hole filling for irregular data.
+ * Pick ticks from `candidates` (sorted by x) on one track. See the module
+ * comment for the level-by-level rule and the two fallbacks.
  */
-function select(s: Selector, candidates: Candidate[]): Candidate[] {
+function select(s: Selector, candidates: Candidate[], extent: Extent): Candidate[] {
   const groups = new Map<number, Candidate[]>();
   for (const c of candidates) {
     if (c.weight === NO_TICK) continue;
@@ -540,8 +629,12 @@ function select(s: Selector, candidates: Candidate[]): Candidate[] {
     accepted = mergeByX(accepted, survivors);
   }
 
-  if (rejectedFrom < weights.length && accepted.length >= 2 && accepted.length < s.maxTicks) {
-    accepted = fillHoles(s, accepted, weights.slice(rejectedFrom).map((w) => groups.get(w)!));
+  if (rejectedFrom < weights.length && accepted.length < s.maxTicks) {
+    const refused = weights.slice(rejectedFrom).map((w) => groups.get(w)!);
+    // Room for two ticks means two ticks: a lone label cannot show a scale.
+    const wanted = Math.min(2, Math.floor((extent[1] - extent[0]) / s.minSpacing));
+    if (accepted.length < wanted) accepted = fillSparse(s, accepted, refused, wanted);
+    accepted = fillHoles(s, accepted, refused, extent);
   }
   return accepted;
 }
@@ -580,19 +673,41 @@ function admitLevel(s: Selector, accepted: Candidate[], group: Candidate[], nomi
 }
 
 /**
- * Regular data never produces holes: every accepted gap is within a small
- * factor of the median. Sparse or irregular bars can, and there finer
- * labels are better than an empty stretch of axis.
+ * The regular result has fewer ticks than the axis has room for (a crowded
+ * top level, or a single heavier boundary in view). Admit refused levels
+ * greedily, heaviest first, until `wanted` ticks are on the axis. Greedy
+ * admission of an evenly spaced level keeps every other (or every third)
+ * tick, so the result is still close to regular.
  */
-function fillHoles(s: Selector, accepted: Candidate[], finerGroups: Candidate[][]): Candidate[] {
+function fillSparse(s: Selector, accepted: Candidate[], refused: Candidate[][], wanted: number): Candidate[] {
+  const out = [...accepted];
+  for (const group of refused) {
+    for (const c of group) {
+      if (out.length >= s.maxTicks) return out;
+      if (fits(s, out, c)) out.splice(lowerBound(out, c.x), 0, c);
+    }
+    if (out.length >= wanted) break;
+  }
+  return out;
+}
+
+/**
+ * Regular data never produces holes: every accepted gap, and each axis end,
+ * is within a small factor of the median gap. Sparse or irregular bars can,
+ * and there finer labels are better than an empty stretch of axis.
+ */
+function fillHoles(s: Selector, accepted: Candidate[], finerGroups: Candidate[][], extent: Extent): Candidate[] {
+  if (!accepted.length || accepted.length >= s.maxTicks) return accepted;
   const gaps: number[] = [];
   for (let i = 1; i < accepted.length; i++) gaps.push(accepted[i]!.x - accepted[i - 1]!.x);
   const sorted = [...gaps].sort((a, b) => a - b);
-  const median = sorted[sorted.length >> 1]!;
+  const median = sorted.length ? sorted[sorted.length >> 1]! : 0;
   const threshold = Math.max(2.5 * median, 3 * s.minSpacing);
+  // The axis ends act as anchors, so a stretch without labels at either end is a hole too.
+  const anchors = [Math.min(extent[0], accepted[0]!.x) - 1e-9, ...accepted.map((c) => c.x), Math.max(extent[1], accepted[accepted.length - 1]!.x) + 1e-9];
   const holes: [number, number][] = [];
-  for (let i = 0; i < gaps.length; i++) {
-    if (gaps[i]! > threshold) holes.push([accepted[i]!.x, accepted[i + 1]!.x]);
+  for (let i = 1; i < anchors.length; i++) {
+    if (anchors[i]! - anchors[i - 1]! > threshold) holes.push([anchors[i - 1]!, anchors[i]!]);
   }
   if (!holes.length) return accepted;
 
@@ -637,22 +752,33 @@ export interface CalendarTickOptions extends TickSelectionOptions {
 /** Guard against pathological inputs building millions of candidates. */
 const MAX_CANDIDATES = 20_000;
 
+/** Continuous ranges end a day inside the Date range, so local wall times stay formattable. */
+const MAX_TICK_RANGE_MS = MAX_DATE_MS - DAY_MS;
+
 /**
  * Calendar-aligned, weighted ticks for a continuous time range.
  *
- * The finest ladder rung whose nominal spacing reaches `minSpacing` bounds
- * the candidates; every boundary of that rung and of all heavier rungs is
- * generated in local time, then selected level by level.
+ * Every boundary of every rung whose nominal spacing reaches a quarter of
+ * `minSpacing` is generated in local time, then selected level by level on
+ * each track. The rungs below `minSpacing` only feed the fallbacks. When the
+ * result is still sparse (fewer than two ticks on an axis with room for
+ * two), selection runs once more with rungs down to 1/16 of `minSpacing`,
+ * so a lone tick can get a neighbour on even a 100 px axis. That retry only
+ * happens on narrow axes, where the extra candidates are few.
  */
 export function calendarTicks(options: CalendarTickOptions): CalendarTick[] {
   const s = makeSelector(options);
-  const weekStart = options.weekStart ?? DEFAULT_WEEK_START;
-  assertWeekStart(weekStart);
   const from = +options.from;
   const to = +options.to;
   const { width } = options;
   if (!Number.isFinite(from) || !Number.isFinite(to)) {
     throw new RangeError(`calendarTicks needs a finite time range; received [${String(options.from)}, ${String(options.to)}].`);
+  }
+  if (Math.abs(from) > MAX_TICK_RANGE_MS || Math.abs(to) > MAX_TICK_RANGE_MS) {
+    throw new RangeError(
+      `calendarTicks range [${from}, ${to}] must lie within ±${MAX_TICK_RANGE_MS} ms: the Date range ` +
+      "(±8.64e15 ms, about 273,790 years either side of 1970) less a day, so every local time stays representable.",
+    );
   }
   if (!Number.isFinite(width) || width < 0) {
     throw new RangeError(`calendarTicks width must be a non-negative number of pixels; received ${width}.`);
@@ -665,12 +791,27 @@ export function calendarTicks(options: CalendarTickOptions): CalendarTick[] {
   if (width === 0) return [];
   if (hi === lo) {
     const wall = zone.toWall(lo);
-    const c: Candidate = { time: lo, wall, prevWall: wall - 1, x: 0, weight: alignedWeight(wall, weekStart), index: -1, label: null, width: 0 };
+    const c: Candidate = { time: lo, wall, prevWall: wall - 1, x: 0, weight: alignedWeight(wall, s.weekStart), index: -1, label: null, width: 0 };
     return c.weight === NO_TICK ? [] : [toTick(s, c, false)];
   }
+  const extent: Extent = [0, width];
+  let ticks = selectBest(s, rangeCandidates(s, zone, lo, hi, width, 4), extent);
+  if (ticks.length < Math.min(2, Math.floor(width / s.minSpacing), s.maxTicks)) {
+    const deeper = selectBest(s, rangeCandidates(s, zone, lo, hi, width, 16), extent);
+    if (deeper.length > ticks.length) ticks = deeper;
+  }
+  return ticks.map((c) => toTick(s, c, false));
+}
+
+/**
+ * Every boundary in `[lo, hi]` of the rungs whose nominal spacing is at
+ * least `minSpacing / depth` pixels, sorted by x. Each boundary carries the
+ * weight of the heaviest rung it sits on.
+ */
+function rangeCandidates(s: Selector, zone: TimeZone, lo: number, hi: number, width: number, depth: number): Candidate[] {
   const pxPerMs = width / (hi - lo);
-  const finest = TICK_LEVELS.findIndex((l) => l.nominalMs * pxPerMs >= s.minSpacing * 0.9);
-  if (finest < 0) return [];
+  const found = TICK_LEVELS.findIndex((l) => l.nominalMs * pxPerMs >= s.minSpacing / depth);
+  const first = found < 0 ? TICK_LEVELS.length - 1 : found;
 
   const byTime = new Map<number, Candidate>();
   // Wall times of instants in [lo, hi] lie between these bounds: a short range
@@ -681,14 +822,13 @@ export function calendarTicks(options: CalendarTickOptions): CalendarTick[] {
   const pad = hi - lo >= 2 * DAY_MS ? DAY_MS : 0;
   const wallFrom = lo + Math.min(offLo, offHi) - pad;
   const wallTo = hi + Math.max(offLo, offHi) + pad;
-  for (let li = finest; li < TICK_LEVELS.length; li++) {
+  for (let li = first; li < TICK_LEVELS.length; li++) {
     const level = TICK_LEVELS[li]!;
     const subDay = UNIT_MS[level.unit] < DAY_MS;
-    let b = floorWall(wallFrom, level.unit, level.step, weekStart);
-    const end = wallTo;
-    for (let guard = 0; b <= end && guard < MAX_CANDIDATES; guard++, b = addWall(b, level.unit, level.step)) {
+    let b = floorWall(wallFrom, level.unit, level.step, s.weekStart);
+    for (let guard = 0; b <= wallTo && guard < MAX_CANDIDATES; guard++, b = nextBoundary(b, level.unit, level.step)) {
       for (const utc of instantsForWall(zone, b, subDay)) {
-        if (utc < lo || utc > hi) continue;
+        if (!(utc >= lo && utc <= hi)) continue;
         const existing = byTime.get(utc);
         if (existing) {
           if (level.weight > existing.weight) existing.weight = level.weight;
@@ -700,10 +840,7 @@ export function calendarTicks(options: CalendarTickOptions): CalendarTick[] {
       }
     }
   }
-  // Every rung from `finest` up is walked, so each boundary already carries
-  // the weight of the heaviest rung it sits on.
-  const candidates = [...byTime.values()].sort((a, b) => a.x - b.x);
-  return selectBest(s, candidates).map((c) => toTick(s, c, false));
+  return [...byTime.values()].sort((a, b) => a.x - b.x);
 }
 
 /**
@@ -798,5 +935,11 @@ export function barTicks(options: BarTickOptions): CalendarTick[] {
     const prevWall = i > 0 ? zone.toWall(bars[i - 1]!.time) : wall - 1;
     candidates.push({ time, wall, prevWall, x: (i - options.from) * barSpacing, weight, index: i, label: null, width: 0 });
   }
-  return selectBest(s, candidates).map((c) => toTick(s, c, true));
+  // The span the bars cover on screen: whitespace before the first bar or
+  // after the last one is not a hole to fill with labels.
+  const extent: Extent = [
+    Math.max(0, (start - options.from) * barSpacing),
+    Math.min(options.to - options.from, end - options.from) * barSpacing,
+  ];
+  return selectBest(s, candidates, extent).map((c) => toTick(s, c, true));
 }

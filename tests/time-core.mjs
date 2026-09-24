@@ -4,7 +4,9 @@
 // the sources directly with esbuild. It checks DST-correct zone offsets,
 // calendar-aligned weighted ticks for continuous ranges and gapped bar axes,
 // the formatter cache, and that every result is identical whatever the
-// process time zone is (child processes run under three TZ values).
+// process time zone is (child processes run under three TZ values). Density
+// grids assert that labels never collapse to zero or one on an axis with
+// room for two, and that small width changes never cause large jumps.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -47,6 +49,7 @@ const {
   DAY_MS,
   HOUR_MS,
   FinancialTimeAxis,
+  MAX_DATE_MS,
   TICK_LEVELS,
   TickWeight,
   addCalendar,
@@ -61,11 +64,13 @@ const {
   formatNumber,
   getTimeZone,
   intlCacheSize,
+  isIntradayKind,
   isValidTimeZone,
   numberFormat,
   resolveLocale,
   resolveTimeZoneId,
   tickLevel,
+  tickWeight,
   wallFromFields,
 } = core;
 
@@ -121,7 +126,7 @@ function fingerprint() {
       probes,
       wall: zone.wallParts(Date.UTC(2024, 10, 3, 6, 30)),
       fromWall: zone.fromWall(wallFromFields(2024, 9, 6, 2, 30)),
-      axis: labels(axis.ticks(bars, { from: bars.length - 700, to: bars.length - 1, barSpacing: 1.6 })),
+      axis: labels(axis.ticks(bars, { kind: "minutes", from: bars.length - 700, to: bars.length - 1, barSpacing: 1.6 })),
       crosshair: axis.formatCrosshair(Date.UTC(2024, 0, 14, 22), "minutes"),
       days: labels(calendarTicks({ from: Date.UTC(2024, 2, 1), to: Date.UTC(2024, 3, 20), width: 900, timeZone: id })),
       hours: labels(calendarTicks({ from: Date.UTC(2024, 10, 2, 18), to: Date.UTC(2024, 10, 3, 18), width: 1000, timeZone: id })),
@@ -165,6 +170,12 @@ if (fingerprintOnly) {
   assert.equal(resolveLocale("EN-us"), "en-US", "locale tags are canonicalised");
   assert.throws(() => resolveLocale("not a locale!"), /Invalid locale "not a locale!".*BCP 47/);
   assert.throws(() => dateTimeFormat("en-US", { timeZone: "Nowhere/Land" }), /Unknown time zone "Nowhere\/Land"/);
+  // Another bad option next to a valid zone must not blame the zone.
+  assert.throws(
+    () => dateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hourCycle: "h99" }),
+    (error) => error instanceof RangeError && /hourCycle=h99/.test(error.message) && !/Unknown time zone/.test(error.message),
+    "an invalid hourCycle is reported as such, with the option bag",
+  );
   for (let i = 0; i < 300; i++) numberFormat("en-US", { maximumFractionDigits: i % 21, minimumIntegerDigits: 1 + (i % 15) });
   assert.ok(intlCacheSize().number <= 128, "the cache is bounded");
 }
@@ -205,9 +216,20 @@ if (fingerprintOnly) {
   assert.equal(nyAxis.formatCrosshair(Date.UTC(2026, 10, 1, 12), "minutes"), "1 Nov '26 07:00");
   assert.equal(new FinancialTimeAxis({ timeZone: "Asia/Tokyo" }).formatCrosshair(Date.UTC(2026, 10, 1, 12), "minutes"), "1 Nov '26 21:00");
   assert.equal(nyAxis.formatCrosshair(Date.UTC(2024, 0, 15, 12, 0, 5), "seconds"), "15 Jan '24 07:00:05");
-  assert.equal(nyAxis.formatCrosshair(Date.UTC(2024, 0, 15, 3), "days"), "14 Jan '24", "daily labels use the local date");
+  // TradingView datafeed contract: D/W/M bars are stamped 00:00 UTC of the
+  // trading day, so their date is the UTC date whatever the display zone.
+  assert.equal(nyAxis.formatCrosshair(Date.UTC(2024, 1, 1), "days"), "1 Feb '24", "a daily bar reads its trading day in New York");
+  assert.equal(new FinancialTimeAxis({ timeZone: "Asia/Tokyo" }).formatCrosshair(Date.UTC(2024, 1, 1), "months"), "1 Feb '24");
+  assert.equal(nyAxis.formatCrosshair(Date.UTC(2024, 0, 1), "weeks"), "1 Jan '24");
   assert.equal(new FinancialTimeAxis().formatCrosshair(Date.UTC(2024, 0, 14, 22), "minutes"), "14 Jan '24 22:00", "UTC stays byte-identical to the legacy format");
-  assert.equal(nyAxis.formatTick(Date.UTC(2024, 0, 15, 14, 30), TickWeight.Minute), "09:30");
+  assert.equal(nyAxis.formatTick(Date.UTC(2024, 0, 15, 14, 30), TickWeight.Minute, "minutes"), "09:30");
+  assert.equal(nyAxis.formatTick(Date.UTC(2024, 1, 1), TickWeight.Month, "days"), "Feb", "a daily bar's month label is its UTC month");
+  assert.equal(nyAxis.calendarZone("minutes"), nyAxis.timeZone, "intraday bars are read in the display zone");
+  assert.equal(nyAxis.calendarZone("days").id, "Etc/UTC", "daily bars are read in UTC");
+  assert.equal(isIntradayKind("hours"), true);
+  assert.equal(isIntradayKind("weeks"), false);
+  assert.throws(() => nyAxis.formatCrosshair(0, "1D"), /Unknown resolution kind "1D".*parseResolution/);
+  assert.throws(() => nyAxis.ticks([{ time: 0 }], { from: 0, to: 0, barSpacing: 5 }), /Unknown resolution kind undefined/);
   assert.equal(new FinancialTimeAxis({ hourCycle: "h12" }).formatCrosshair(Date.UTC(2024, 0, 14, 17), "minutes"), "14 Jan '24 5:00 PM");
 
   // Wall -> instant: skipped and repeated local times.
@@ -250,6 +272,19 @@ if (fingerprintOnly) {
   assert.equal(resolveTimeZoneId(undefined, undefined), "Etc/UTC");
   assert.ok(Number.isNaN(ny.offset(Number.NaN)), "non-finite input propagates as NaN");
 
+  // The ends of the Date range resolve, and beyond them is NaN, never a raw Intl RangeError.
+  for (const zone of [ny, sydney, tokyo, getTimeZone("+05:30")]) {
+    for (const edge of [MAX_DATE_MS, -MAX_DATE_MS]) {
+      assert.ok(Number.isFinite(zone.offset(edge)), `${zone.id} has an offset at ${edge}`);
+      assert.equal(zone.fromWall(zone.toWall(edge)), edge, `${zone.id} round-trips ${edge}`);
+      assert.ok(Number.isNaN(zone.offset(edge + Math.sign(edge))), `${zone.id} has no offset past ${edge}`);
+      assert.ok(Number.isNaN(zone.fromWall(edge + Math.sign(edge) * 2 * DAY_MS)), `${zone.id} maps no wall time past ${edge}`);
+    }
+  }
+  assert.equal(nyAxis.formatCrosshair(-MAX_DATE_MS, "minutes"), "", "a local time outside the Date range has no label");
+  assert.ok(calendarTicks({ from: MAX_DATE_MS - 20 * 366 * DAY_MS, to: MAX_DATE_MS - DAY_MS, width: 400, timeZone: "Asia/Tokyo" }).length >= 2, "ticks at the end of time");
+  assert.throws(() => calendarTicks({ from: 0, to: MAX_DATE_MS, width: 400 }), /must lie within/);
+
   // Civil day arithmetic, including years before 1970 and before 100.
   for (const [y, m, d] of [[1970, 1, 1], [1969, 12, 31], [2000, 2, 29], [1600, 3, 1], [50, 6, 15], [-44, 3, 15], [9999, 12, 31]]) {
     const days = daysFromCivil(y, m, d);
@@ -278,6 +313,14 @@ if (fingerprintOnly) {
     "adding a local day across spring-forward keeps the clock time (23 elapsed hours)",
   );
   assert.equal(addCalendar(Date.UTC(2024, 0, 31), "month"), Date.UTC(2024, 1, 29), "month ends clamp");
+  // Day steps above 1 count days of the month; a short tail joins the previous period.
+  assert.equal(floorToCalendar(Date.UTC(2024, 0, 30, 12), "day", 2), Date.UTC(2024, 0, 29), "2-day periods start on odd days");
+  assert.equal(floorToCalendar(Date.UTC(2024, 0, 31, 12), "day", 2), Date.UTC(2024, 0, 31));
+  assert.equal(floorToCalendar(Date.UTC(2024, 1, 2, 12), "day", 2), Date.UTC(2024, 1, 1), "every month restarts on the 1st");
+  assert.equal(floorToCalendar(Date.UTC(2024, 0, 14, 12), "day", 14), Date.UTC(2024, 0, 1), "half months: the 1st…");
+  assert.equal(floorToCalendar(Date.UTC(2024, 0, 31, 12), "day", 14), Date.UTC(2024, 0, 15), "…and the 15th (29-31 join it)");
+  assert.equal(floorToCalendar(Date.UTC(2024, 1, 29, 12), "day", 14), Date.UTC(2024, 1, 15));
+  assert.equal(floorToCalendar(Date.UTC(2024, 0, 31, 12), "day", 10), Date.UTC(2024, 0, 21), "the 31st joins the 21st period");
   assert.throws(() => floorToCalendar(0, "month", 0), /positive integer/);
   assert.throws(() => floorToCalendar(0, "week", 1, null, 7), /weekStart/);
 }
@@ -341,8 +384,15 @@ function assertCalendarTicks(ticks, { width, zone, name, minSpacing = 40 }) {
   assert.ok(new Set(labels(intraday)).size >= 4, `6.5 h shows at least four distinct HH:mm labels (${labels(intraday)})`);
   assert.ok(labels(intraday).every((l) => /^\d\d:\d\d$/.test(l)));
 
+  // 26 px/day: days are crowded, odd days (52 px) fit and beat weekly labels.
   const month = calendarTicks({ from: Date.UTC(2024, 0, 1), to: Date.UTC(2024, 1, 1), width: 800 });
-  assert.deepEqual(labels(month), ["2024", "8", "15", "22", "29", "Feb"], "Mondays between month starts");
+  assert.deepEqual(labels(month), ["2024", "3", "5", "7", "9", "11", "13", "15", "17", "19", "21", "23", "25", "27", "29", "Feb"], "odd days between month starts");
+  // 6.5 px/day: weekly labels (the quarter track) when odd days no longer fit.
+  const weekly = calendarTicks({ from: Date.UTC(2024, 0, 1), to: Date.UTC(2024, 2, 1), width: 390 });
+  assert.deepEqual(labels(weekly), ["2024", "8", "15", "22", "Feb", "12", "19", "Mar"], "Mondays between month starts; one 3-4 days from the 1st gives way");
+  // 3.3 px/day: weeks (23 px) are crowded, half months (46 px) fit.
+  const halves = calendarTicks({ from: Date.UTC(2024, 0, 1), to: Date.UTC(2024, 3, 1), width: 300 });
+  assert.deepEqual(labels(halves), ["2024", "15", "Feb", "15", "Mar", "15", "Apr"], "half months when weeks are crowded");
 
   const acrossMidnight = calendarTicks({ from: Date.UTC(2024, 0, 14, 20), to: Date.UTC(2024, 0, 15, 4), width: 600 });
   assert.ok(acrossMidnight.some((t) => t.label === "15" && (t.unit === "day" || t.unit === "week")), "a day boundary inside an intraday range shows the date");
@@ -374,6 +424,39 @@ function assertCalendarTicks(ticks, { width, zone, name, minSpacing = 40 }) {
   assert.throws(() => calendarTicks({ from: 0, to: 1, width: 100, minSpacing: 0 }), /minSpacing/);
   assert.throws(() => calendarTicks({ from: 0, to: 1, width: 100, timeZone: "Bad/Zone" }), /Unknown time zone/);
   assert.equal(TICK_LEVELS.length, TICK_LEVELS[TICK_LEVELS.length - 1].weight);
+  for (let i = 1; i < TICK_LEVELS.length; i++) {
+    const ratio = TICK_LEVELS[i].nominalMs / TICK_LEVELS[i - 1].nominalMs;
+    assert.ok(ratio > 1 && ratio <= 3.5, `the ladder ascends in steps of at most 3.5x (${TICK_LEVELS[i - 1].step} ${TICK_LEVELS[i - 1].unit} -> ${TICK_LEVELS[i].step} ${TICK_LEVELS[i].unit})`);
+  }
+  assert.equal(tickWeight("day", 14), TickWeight.Week + 1, "half months sit between weeks and months");
+}
+
+// Density: never blank, never a cliff. Spans from 1 s to 40 y (x1.37) at the
+// widths dashboard cards and full charts use, in UTC and New York.
+{
+  const t0 = Date.UTC(2024, 0, 17, 13, 7);
+  for (let span = SEC; span < 40 * 366 * DAY_MS; span *= 1.37) {
+    for (const zone of ["Etc/UTC", "America/New_York"]) {
+      for (const width of [120, 200, 300, 400, 600, 800, 1200]) {
+        const name = `${zone} ${(span / DAY_MS).toPrecision(3)}d @${width}px`;
+        const ticks = calendarTicks({ from: t0, to: t0 + span, width, timeZone: zone });
+        assert.ok(ticks.length >= Math.min(2, Math.floor(width / 40)), `${name}: room for two labels shows two (${labels(ticks)})`);
+        for (let i = 1; i < ticks.length; i++) {
+          assert.ok(ticks[i].x - ticks[i - 1].x >= 40 - 1e-6, `${name}: ${ticks[i - 1].label} -> ${ticks[i].label} keeps 40px`);
+        }
+        const wider = calendarTicks({ from: t0, to: t0 + span, width: width * 1.05, timeZone: zone });
+        assert.ok(wider.length >= ticks.length / 2, `${name}: 5% more width never halves the labels (${labels(ticks)} -> ${labels(wider)})`);
+        assert.ok(wider.length <= 4.5 * Math.max(1, ticks.length), `${name}: 5% more width never jumps past one ladder step (${labels(ticks)} -> ${labels(wider)})`);
+      }
+    }
+  }
+  // Regressions: 10 days went from 11 labels at 400 px to one at 380 px, and
+  // 8.8 days at 300 px and 3.4 days at 120 px showed one label or none.
+  const tenDays = (width) => calendarTicks({ from: Date.UTC(2024, 0, 17), to: Date.UTC(2024, 0, 27), width });
+  assert.equal(tenDays(400).length, 11);
+  assert.deepEqual(labels(tenDays(380)), ["17", "19", "21", "23", "25", "27"], "odd days when days no longer fit");
+  assert.ok(calendarTicks({ from: t0, to: t0 + 8.76 * DAY_MS, width: 300 }).length >= 4);
+  assert.ok(calendarTicks({ from: t0, to: t0 + 3.4 * DAY_MS, width: 120 }).length >= 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -395,7 +478,7 @@ function assertBarTicks(ticks, bars, { barSpacing, name, minSpacing = 40 }) {
   const counts = [];
   for (const width of [500, 1002, 2000]) {
     const barSpacing = width / 500;
-    const ticks = axis.ticks(eq, { from: eq.length - 500, to: eq.length - 1, barSpacing });
+    const ticks = axis.ticks(eq, { kind: "minutes", from: eq.length - 500, to: eq.length - 1, barSpacing });
     assertBarTicks(ticks, eq, { barSpacing, name: `sessions @${width}px` });
     assert.ok(ticks.some((t) => (t.unit === "day" || t.unit === "week") && axis.timeZone.wallParts(t.time).hour === 9), "a session open shows its date");
     assert.ok(ticks.filter((t) => t.unit !== "day" && t.unit !== "week").every((t) => /^\d\d:\d\d$/.test(t.label)), "intraday ticks show HH:mm");
@@ -406,23 +489,23 @@ function assertBarTicks(ticks, bars, { barSpacing, name, minSpacing = 40 }) {
   // Same bar count with 17.5 h overnight gaps only vs. with weekend gaps: same density.
   const weekdaysOnly = sessions(6, "America/New_York", Date.UTC(2024, 0, 8));
   const withWeekend = sessions(6, "America/New_York", Date.UTC(2024, 0, 3));
-  const a = axis.ticks(weekdaysOnly, { from: 390, to: 390 + 1199, barSpacing: 1 });
-  const b = axis.ticks(withWeekend, { from: 390, to: 390 + 1199, barSpacing: 1 });
+  const a = axis.ticks(weekdaysOnly, { kind: "minutes", from: 390, to: 390 + 1199, barSpacing: 1 });
+  const b = axis.ticks(withWeekend, { kind: "minutes", from: 390, to: 390 + 1199, barSpacing: 1 });
   assert.ok(Math.abs(a.length - b.length) <= 1, `gap size does not change density (${a.length} vs ${b.length})`);
 
   const utc = new FinancialTimeAxis();
   const fixtures = [
-    ["1s", series(Date.UTC(2024, 0, 2, 14), Date.UTC(2024, 0, 2, 16), SEC), [2, 12, 40]],
-    ["1m", series(Date.UTC(2024, 0, 1), Date.UTC(2024, 0, 8), MIN), [0.5, 3, 30]],
-    ["1h", series(Date.UTC(2023, 0, 1), Date.UTC(2024, 0, 1), HOUR_MS), [0.2, 2, 30]],
-    ["1D", series(Date.UTC(2015, 0, 1), Date.UTC(2025, 0, 1), DAY_MS, true), [0.15, 0.3, 1.6, 8, 50]],
-    ["1W", series(Date.UTC(2010, 0, 4), Date.UTC(2025, 0, 1), 7 * DAY_MS), [1, 5, 15, 60]],
-    ["1M", monthly(1990, 2025), [1, 4, 12, 60]],
+    ["1s", "seconds", series(Date.UTC(2024, 0, 2, 14), Date.UTC(2024, 0, 2, 16), SEC), [2, 12, 40]],
+    ["1m", "minutes", series(Date.UTC(2024, 0, 1), Date.UTC(2024, 0, 8), MIN), [0.5, 3, 30]],
+    ["1h", "hours", series(Date.UTC(2023, 0, 1), Date.UTC(2024, 0, 1), HOUR_MS), [0.2, 2, 30]],
+    ["1D", "days", series(Date.UTC(2015, 0, 1), Date.UTC(2025, 0, 1), DAY_MS, true), [0.15, 0.3, 1.6, 8, 50]],
+    ["1W", "weeks", series(Date.UTC(2010, 0, 4), Date.UTC(2025, 0, 1), 7 * DAY_MS), [1, 5, 15, 60]],
+    ["1M", "months", monthly(1990, 2025), [1, 4, 12, 60]],
   ];
-  for (const [name, bars, spacings] of fixtures) {
+  for (const [name, kind, bars, spacings] of fixtures) {
     for (const barSpacing of spacings) {
       const n = Math.min(bars.length, Math.floor(1200 / barSpacing));
-      const ticks = utc.ticks(bars, { from: bars.length - n, to: bars.length - 1, barSpacing });
+      const ticks = utc.ticks(bars, { kind, from: bars.length - n, to: bars.length - 1, barSpacing });
       assertBarTicks(ticks, bars, { barSpacing, name: `${name} @${barSpacing}px/bar` });
       const years = ticks.filter((t) => t.unit === "year").map((t) => t.label);
       assert.equal(new Set(years).size, years.length, `${name}: year labels are unique`);
@@ -433,18 +516,18 @@ function assertBarTicks(ticks, bars, { barSpacing, name, minSpacing = 40 }) {
     }
   }
 
-  const daily = fixtures[3][1];
-  const tenYears = utc.ticks(daily, { from: 0, to: daily.length - 1, barSpacing: 800 / daily.length });
+  const daily = fixtures[3][2];
+  const tenYears = utc.ticks(daily, { kind: "days", from: 0, to: daily.length - 1, barSpacing: 800 / daily.length });
   assert.deepEqual(labels(tenYears), ["2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024"], "ten years of daily bars label every year");
-  const tenYearsNarrow = utc.ticks(daily, { from: 0, to: daily.length - 1, barSpacing: 400 / daily.length });
+  const tenYearsNarrow = utc.ticks(daily, { kind: "days", from: 0, to: daily.length - 1, barSpacing: 400 / daily.length });
   assert.deepEqual(labels(tenYearsNarrow), ["2016", "2018", "2020", "2022", "2024"], "a crowded year rung is dropped whole, not thinned irregularly");
-  const twoYears = utc.ticks(daily, { from: daily.length - 522, to: daily.length - 1, barSpacing: 1000 / 522 });
+  const twoYears = utc.ticks(daily, { kind: "days", from: daily.length - 522, to: daily.length - 1, barSpacing: 1000 / 522 });
   assert.ok(labels(twoYears).includes("2024") && labels(twoYears).includes("Jul"), `two years of dailies show years and months (${labels(twoYears)})`);
   assert.ok(twoYears.find((t) => t.unit === "year").major, "heavier units are flagged major");
 
   // Crossing DST in New York on hourly bars keeps one label per local boundary.
   const hourly = series(Date.UTC(2024, 10, 1), Date.UTC(2024, 10, 6), HOUR_MS);
-  const dst = axis.ticks(hourly, { from: 0, to: hourly.length - 1, barSpacing: 12 });
+  const dst = axis.ticks(hourly, { kind: "hours", from: 0, to: hourly.length - 1, barSpacing: 12 });
   assertBarTicks(dst, hourly, { barSpacing: 12, name: "hourly across fall-back" });
   const ny = axis.timeZone;
   for (const t of dst.filter((x) => x.unit === "day" || x.unit === "week")) assert.equal(ny.wallParts(t.time).hour, 0, "day ticks at local midnight");
@@ -454,36 +537,44 @@ function assertBarTicks(ticks, bars, { barSpacing, name, minSpacing = 40 }) {
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const sparse = [];
   for (let i = 0, t = Date.UTC(2024, 5, 3); i < 600; i++) sparse.push({ time: (t += MIN * (rnd() < 0.8 ? 1 : Math.ceil(rnd() * 120))) });
-  const sparseTicks = utc.ticks(sparse, { from: 0, to: 599, barSpacing: 2 });
+  const sparseTicks = utc.ticks(sparse, { kind: "minutes", from: 0, to: 599, barSpacing: 2 });
   assertBarTicks(sparseTicks, sparse, { barSpacing: 2, name: "sparse bars" });
   assert.ok(sparseTicks.length >= 6, "sparse data keeps a usable number of labels");
 
   // Weight cache: appends are incremental and equal a full recompute; prepends recompute.
   const live = new FinancialTimeAxis({ timeZone: "Asia/Tokyo" });
   const bars = series(Date.UTC(2024, 0, 1), Date.UTC(2024, 0, 20), 15 * MIN).slice();
-  const first = live.weights(bars).slice(0, bars.length);
-  assert.equal(live.weights(bars), live.weights(bars), "an unchanged series reuses its weights");
+  const first = live.weights(bars, "minutes").slice(0, bars.length);
+  assert.equal(live.weights(bars, "minutes"), live.weights(bars, "minutes"), "an unchanged series reuses its weights");
   for (let i = 0; i < 500; i++) bars.push({ time: bars[bars.length - 1].time + 15 * MIN });
-  const grown = live.weights(bars);
+  const grown = live.weights(bars, "minutes");
   assert.deepEqual([...grown.slice(0, bars.length)], [...computeTickWeights(bars, "Asia/Tokyo")], "appended weights match a full recompute");
   assert.deepEqual([...grown.slice(0, first.length)], [...first]);
   bars.unshift({ time: bars[0].time - 15 * MIN });
-  assert.deepEqual([...live.weights(bars).slice(0, bars.length)], [...computeTickWeights(bars, "Asia/Tokyo")], "a prepend recomputes");
+  assert.deepEqual([...live.weights(bars, "minutes").slice(0, bars.length)], [...computeTickWeights(bars, "Asia/Tokyo")], "a prepend recomputes");
   live.setOptions({ timeZone: "America/New_York" });
-  assert.deepEqual([...live.weights(bars).slice(0, bars.length)], [...computeTickWeights(bars, "America/New_York")], "setOptions({ timeZone }) invalidates the cache");
+  assert.deepEqual([...live.weights(bars, "minutes").slice(0, bars.length)], [...computeTickWeights(bars, "America/New_York")], "setOptions({ timeZone }) invalidates the cache");
+  // Daily weights are read in UTC, so a new display zone keeps them; a switch
+  // between intraday and daily kinds recomputes in the right zone.
+  const dailyWeights = live.weights(daily, "days");
+  assert.deepEqual([...dailyWeights.slice(0, daily.length)], [...computeTickWeights(daily, null)], "daily weights are UTC weights");
+  live.setOptions({ timeZone: "Asia/Tokyo" });
+  assert.equal(live.weights(daily, "days"), dailyWeights, "a new display zone leaves daily weights untouched");
+  assert.deepEqual([...live.weights(daily, "hours").slice(0, daily.length)], [...computeTickWeights(daily, "Asia/Tokyo")], "intraday kinds use the display zone");
+  assert.deepEqual([...live.weights(daily, "weeks").slice(0, daily.length)], [...computeTickWeights(daily, null)], "and back to UTC");
 
   // Measured labels keep clear of each other on a bar axis too.
   const measure = (s) => s.length * 7;
-  const measured = utc.ticks(daily, { from: daily.length - 300, to: daily.length - 1, barSpacing: 3, measure });
+  const measured = utc.ticks(daily, { kind: "days", from: daily.length - 300, to: daily.length - 1, barSpacing: 3, measure });
   for (let i = 1; i < measured.length; i++) {
     const need = (measure(measured[i - 1].label) + measure(measured[i].label)) / 2 + 8;
     assert.ok((measured[i].index - measured[i - 1].index) * 3 >= need, "measured bar labels do not overlap");
   }
 
-  assert.deepEqual(utc.ticks([], { from: 0, to: 10, barSpacing: 5 }), []);
+  assert.deepEqual(utc.ticks([], { kind: "days", from: 0, to: 10, barSpacing: 5 }), []);
   assert.throws(() => barTicks({ bars: daily, weights: new Uint8Array(3), from: 0, to: 10, barSpacing: 5 }), /weight per bar/);
   assert.throws(() => barTicks({ bars: [{ time: 0 }], weights: [99], from: 0, to: 0, barSpacing: 5 }), /Invalid tick weight 99/);
-  assert.throws(() => utc.ticks(daily, { from: 0, to: 10, barSpacing: 0 }), /barSpacing/);
+  assert.throws(() => utc.ticks(daily, { kind: "days", from: 0, to: 10, barSpacing: 0 }), /barSpacing/);
   assert.throws(() => new FinancialTimeAxis({ weekStart: 9 }), /weekStart/);
   assert.throws(() => new FinancialTimeAxis({ minSpacing: -1 }), /minSpacing/);
   assert.throws(() => new FinancialTimeAxis({ timeZone: "Nope/Nope" }), /Unknown time zone/);
@@ -492,19 +583,101 @@ function assertBarTicks(ticks, bars, { barSpacing, name, minSpacing = 40 }) {
   assert.throws(() => kept.setOptions({ timeZone: "Nope/Nope", minSpacing: 20 }), /Unknown time zone/);
   assert.equal(kept.timeZone.id, "Asia/Tokyo", "a rejected setOptions leaves the axis unchanged");
   assert.throws(() => kept.setOptions({ minSpacing: 0 }), /minSpacing/);
-  assert.equal(kept.ticks(daily, { from: 0, to: 400, barSpacing: 2 }).length > 0, true, "and still usable");
+  assert.equal(kept.ticks(daily, { kind: "days", from: 0, to: 400, barSpacing: 2 }).length > 0, true, "and still usable");
 
   // Performance guard (generous; catches accidental per-bar Intl work).
   const big = series(Date.UTC(2020, 0, 1), Date.UTC(2020, 0, 1) + 300_000 * MIN, MIN);
   const perfAxis = new FinancialTimeAxis({ timeZone: "America/New_York" });
   let start = performance.now();
-  perfAxis.weights(big);
+  perfAxis.weights(big, "minutes");
   const weightMs = performance.now() - start;
   start = performance.now();
-  for (let i = 0; i < 20; i++) perfAxis.ticks(big, { from: 0, to: big.length - 1, barSpacing: 1200 / big.length });
+  for (let i = 0; i < 20; i++) perfAxis.ticks(big, { kind: "minutes", from: 0, to: big.length - 1, barSpacing: 1200 / big.length });
   const fullViewMs = (performance.now() - start) / 20;
   assert.ok(weightMs < 1500, `weights for 300k bars took ${weightMs.toFixed(1)}ms`);
   assert.ok(fullViewMs < 100, `a fully zoomed-out tick pass took ${fullViewMs.toFixed(1)}ms`);
+}
+
+// ---------------------------------------------------------------------------
+// TradingView datafeed contract: daily, weekly and monthly bars are stamped
+// 00:00 UTC of their trading day. Outside UTC they keep their dates, and their
+// month and year labels sit on the bars of the 1st, exactly as on a UTC axis.
+// ---------------------------------------------------------------------------
+
+{
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const daily = series(Date.UTC(2023, 6, 3), Date.UTC(2024, 6, 1), DAY_MS, true);
+  const weekly = series(Date.UTC(2021, 0, 4), Date.UTC(2024, 6, 1), 7 * DAY_MS);
+  const months = monthly(2019, 2025);
+  const utcAxis = new FinancialTimeAxis();
+  for (const zone of ["America/New_York", "Asia/Tokyo", "Australia/Sydney"]) {
+    const axis = new FinancialTimeAxis({ timeZone: zone });
+    for (const [kind, bars, barSpacing] of [["days", daily, 6], ["days", daily, 1.5], ["weeks", weekly, 4], ["months", months, 30], ["months", months, 8]]) {
+      const request = { kind, from: 0, to: bars.length - 1, barSpacing };
+      const ticks = axis.ticks(bars, request);
+      assertBarTicks(ticks, bars, { barSpacing, name: `${zone} ${kind} @${barSpacing}px/bar` });
+      assert.deepEqual(labels(ticks), labels(utcAxis.ticks(bars, request)), `${zone} ${kind}: labels match the UTC axis`);
+      for (const t of ticks) {
+        const date = new Date(t.time);
+        if (t.unit === "year") assert.equal(t.label, String(date.getUTCFullYear()), `${zone} ${kind}: ${t.label} sits on its own year`);
+        if (t.unit === "month") assert.equal(t.label, MONTHS[date.getUTCMonth()], `${zone} ${kind}: ${t.label} sits on its own month`);
+        if (t.unit === "day" || t.unit === "week") assert.equal(t.label, String(date.getUTCDate()), `${zone} ${kind}: ${t.label} is the bar's date`);
+      }
+    }
+    const dailyTicks = axis.ticks(daily, { kind: "days", from: 0, to: daily.length - 1, barSpacing: 6 });
+    assert.equal(dailyTicks.find((t) => t.label === "Feb")?.time, Date.UTC(2024, 1, 1), `${zone}: 'Feb' sits on the 1 Feb bar`);
+    assert.equal(dailyTicks.find((t) => t.label === "2024")?.time, Date.UTC(2024, 0, 1), `${zone}: '2024' sits on the 1 Jan bar`);
+    const monthlyTicks = axis.ticks(months, { kind: "months", from: 0, to: months.length - 1, barSpacing: 30 });
+    assert.equal(monthlyTicks.find((t) => t.label === "Apr")?.time, Date.UTC(2019, 3, 1), `${zone}: 'Apr' sits on the April bar`);
+    assert.equal(monthlyTicks.find((t) => t.label === "2020")?.time, Date.UTC(2020, 0, 1), `${zone}: '2020' sits on the January bar`);
+    assert.equal(axis.formatCrosshair(Date.UTC(2024, 1, 1), "days"), "1 Feb '24", `${zone}: the crosshair shows the trading day`);
+  }
+}
+
+// Bar-axis density across zoom: 1-minute 24x7 data and gapped sessions from
+// 0.005 to 60 px per bar never go blank, keep 40 px, and never cliff.
+{
+  const fixtures = [
+    ["1-minute 24x7", "Etc/UTC", series(Date.UTC(2024, 0, 1), Date.UTC(2024, 3, 1), MIN)],
+    ["1-minute 24x7 in New York", "America/New_York", series(Date.UTC(2024, 0, 1), Date.UTC(2024, 3, 1), MIN)],
+    ["60 NY sessions", "America/New_York", sessions(60, "America/New_York")],
+    ["three NY sessions", "America/New_York", sessions(3, "America/New_York", Date.UTC(2024, 0, 15))],
+  ];
+  for (const [name, zone, bars] of fixtures) {
+    const axis = new FinancialTimeAxis({ timeZone: zone });
+    for (const width of [120, 300, 600, 1000]) {
+      for (let barSpacing = 0.005; barSpacing <= 60; barSpacing *= 1.25) {
+        const n = Math.min(bars.length, Math.floor(width / barSpacing));
+        const request = { kind: "minutes", from: bars.length - n, to: bars.length - 1, barSpacing };
+        const label = `${name} @${barSpacing.toFixed(3)}px/bar in ${width}px`;
+        const ticks = axis.ticks(bars, request);
+        assert.ok(ticks.length >= Math.min(2, Math.floor(((n - 1) * barSpacing) / 40)), `${label}: room for two labels shows two (${labels(ticks)})`);
+        for (let i = 1; i < ticks.length; i++) {
+          assert.ok((ticks[i].index - ticks[i - 1].index) * barSpacing >= 40 - 1e-6, `${label}: ${ticks[i - 1].label} -> ${ticks[i].label} keeps 40px`);
+        }
+        const wider = axis.ticks(bars, { ...request, barSpacing: barSpacing * 1.05 });
+        assert.ok(wider.length >= ticks.length / 2, `${label}: 5% wider bars never halve the labels (${labels(ticks)} -> ${labels(wider)})`);
+        assert.ok(wider.length <= 4.5 * Math.max(1, ticks.length), `${label}: 5% wider bars never jump past one ladder step (${labels(ticks)} -> ${labels(wider)})`);
+      }
+    }
+  }
+
+  // Whitespace before the first bar or after the last is not a hole to fill:
+  // scrolling into it never adds labels next to the data.
+  const daily = series(Date.UTC(2020, 0, 2), Date.UTC(2024, 5, 20), DAY_MS, true);
+  const axis = new FinancialTimeAxis();
+  const last = daily.length - 1;
+  for (let barSpacing = 0.05; barSpacing < 40; barSpacing *= 1.3) {
+    const visible = Math.floor(800 / barSpacing);
+    const from = Math.max(0, last - visible);
+    const latest = labels(axis.ticks(daily, { kind: "days", from, to: last, barSpacing }));
+    const future = labels(axis.ticks(daily, { kind: "days", from, to: last + visible * 0.6, barSpacing }));
+    assert.deepEqual(future, latest, `${barSpacing.toFixed(3)}px/bar: future whitespace changes no label`);
+    const to = Math.min(last, visible);
+    const earliest = labels(axis.ticks(daily, { kind: "days", from: 0, to, barSpacing }));
+    const past = labels(axis.ticks(daily, { kind: "days", from: -visible * 0.6, to, barSpacing }));
+    assert.deepEqual(past, earliest, `${barSpacing.toFixed(3)}px/bar: whitespace before the first bar changes no label`);
+  }
 }
 
 // ---------------------------------------------------------------------------

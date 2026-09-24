@@ -13,6 +13,10 @@
  * memoised per UTC day. A day whose start and end offsets differ is searched
  * to the exact second of its transition(s), so a lookup is a Map hit plus one
  * comparison and the result is independent of the process time zone (`TZ`).
+ *
+ * Instants outside the ECMAScript Date range ({@link MAX_DATE_MS}, about
+ * 273,790 years either side of 1970) have no offset: `offset`, `toWall` and
+ * `fromWall` return `NaN` for them, like `new Date(9e15).getTime()`.
  */
 
 import { dateTimeFormat } from "../intl";
@@ -21,6 +25,19 @@ export const SECOND_MS = 1_000;
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 3_600_000;
 export const DAY_MS = 86_400_000;
+
+/** Largest instant a `Date` can hold, in either direction (±8.64e15 ms). */
+export const MAX_DATE_MS = 8.64e15;
+
+/** `true` for a finite instant inside the Date range. */
+function inDateRange(utcMs: number): boolean {
+  return utcMs >= -MAX_DATE_MS && utcMs <= MAX_DATE_MS;
+}
+
+/** Clamp an Intl probe instant into the Date range (formatToParts throws outside it). */
+function clampToDateRange(utcMs: number): number {
+  return Math.min(MAX_DATE_MS, Math.max(-MAX_DATE_MS, utcMs));
+}
 
 /** Canonical id used for UTC throughout the library (TradingView spelling). */
 export const UTC_ZONE_ID = "Etc/UTC";
@@ -45,11 +62,15 @@ export interface TimeZone {
   readonly id: string;
   /** Offset in milliseconds when the zone never changes offset (UTC, Etc/GMT±N, ±HH:MM), else `null`. */
   readonly fixedOffset: number | null;
-  /** Milliseconds to add to a UTC instant to obtain its local wall time. `NaN` for a non-finite input. */
+  /** Milliseconds to add to a UTC instant to obtain its local wall time. `NaN` outside the Date range. */
   offset(utcMs: number): number;
   /** UTC instant → wall milliseconds (read the fields with `getUTC*` or {@link civilFromDays}). */
   toWall(utcMs: number): number;
-  /** Wall milliseconds → UTC instant, resolving DST gaps and overlaps with `disambiguation` (default "compatible"). */
+  /**
+   * Wall milliseconds → UTC instant, resolving DST gaps and overlaps with
+   * `disambiguation` (default "compatible"). `NaN` when the instant would lie
+   * outside the Date range.
+   */
   fromWall(wallMs: number, disambiguation?: Disambiguation): number;
   /** Local calendar fields of a UTC instant. */
   wallParts(utcMs: number): WallParts;
@@ -143,7 +164,7 @@ class FixedZone implements TimeZone {
   constructor(readonly id: string, readonly fixedOffset: number) {}
 
   offset(utcMs: number): number {
-    return Number.isFinite(utcMs) ? this.fixedOffset : NaN;
+    return inDateRange(utcMs) ? this.fixedOffset : NaN;
   }
 
   toWall(utcMs: number): number {
@@ -151,7 +172,8 @@ class FixedZone implements TimeZone {
   }
 
   fromWall(wallMs: number): number {
-    return Number.isFinite(wallMs) ? wallMs - this.fixedOffset : NaN;
+    const utc = wallMs - this.fixedOffset;
+    return inDateRange(utc) ? utc : NaN;
   }
 
   wallParts(utcMs: number): WallParts {
@@ -179,7 +201,7 @@ class IntlZone implements TimeZone {
   }
 
   offset(utcMs: number): number {
-    if (!Number.isFinite(utcMs)) return NaN;
+    if (!inDateRange(utcMs)) return NaN;
     const day = Math.floor(utcMs / DAY_MS);
     let entry = this.days.get(day);
     if (entry === undefined) entry = this.fillDay(day);
@@ -195,11 +217,19 @@ class IntlZone implements TimeZone {
   }
 
   fromWall(wallMs: number, disambiguation: Disambiguation = "compatible"): number {
-    if (!Number.isFinite(wallMs)) return NaN;
+    // Real-world offsets are far below a day, so a wall time more than a day
+    // outside the Date range cannot map into it.
+    if (!(Math.abs(wallMs) <= MAX_DATE_MS + DAY_MS)) return NaN;
+    const utc = this.resolveWall(wallMs, disambiguation);
+    return inDateRange(utc) ? utc : NaN;
+  }
+
+  private resolveWall(wallMs: number, disambiguation: Disambiguation): number {
     // The offsets in force a day either side bracket any transition near this
-    // wall time (real-world offsets never move by more than a day).
-    const before = this.offset(wallMs - DAY_MS);
-    const after = this.offset(wallMs + DAY_MS);
+    // wall time (real-world offsets never move by more than a day). Probes
+    // are clamped so wall times at the ends of the Date range still resolve.
+    const before = this.offset(clampToDateRange(wallMs - DAY_MS));
+    const after = this.offset(clampToDateRange(wallMs + DAY_MS));
     const candidates: number[] = [];
     const consider = (offset: number): void => {
       const utc = wallMs - offset;
@@ -209,7 +239,7 @@ class IntlZone implements TimeZone {
     if (after !== before) consider(after);
     if (candidates.length === 0) {
       // Two transitions within two days: fall back to the offset at the first guess.
-      consider(this.offset(wallMs - before));
+      consider(this.offset(clampToDateRange(wallMs - before)));
     }
     candidates.sort((a, b) => a - b);
 
@@ -268,8 +298,9 @@ class IntlZone implements TimeZone {
 
   private fillDay(day: number): DayOffsets {
     if (this.days.size >= MAX_CACHED_DAYS) this.days.clear();
-    const start = day * DAY_MS;
-    const last = start + DAY_MS - SECOND_MS;
+    // The first and last UTC days of the Date range are partial.
+    const start = clampToDateRange(day * DAY_MS);
+    const last = clampToDateRange(day * DAY_MS + DAY_MS - SECOND_MS);
     const first = this.rawOffset(start);
     const end = this.rawOffset(last);
     let entry: DayOffsets = first;
