@@ -343,7 +343,7 @@
       }
     }
     mountChart(document.getElementById("heatmap"), defineChart({
-      marks: [heatmap(heat, { x: "h", y: "token", valueKey: "value", name: "return %" })],
+      marks: [heatmap(heat, { x: "h", y: "token", valueKey: "value", valueFormat: "signed-percent", name: "return %" })],
       ariaLabel: "Token returns",
     }));
     nativeReady = true;

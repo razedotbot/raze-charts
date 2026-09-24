@@ -97,9 +97,18 @@ export type RadarChartMark = BuiltinCartesian & {
   fillOpacity?: number;
   strokeWidth?: number;
 };
+/**
+ * How heatmap values print in cells, tooltips and the colour bar: "number"
+ * (default, data precision), "percent" (12.5%), "signed" (+12.5),
+ * "signed-percent" (+12.5%), or a function of the raw value. Percent presets
+ * treat values as percentage points (12.5 prints 12.5%).
+ */
+export type HeatmapValueFormat = "number" | "percent" | "signed" | "signed-percent" | ((value: number) => string);
+
 export type HeatmapChartMark = BuiltinCartesian & {
   kind: "heatmap";
   valueKey: Accessor<never> | string;
+  valueFormat?: HeatmapValueFormat;
 };
 
 /** Built-ins form a discriminated union, so mark-specific fields fail at the type boundary. */
@@ -219,6 +228,8 @@ export interface HeatmapMarkOptions<T> extends NamedMarkOptions {
   x: Accessor<T>;
   y: Accessor<T>;
   valueKey: Accessor<T>;
+  /** Cell, tooltip and colour-bar value format. Default "number" (no sign, no %). */
+  valueFormat?: HeatmapValueFormat;
 }
 
 export function line<T>(data: readonly T[], opts: LineMarkOptions<T>): LineChartMark {

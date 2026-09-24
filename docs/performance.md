@@ -67,11 +67,11 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
 | | Scenario: Widget only | `import { widget }` | 63 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 44.5 KiB |
-| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33.5 KiB |
-| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 23 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 50 KiB |
+| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 38 KiB |
+| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 27 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
-| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 37 KiB |
+| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 41 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
 | Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 5 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
@@ -111,6 +111,28 @@ uses (about 5.2 KiB), the context seams and id allocator (about 2.4 KiB), and
 the controller and interaction-handler split of the widget (about 2.1 KiB).
 72 KiB is a ceiling, not a target: AD-01 requires a later wave to win back at
 least 10 KiB of headroom.
+
+The native artifact budget was raised from 44 KiB to 50 KiB, its "Line-only
+mount" scenario from 33 KiB to 38 KiB, "Static line SVG" from 23 KiB to
+27 KiB, and the React "React LineChart" scenario (which ships the same
+runtime) from 37 KiB to 41 KiB, when the native compiler gained measured axes
+(W1B-01). 50 KiB is that package's hard cap. Measured then, the artifact is
+49.6 KiB and the scenarios 37.3, 26.5 and 40.5 KiB. The compact UTC calendar
+ladder costs about 0.9 KiB; step-derived tick precision, compact notation,
+en-US digit grouping, label measurement, margin fitting, x-label
+thinning/rotation/ellipsis, heatmap value formats and the scene v2 formatters
+and measured axes account for the rest. Number formatting no longer imports
+the shared Intl cache (see "Native value formatting" below). The artifact is
+unminified, so consumer bundles are smaller than it.
+
+The native time axis does not use the shared `calendarTicks()` selector yet.
+Importing it costs about 7.5 KiB of the artifact (its zone arithmetic and
+eagerly built rung tables), more than the 6.8 KiB the cap left for the whole
+package, and its tables also reached the "Grammar only" scenario (1.9 KiB of
+its 2 KiB; 1 KiB without them). `src/chart/compile/axes.ts` keeps a compact
+UTC ladder with the same label scheme instead, marked with a TODO for W1B-05:
+once the core builds its tables lazily and lets UTC-only callers skip the
+IANA zone machinery, `/chart` can switch back.
 
 ## Dense native charts
 
@@ -161,6 +183,41 @@ inspection. Choose Canvas for denser frequently repainted scenes. Always
 measure the final browser interaction because string generation, rasterization,
 fonts, device pixel ratio, and surrounding layout are outside the compiler
 benchmark.
+
+## Native value formatting
+
+The native compiler formats a tooltip string for every hover sample, so number
+formatting sits on its hottest path. `src/chart/compile/format.ts` prints
+en-US numbers (the library default, `DEFAULT_LOCALE` in `src/util/intl.ts`)
+without Intl: integers go through `String()`, other values are rounded to
+their decimals with integer arithmetic (falling back to `toFixed()` near a
+rounding tie, so the digits always match it), and thousands are grouped by
+hand. `tests/native-compile-axes.mjs` checks the result against both
+`toFixed()` and the en-US `Intl.NumberFormat`.
+
+Measured on the benchmark's 10k-point line (headless Chromium 153, Windows
+x64, AMD Ryzen 9 5900X, median of 21 compiles at 1280x720):
+
+| Data | raze-100x before W1B-01 | W1B-01 |
+| --- | ---: | ---: |
+| y around 100 | 20 ms | 1.8-2.5 ms |
+| y from 1,000 up | 46-78 ms | 3.4-3.7 ms |
+
+A CDP CPU profile of 20 such compiles puts all formatting (`formatX`,
+`formatNum`, `formatFixed`, grouping and the one-time data-precision scan) at
+21-26% of the compile, down from 88% for `toLocaleString` before. What remains
+is the count, not the cost, of calls: two formatted numbers for each of the
+10k hover samples, built eagerly by the mark compilers. The audit target
+(formatting under 10% of the profile) needs those tooltip strings built
+lazily, on hover, from the structured samples; that change belongs to the
+mark compilers (`src/chart/compile/cartesian.ts`, W1B-02) and the renderer
+(W1B-03), and the target stays open until it lands.
+
+Band axes measure every category label once per compile and thin them with a
+search that starts at the smallest interval that could fit, so thousands of
+categories stay near-linear: 5,000 bar categories compile in about 6 ms and
+20,000 in about 26 ms in Node (raze-100x: 4 and 17 ms; before this fix 16 and
+159 ms).
 
 ## React update flow
 

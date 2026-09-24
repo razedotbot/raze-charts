@@ -21,7 +21,7 @@ const BUILTIN_MARK_KEYS: Record<MarkKind, ReadonlySet<string>> = {
   ruleX: new Set(["kind", "data", "x", "name", "stroke", "strokeWidth"]),
   pie: new Set(["kind", "data", "name", "valueKey", "labelKey", "innerRadius", "outerRadius"]),
   radar: new Set(["kind", "data", "x", "y", "name", "stroke", "fill", "fillOpacity", "strokeWidth"]),
-  heatmap: new Set(["kind", "data", "x", "y", "name", "valueKey"]),
+  heatmap: new Set(["kind", "data", "x", "y", "name", "valueKey", "valueFormat"]),
 };
 
 function validateBuiltinMarkOptions(mark: BuiltinChartMark, index: number): void {
@@ -100,7 +100,7 @@ function validateScaleSpec(
   }
   const scale = value as RuntimeScaleSpec;
   for (const key of Object.keys(value)) {
-    if (!["type", "nice", "padding", "domain", "tickFormat"].includes(key)) {
+    if (!["type", "nice", "padding", "domain", "tickFormat", "labels"].includes(key)) {
       throw new ChartCompileError("E_SCALE_TYPE", `scales.${axis} does not support option "${key}".`);
     }
   }

@@ -2,7 +2,7 @@
 // placement pass) and the crosshair chip labels shown by mounted charts.
 
 import type { HoverSample, CompiledChart, SceneNode } from "../compile/types";
-import type { LinearScale } from "../scales";
+import type { AnyScale, BandScale, LinearScale } from "../scales";
 import { chartColorWithOpacity, readableTextColor } from "../theme";
 import { esc, hair, traceRoundRect } from "./primitives";
 
@@ -108,6 +108,24 @@ function nearestLabel(ticks: { px: number; label: string }[], px: number): strin
   return best.label;
 }
 
+/**
+ * The band category nearest `px`, formatted like the axis (full text): band
+ * ticks may be thinned or ellipsized, so they cannot name the hovered row or
+ * column.
+ */
+function bandLabel(scale: AnyScale, px: number, format: ((value: unknown) => string) | undefined): string {
+  let best: unknown;
+  let gap = Infinity;
+  for (const value of (scale as BandScale<string | number>).domain) {
+    const distance = Math.abs(scale.map(value as never) - px);
+    if (distance < gap) {
+      gap = distance;
+      best = value;
+    }
+  }
+  return best === undefined ? "" : format ? format(best) : String(best);
+}
+
 /** What the crosshair is anchored to while hovering. */
 export interface CrosshairTarget {
   hit: SceneNode | null;
@@ -125,19 +143,17 @@ export interface CrosshairTarget {
 /** Value-axis crosshair chip text. */
 export function crosshairValueLabel(c: CompiledChart, target: CrosshairTarget): string {
   const { hit, sample, isBar, isLine, isPoint, scanY, y } = target;
-  if (c.yScale.kind === "band") {
-    return nearestLabel(c.yTicks, scanY);
-  }
+  if (c.yScale.kind === "band") return bandLabel(c.yScale, scanY, c.formatters?.y);
   if (isBar && hit?.tip) {
     const bits = hit.tip.split("\n")[1]?.trim().split(/\s{2,}/) ?? [];
     return bits[1] ?? bits[0] ?? "";
   }
-  if ((isLine || isPoint) && sample) {
-    const yVal = (c.yScale as LinearScale).invert(sample.y);
-    return Number.isInteger(yVal) ? String(yVal) : yVal.toFixed(Math.abs(yVal) < 1 ? 2 : 1);
-  }
-  const yVal = (c.yScale as LinearScale).invert(y);
-  return Number.isInteger(yVal) ? String(yVal) : yVal.toFixed(Math.abs(yVal) < 1 ? 2 : 1);
+  // Scene v2 value formatter: data precision (or scales.y.tickFormat).
+  const format = c.formatters?.y ?? ((value: number): string => (
+    Number.isInteger(value) ? String(value) : value.toFixed(Math.abs(value) < 1 ? 2 : 1)
+  ));
+  if ((isLine || isPoint) && sample) return format((c.yScale as LinearScale).invert(sample.y));
+  return format((c.yScale as LinearScale).invert(y));
 }
 
 /** Category/time-axis crosshair chip text. */
@@ -151,5 +167,5 @@ export function crosshairCategoryLabel(c: CompiledChart, target: CrosshairTarget
     const first = sample.tip.split("\n")[1];
     return first ? (first.trim().split("·")[0]!.trim() || nearestLabel(c.xTicks, sample.x)) : nearestLabel(c.xTicks, scanX);
   }
-  return nearestLabel(c.xTicks, scanX);
+  return c.xScale.kind === "band" ? bandLabel(c.xScale, scanX, c.formatters?.x) : nearestLabel(c.xTicks, scanX);
 }

@@ -2,12 +2,13 @@
 // renderer-neutral CompiledChart. Each stage lives in its own module:
 //
 //   validate -> legend (hidden series) -> domain (viewport window)
-//   -> plugin domains -> axes (margins, plot) -> domain/heatmap (scales)
-//   -> axes (ticks) -> cartesian/polar/heatmap/plugin marks -> legend rows
+//   -> plugin domains -> format (value formatters) -> axes (measured
+//   margins, plot, domain/heatmap scales and ticks, repeated until the labels
+//   fit) -> cartesian/polar/heatmap/plugin marks -> legend rows
 
-import type { AnyScale } from "../scales";
+import { SCENE_CONTRACT_VERSION } from "../sceneTypes";
 import { resolveChartTheme, type DashboardTheme } from "../theme";
-import { buildTicks, plotArea, resolveMargin } from "./axes";
+import { layoutAxes, resolveMargin, type AxisScales } from "./axes";
 import { compileBar, compileLineArea, compilePoint, compileRuleX, compileRuleY, createBarState, planBars } from "./cartesian";
 import { createMarkContext } from "./context";
 import {
@@ -21,7 +22,7 @@ import {
 } from "./domain";
 import { ChartCompileError } from "./errors";
 import { axisFormatters } from "./format";
-import { compileHeatmap, heatmapLayout } from "./heatmap";
+import { compileHeatmap, heatmapColorLabels, heatmapLayout, heatmapValues } from "./heatmap";
 import {
   filterHiddenSeries,
   finalizeLegend,
@@ -73,32 +74,35 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
   const bars = planBars(spec.marks);
   const pluginDomains = resolvePluginDomains(spec.marks);
 
-  const margin = resolveMargin(spec, { polar, isPie, heatmap, hideLegend, pieHasLegendRows, isHist: bars.isHist });
-  let plot = plotArea(width, height, margin);
+  const baseMargin = resolveMargin(spec, { polar, isPie, heatmap, hideLegend, pieHasLegendRows, isHist: bars.isHist });
 
   const cartesianMarks = spec.marks.filter((mark): mark is CartesianChartMark => (
     isBuiltinMark(mark) && (mark.kind === "line" || mark.kind === "area" || mark.kind === "bar" || mark.kind === "point")
   ));
   const { xValues, yValues } = collectDomainValues(spec, cartesianMarks, pluginDomains);
   const xType = inferXType(spec, xValues);
-  const formatters = axisFormatters(spec, xType);
+  const formatters = axisFormatters(spec, xType, { xValues, yValues, yBand: heatmap });
   appendStackExtents(spec, xType, yValues);
   if (!heatmap) {
     validateCartesianDomain(spec, { xType, xValues, yValues, cartesianMarks, pluginDomains, hasBar, hasArea });
   }
 
-  let xScale: AnyScale;
-  let yScale: AnyScale;
-  if (heatmap) {
-    const hm = spec.marks.find((mark) => isBuiltinKind(mark, "heatmap"))!;
-    ({ plot, xScale, yScale } = heatmapLayout(spec, hm, margin, plot));
-  } else {
-    xScale = cartesianXScale(spec, { xType, xValues, plot, bars, hasArea });
-    const includeZero = hasBar || hasArea || Array.from(pluginDomains.values()).some((domain) => domain.includeZero);
-    yScale = cartesianYScale(spec, { yValues, plot, includeZero });
-  }
-
-  const { xTicks, yTicks } = buildTicks(xScale, yScale, plot, xType, heatmap, formatters);
+  // Margins are measured from the tick labels, so scales are built per layout pass.
+  const hm = heatmap ? spec.marks.find((mark) => isBuiltinKind(mark, "heatmap")) : undefined;
+  // Colour domain and value format, read from the data once per compile.
+  const heat = hm && heatmapValues(hm);
+  const includeZero = hasBar || hasArea || Array.from(pluginDomains.values()).some((domain) => domain.includeZero);
+  const { margin, plot, xScale, yScale, xTicks, yTicks, axes } = layoutAxes({
+    spec, width, height, margin: baseMargin, xType, heatmap, polar, font: theme.font, formatters,
+    colorLabels: heat && heatmapColorLabels(heat),
+    scales: (area, areaMargin): AxisScales => (hm
+      ? heatmapLayout(spec, hm, areaMargin, area)
+      : {
+        plot: area,
+        xScale: cartesianXScale(spec, { xType, xValues, plot: area, bars, hasArea }),
+        yScale: cartesianYScale(spec, { yValues, plot: area, includeZero }),
+      }),
+  });
 
   const ctx = createMarkContext({ spec, width, height, plot, theme, xScale, yScale, xType, ...formatters });
   const barState = createBarState(ctx, bars);
@@ -118,7 +122,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     else if (m.kind === "ruleY") compileRuleY(ctx, m, name, color);
     else if (m.kind === "ruleX") compileRuleX(ctx, m, name, color);
     else if (m.kind === "bar") compileBar(ctx, m, name, color, barState);
-    else if (m.kind === "heatmap") compileHeatmap(ctx, m);
+    else if (m.kind === "heatmap") compileHeatmap(ctx, m, heat!);
     else if (m.kind === "pie") compilePie(ctx, m, name);
     else if (m.kind === "radar") compileRadar(ctx, m, name, color, radarState);
   }
@@ -141,6 +145,13 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     lastValues: ctx.lastValues,
     samples,
     viewport: inputSpec.viewport ?? null,
+    contractVersion: SCENE_CONTRACT_VERSION,
+    formatters: {
+      x: formatters.formatX,
+      y: formatters.formatY,
+      ...(heat ? { color: (value: unknown): string => (typeof value === "number" ? heat.format(value) : String(value ?? "")) } : {}),
+    },
+    axes,
     diagnostics: {
       sourceRows,
       visibleRows,

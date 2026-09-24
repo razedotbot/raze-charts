@@ -222,9 +222,24 @@ function paintAxesCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void 
   ctx.stroke();
   ctx.font = `9px ${theme.font}`;
   ctx.fillStyle = theme.muted;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  for (const tick of c.xTicks) ctx.fillText(tick.label, tick.px, plot.y + plot.h + 14);
+  // Scene v2 ticks carry the compiler's measured anchor and rotation.
+  for (const tick of c.axes?.x.ticks ?? c.xTicks) {
+    const rotation = "rotation" in tick ? tick.rotation : 0;
+    if (rotation) {
+      ctx.save();
+      ctx.translate(tick.px, plot.y + plot.h + 8);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.textAlign = "end";
+      ctx.textBaseline = "middle";
+      ctx.fillText(tick.label, 0, 0);
+      ctx.restore();
+      continue;
+    }
+    const anchor = "anchor" in tick ? tick.anchor : "middle";
+    ctx.textAlign = anchor === "middle" ? "center" : anchor;
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(tick.label, tick.px, plot.y + plot.h + 14);
+  }
 }
 
 function paintColorBarCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void {
@@ -244,7 +259,8 @@ function paintColorBarCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): v
   traceRoundRect(ctx, x, y, w, h, 1);
   ctx.fillStyle = gradient;
   ctx.fill();
-  const format = (value: number): string => value.toFixed(Math.abs(value) < 10 ? 1 : 0);
+  // Scene v2: the heatmap's valueFormat, as measured for the margin.
+  const format = c.formatters?.color ?? ((value: number): string => value.toFixed(Math.abs(value) < 10 ? 1 : 0));
   ctx.font = `9px ${theme.font}`;
   ctx.fillStyle = theme.muted;
   ctx.textAlign = "start";
