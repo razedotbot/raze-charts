@@ -42,6 +42,7 @@ import type {
   TimescaleMarkHit,
   TradingHit,
 } from "./paint/view";
+import { compareAutoScaleLevels } from "./paint/chrome";
 import { paintFinanceLayer, paintFinanceScene } from "./scene";
 import { SeriesTransformCache } from "./seriesTransform";
 import { GestureController, type GestureHost } from "./gestures";
@@ -498,7 +499,8 @@ export class ChartRenderer implements GestureHost {
       const scale = { ...this.plotScale(), pctBase: fitted.pctBase };
       const levels = this.trading.autoScalePrices()
         .map((price) => toDisplay(scale, price))
-        .filter(Number.isFinite);
+        .filter(Number.isFinite)
+        .concat(compareAutoScaleLevels(scale, this.context));
       if (levels.length) {
         const low = Math.min(this.priceMin, ...levels);
         const high = Math.max(this.priceMax, ...levels);
