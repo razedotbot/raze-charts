@@ -235,6 +235,8 @@ export const TOKEN_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "--raze-font-size-lg:14px;" +
   "--raze-surface:var(--tv-color-popup-background,var(--tv-color-pane-background,#1e222d));" +
   "--raze-text:var(--tv-color-popup-element-text,#d1d4dc);" +
+  // Secondary text: >=4.5:1 on the dark and light popup surfaces.
+  "--raze-text-muted:color-mix(in srgb,var(--raze-text) 72%,var(--raze-surface));" +
   "--raze-border:var(--tv-color-toolbar-divider-background,#363a45);" +
   "--raze-hover:var(--tv-color-popup-element-background-hover,rgba(255,255,255,.08));" +
   "--raze-active:var(--tv-color-toolbar-button-background-active,rgba(41,98,255,.18));" +

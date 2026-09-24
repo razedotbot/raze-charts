@@ -109,6 +109,12 @@ and orientation. Controls use native buttons with accessible labels and state:
 - symbol search is a labelled search field when the header search feature is on;
 - drawing, magnet, stay-in-mode, objects-tree, and scale toggles expose pressed/checked state;
 - decorative icons are hidden from assistive technology;
+- left-toolbar buttons show a themed tooltip (kit `attachTooltip`, no `title`
+  attributes) after 500ms of hover, on keyboard focus, or on a touch
+  long-press (which does not activate the button). It sits to the right of
+  the toolbar, includes the keyboard shortcut where one exists ("Fit content
+  F", exposed through `aria-describedby` and `aria-keyshortcuts="F"`), and
+  Escape dismisses it;
 - separators are semantic;
 - loading uses `role="status"`, polite live updates, and busy state.
 - the legend is a named group ("Chart legend") after the canvas in tab order:
@@ -119,6 +125,11 @@ and orientation. Controls use native buttons with accessible labels and state:
 
 Popup triggers expose `aria-haspopup`, `aria-expanded`, and `aria-controls`.
 Menus are named and use menu item, radio item, or checkbox item semantics.
+Checked state is a check icon in a fixed-width slot at the start of each row,
+never text in the label, so labels start at the same position in checked and
+unchecked rows and screen readers hear the label plus the checked state.
+Secondary rows (Indicators "Clear all") use the `--raze-text-muted` token,
+which keeps at least 4.5:1 contrast on the dark and light popup surfaces.
 Opening moves focus into the popup's first enabled row. Arrow Up/Down and
 Home/End navigate and skip separators. Disabled items (`aria-disabled`, such
 as a context-menu item without a handler) stay reachable with the arrow keys,

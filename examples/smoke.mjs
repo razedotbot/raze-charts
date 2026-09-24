@@ -252,7 +252,7 @@ assert(customBtn !== null, "custom sidebar button present");
 customBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 assert(customClicked, "custom sidebar button onClick fired");
 
-const styleBtn2 = [...sb2.querySelectorAll("button")].find((b) => b.title.startsWith("Chart type"));
+const styleBtn2 = sb2.querySelector('[data-raze-item="chart_type"]');
 styleBtn2?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 const styleRows = [...window.document.querySelectorAll(".raze-chart-style-menu button")]
   .filter((b) => /Candles|Line|Area|Heikin/.test(b.textContent));
@@ -288,7 +288,7 @@ await chart2.createStudy("NOPE").catch(() => { unknownRejected = true; });
 assert(unknownRejected, "createStudy unknown name rejects");
 
 // indicators panel shows exactly the configured presets (2 rows + Clear all)
-const indBtn2 = [...sb2.querySelectorAll("button")].find((b) => b.title === "Indicators");
+const indBtn2 = sb2.querySelector('[data-raze-item="indicators"]');
 indBtn2?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 const menu2 = window.document.querySelector(".raze-chart-indicators-menu");
 assert(menu2 !== null, "indicators panel opens from custom sidebar");
