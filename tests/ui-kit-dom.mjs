@@ -332,6 +332,105 @@ try {
     assert.equal(await forced.result, "cancel", "close() from code is the forced path");
   }
 
+  // Regression: a content or tab render callback that throws while the
+  // dialog opens used to leave the portal mounted, the page scroll-locked
+  // and the focus trap and overlay layer installed until reload.
+  {
+    opener.focus();
+    const layersBefore = kit.openLayerCount();
+    const broken = [
+      { title: "Broken tab", presentation: "dialog", tabs: [{ id: "a", label: "A", render() { throw new Error("tab boom"); } }] },
+      { title: "Broken sheet tab", presentation: "sheet", tabs: [{ id: "a", label: "A", render() { throw new Error("tab boom"); } }] },
+      { title: "Broken body", presentation: "dialog", content() { throw new Error("body boom"); } },
+      {
+        title: "Focus then throw",
+        presentation: "dialog",
+        content(body) {
+          const field = kit.textField({ label: "Name", value: "" }).el;
+          body.append(field);
+          field.querySelector("input").focus();
+          throw new TypeError("late boom");
+        },
+      },
+    ];
+    for (const options of broken) {
+      assert.throws(() => kit.openDialog(options), (error) => {
+        assert.match(error.message, /^\[raze-charts\] dialog content threw while opening "/, options.title);
+        assert.match(error.cause?.message ?? "", /boom/, "the original error is the cause");
+        return true;
+      });
+      assert.equal(document.documentElement.style.overflow, "", `${options.title}: the scroll lock is released`);
+      assert.equal(kit.openLayerCount(), layersBefore, `${options.title}: the overlay layer is removed`);
+      assert.equal(document.querySelector("[data-raze-portal]"), null, `${options.title}: the portal is removed`);
+      assert.equal(document.activeElement, opener, `${options.title}: focus stays on (or returns to) the opener`);
+      const free = document.createElement("button");
+      document.body.appendChild(free);
+      free.focus();
+      assert.equal(document.activeElement, free, `${options.title}: no focus trap is left behind`);
+      free.remove();
+      opener.focus();
+    }
+    // Option errors are cleaned up the same way and keep their own message.
+    assert.throws(
+      () => kit.openDialog({ title: "Dupes", tabs: [{ id: "x", label: "X", render() {} }, { id: "x", label: "Y", render() {} }] }),
+      /^RangeError: \[raze-charts\] duplicate dialog tab id "x"/,
+    );
+    assert.throws(() => kit.openDialog({ title: "Missing", tabs: [{ id: "x", label: "X", render() {} }], initialTab: "nope" }), /no tab "nope"/);
+    assert.equal(document.documentElement.style.overflow, "");
+    assert.equal(kit.openLayerCount(), layersBefore);
+    assert.equal(document.querySelector("[data-raze-portal]"), null);
+
+    // A tab whose render throws later leaves the selection and panels as
+    // they were, and selecting it again retries the render.
+    let attempts = 0;
+    const tabbed = kit.openDialog({
+      title: "Later",
+      presentation: "dialog",
+      tabs: [
+        { id: "ok", label: "OK tab", render: (panel) => panel.append("fine") },
+        {
+          id: "flaky",
+          label: "Flaky",
+          render(panel) {
+            attempts++;
+            if (attempts === 1) throw new Error("flaky boom");
+            panel.append("second try");
+          },
+        },
+      ],
+    });
+    assert.throws(() => tabbed.selectTab("flaky"), /flaky boom/);
+    const tabEls = [...tabbed.el.querySelectorAll('[role="tab"]')];
+    assert.deepEqual(tabEls.map((tab) => tab.getAttribute("aria-selected")), ["true", "false"], "the selection is unchanged");
+    assert.equal(tabbed.el.querySelectorAll('[role="tabpanel"]').length, 1, "no half-rendered panel is left");
+    assert.equal(tabbed.body.textContent, "fine");
+    tabbed.selectTab("flaky");
+    assert.equal(tabbed.body.textContent, "second try", "selecting the tab again renders it");
+    tabbed.close();
+    assert.equal(await tabbed.result, "api");
+  }
+
+  // ── Sheet modality (aria-modal only on dialogs) ──────────────────────
+  {
+    const anchor = document.createElement("button");
+    document.body.appendChild(anchor);
+    const menuSheet = kit.openPopover({ anchor, label: "Timeframes", role: "menu", presentation: "sheet", content: "1m" });
+    const container = menuSheet.el.closest(".raze-kit-sheet");
+    assert.equal(menuSheet.el.hasAttribute("aria-modal"), false, "a menu surface does not carry aria-modal");
+    assert.equal(container.getAttribute("role"), "dialog", "the sheet is the dialog container");
+    assert.equal(container.getAttribute("aria-modal"), "true");
+    assert.equal(container.getAttribute("aria-label"), "Timeframes");
+    menuSheet.close();
+    const dialogSheet = kit.openPopover({ anchor, label: "Quick settings", presentation: "sheet", content: "Hello" });
+    assert.equal(dialogSheet.el.getAttribute("aria-modal"), "true", "a dialog surface is itself modal");
+    assert.equal(dialogSheet.el.closest(".raze-kit-sheet").hasAttribute("role"), false, "no nested dialog container");
+    dialogSheet.close();
+    const anchored = kit.openPopover({ anchor, label: "Anchored", presentation: "anchored", content: "Hi" });
+    assert.equal(anchored.el.hasAttribute("aria-modal"), false, "anchored popovers are not modal");
+    anchored.close();
+    anchor.remove();
+  }
+
   // ── Tooltip and toast lifecycles ─────────────────────────────────────
   {
     // Regression: a visible tooltip whose target is removed (re-render or
@@ -400,6 +499,12 @@ try {
   assert(sheet.el.closest(".raze-kit-sheet"), "menu content is hosted in a sheet");
   assert(sheet.el.closest(".raze-kit-portal"), "sheets are portalled");
   assert.equal(sheet.el.getAttribute("role"), "menu");
+  // Regression: a menu sheet is modal, exposed through a dialog container
+  // because aria-modal is not allowed on role="menu".
+  assert.equal(sheet.el.hasAttribute("aria-modal"), false);
+  assert.equal(sheet.el.closest(".raze-kit-sheet").getAttribute("role"), "dialog");
+  assert.equal(sheet.el.closest(".raze-kit-sheet").getAttribute("aria-modal"), "true");
+  assert.equal(sheet.el.closest(".raze-kit-sheet").getAttribute("aria-label"), "Indicators");
   await wait();
   document.querySelector(".raze-kit-sheet-handle").click();
   assert.equal(document.querySelector(".raze-kit-sheet"), null, "the handle closes the sheet");
@@ -425,7 +530,49 @@ try {
 
   const dialogRole = kit.openPopup({ anchor: menuAnchor, fontFamily: "sans-serif", role: "dialog" });
   assert.equal(dialogRole.presentation, "anchored", "dialog-role popups (search results) stay anchored by default");
+  assert.equal(dialogRole.el.hasAttribute("aria-modal"), false, "anchored dialog-role popups are not modal");
   dialogRole.close();
+  const dialogSheetPopup = kit.openPopup({ anchor: menuAnchor, fontFamily: "sans-serif", role: "dialog", label: "Search", presentation: "sheet" });
+  assert.equal(dialogSheetPopup.el.getAttribute("aria-modal"), "true", "a dialog-role sheet popup is itself modal");
+  assert.equal(dialogSheetPopup.el.closest(".raze-kit-sheet").hasAttribute("role"), false);
+  dialogSheetPopup.close();
+
+  // An anchored menu stays open while focus moves between its rows and
+  // closes when focus arrives anywhere else.
+  {
+    menuAnchor.focus();
+    const menu = kit.openPopup({ anchor: menuAnchor, fontFamily: "sans-serif", label: "Menu", presentation: "anchored" });
+    const rows = ["One", "Two"].map((label) => menu.el.appendChild(kit.popupRow(label, () => {})));
+    await wait();
+    assert.equal(document.activeElement, rows[0]);
+    rows[1].focus();
+    await wait();
+    assert(menu.el.isConnected, "moving focus between rows keeps the menu open");
+    menuAnchor.focus();
+    await wait();
+    assert(menu.el.isConnected, "focus on the anchor keeps the menu open");
+    const elsewhere = document.createElement("button");
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    await wait();
+    assert.equal(menu.el.isConnected, false, "focus elsewhere closes the menu");
+    assert.equal(document.activeElement, elsewhere, "without pulling focus back");
+
+    // Only focus that was inside can leave: a popup that never took focus
+    // (combobox results) or has not yet (a context menu while the chart
+    // focuses its canvas) stays open when focus moves between outside nodes.
+    const results = kit.openPopup({ anchor: menuAnchor, fontFamily: "sans-serif", role: "dialog", label: "Results", initialFocus: false });
+    const option = results.el.appendChild(kit.popupRow("AAPL", () => {}));
+    await wait();
+    elsewhere.focus();
+    await wait();
+    assert(results.el.isConnected, "focus moving outside a popup that never had it keeps it open");
+    option.focus();
+    elsewhere.focus();
+    await wait();
+    assert.equal(results.el.isConnected, false, "once focus has been inside, leaving closes it");
+    elsewhere.remove();
+  }
   assert.equal(kit.openLayerCount(), 0, "no overlay layers leak");
 } finally {
   rmSync(dir, { recursive: true, force: true });

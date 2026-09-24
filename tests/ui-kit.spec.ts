@@ -19,6 +19,8 @@ test.beforeAll(async () => {
         'export * from "./src/ui/kit/index.ts";',
         'export * from "./src/ui/styles.ts";',
         'export * as i18n from "./src/i18n/index.ts";',
+        'export { openPopup, popupRow } from "./src/ui/popup.ts";',
+        'export { LoadingScreen } from "./src/ui/LoadingScreen.ts";',
       ].join("\n"),
       resolveDir: root,
       sourcefile: "ui-kit-harness.ts",
@@ -184,11 +186,21 @@ async function audit(page: Page, selector: string): Promise<string[]> {
     const interactive = new Set(["button", "link", "checkbox", "radio", "tab", "option", "menuitem", "menuitemcheckbox", "menuitemradio", "textbox", "combobox", "slider", "spinbutton", "switch"]);
     const needsName = new Set([...interactive, "dialog", "tablist", "radiogroup", "listbox", "tabpanel", "menu", "region", "tooltip"]);
     const booleanAttrs = ["aria-checked", "aria-selected", "aria-modal", "aria-expanded", "aria-hidden", "aria-disabled", "aria-busy", "aria-invalid"];
+    // Role-restricted ARIA attributes (axe aria-allowed-attr), per WAI-ARIA 1.2.
+    const range = ["spinbutton", "slider", "progressbar", "scrollbar", "separator", "meter"];
     const allowedOn: Record<string, string[]> = {
       "aria-checked": ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"],
       "aria-selected": ["tab", "option", "gridcell", "row"],
       "aria-modal": ["dialog", "alertdialog"],
-      "aria-valuenow": ["spinbutton", "slider", "progressbar", "scrollbar", "separator"],
+      "aria-valuenow": range,
+      "aria-valuetext": range,
+      "aria-valuemin": range,
+      "aria-valuemax": range,
+      "aria-orientation": ["scrollbar", "select", "separator", "slider", "tablist", "toolbar", "listbox", "menu", "menubar", "radiogroup", "tree", "treegrid"],
+      "aria-multiselectable": ["grid", "listbox", "tablist", "tree", "treegrid"],
+      "aria-pressed": ["button"],
+      "aria-required": ["checkbox", "combobox", "gridcell", "listbox", "radiogroup", "spinbutton", "textbox", "searchbox", "tree", "treegrid", "columnheader", "rowheader"],
+      "aria-placeholder": ["textbox", "searchbox"],
     };
     const requiredChildren: Record<string, string> = { tablist: "tab", radiogroup: "radio", listbox: "option" };
     const requiredParent: Record<string, string> = { tab: "tablist", radio: "radiogroup", option: "listbox" };
@@ -438,6 +450,12 @@ test.describe("phone presentation", () => {
     const { button, menu } = await openIndicators(page);
     const sheet = page.locator(".raze-kit-sheet");
     await settle(page);
+    // Regression: the menu sheet is exposed as a modal dialog (the menu role
+    // itself may not carry aria-modal), so screen readers stay inside it.
+    await expect(page.getByRole("dialog", { name: "Indicators" })).toHaveAttribute("aria-modal", "true");
+    await expect(menu).not.toHaveAttribute("aria-modal", /./);
+    expect(await audit(page, ".raze-kit-sheet")).toEqual([]);
+    await expectAxeClean(page, ".raze-kit-sheet");
     const box = await sheet.boundingBox();
     expect(box!.x).toBe(0);
     expect(box!.width).toBe(390);
@@ -531,6 +549,50 @@ test.describe("phone presentation", () => {
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
     await expect(button).toBeFocused();
+  });
+
+  test("popover sheets are modal dialogs whatever the content role", async ({ page }) => {
+    await openHarness(page);
+    const opened = await page.evaluate(() => {
+      const kit = (window as any).RazeKit;
+      const opener = document.getElementById("opener")!;
+      const popover = kit.openPopover({
+        anchor: opener,
+        label: "Timeframes",
+        role: "menu",
+        content(body: HTMLElement) {
+          for (const label of ["1m", "5m", "1h"]) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.setAttribute("role", "menuitem");
+            item.textContent = label;
+            body.appendChild(item);
+          }
+        },
+      });
+      (window as any).__popover = popover;
+      return popover.presentation;
+    });
+    expect(opened).toBe("sheet");
+    // aria-modal is only allowed on dialogs (axe aria-allowed-attr): a
+    // menu-role sheet gets a dialog container that carries it instead.
+    const container = page.getByRole("dialog", { name: "Timeframes" });
+    await expect(container).toHaveAttribute("aria-modal", "true");
+    await expect(page.getByRole("menu", { name: "Timeframes" })).not.toHaveAttribute("aria-modal", /./);
+    expect(await audit(page, ".raze-kit-sheet")).toEqual([]);
+    await expectAxeClean(page, ".raze-kit-sheet");
+    await page.evaluate(() => (window as any).__popover.close());
+
+    // A dialog-role popover sheet is itself the modal dialog: no second one.
+    await page.evaluate(() => {
+      const kit = (window as any).RazeKit;
+      (window as any).__popover = kit.openPopover({ anchor: document.getElementById("opener"), label: "Quick settings", content: "Hello" });
+    });
+    const dialogs = page.getByRole("dialog");
+    await expect(dialogs).toHaveCount(1);
+    await expect(dialogs).toHaveAttribute("aria-modal", "true");
+    expect(await audit(page, ".raze-kit-sheet")).toEqual([]);
+    await page.evaluate(() => (window as any).__popover.close());
   });
 
   test("on wide touch screens a sheet stays a centred 640px column", async ({ page }) => {
@@ -643,6 +705,215 @@ test.describe("portal", () => {
       return out;
     });
     expect(result).toEqual({ inShadow: true, position: "fixed", background: "rgb(250, 250, 250)", documentHasKitRules: false, active: true });
+  });
+});
+
+/**
+ * A chart root inside an open shadow root whose "Studies" button toggles an
+ * openPopup() menu of three checkable rows (like the widget's menus).
+ */
+async function mountShadowMenu(page: Page, presentation?: "sheet" | "anchored"): Promise<void> {
+  await openHarness(page);
+  await page.evaluate((mode) => {
+    const kit = (window as any).RazeKit;
+    const host = document.createElement("div");
+    host.id = "shadow-host";
+    document.body.appendChild(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    const chart = document.createElement("div");
+    chart.className = "raze-chart-root";
+    const anchor = document.createElement("button");
+    anchor.type = "button";
+    anchor.textContent = "Studies";
+    chart.appendChild(anchor);
+    shadow.appendChild(chart);
+    const state: { clicks: string[]; popup: any } = { clicks: [], popup: null };
+    (window as any).__menu = state;
+    anchor.addEventListener("click", () => {
+      if (state.popup) {
+        state.popup.close();
+        return;
+      }
+      const popup = kit.openPopup({
+        fontFamily: "sans-serif",
+        anchor,
+        label: "Studies menu",
+        presentation: mode,
+        onClose: () => {
+          if (state.popup === popup) state.popup = null;
+        },
+      });
+      for (const label of ["EMA 9", "SMA 20", "RSI 14"]) {
+        const row = kit.popupRow(label, () => {
+          state.clicks.push(label);
+          row.setAttribute("aria-checked", String(row.getAttribute("aria-checked") !== "true"));
+        }, { role: "menuitemcheckbox", checked: false });
+        popup.el.appendChild(row);
+      }
+      state.popup = popup;
+    });
+  }, presentation);
+}
+
+const menuClicks = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).__menu.clicks);
+
+test.describe("popup menus inside shadow roots", () => {
+  test.describe("on a phone", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    test("a sheet menu handles row taps, arrows, Escape and the backdrop", async ({ page }) => {
+      await mountShadowMenu(page);
+      const anchor = page.getByRole("button", { name: "Studies" });
+      await anchor.tap();
+      const menu = page.getByRole("menu", { name: "Studies menu" });
+      await expect(menu).toHaveAttribute("data-presentation", "sheet");
+      expect(await page.evaluate(() => (window as any).__menu.popup.el.getRootNode() === document.getElementById("shadow-host")!.shadowRoot)).toBe(true);
+      const rows = menu.getByRole("menuitemcheckbox");
+      await expect(rows.nth(0)).toBeFocused();
+      // Regression: arrow keys read document.activeElement (the shadow host)
+      // and always jumped back to the first row.
+      await page.keyboard.press("ArrowDown");
+      await expect(rows.nth(1)).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(rows.nth(2)).toBeFocused();
+      await page.keyboard.press("ArrowUp");
+      await expect(rows.nth(1)).toBeFocused();
+      await settle(page);
+
+      // Regression: the document saw a press inside the sheet as a press on
+      // the shadow host ("outside") and closed the sheet before the row's
+      // click could run.
+      await rows.nth(2).tap();
+      await expect(rows.nth(2)).toHaveAttribute("aria-checked", "true");
+      expect(await menuClicks(page)).toEqual(["RSI 14"]);
+      await expect(menu).toBeVisible();
+
+      // Regression: Escape with focus inside the sheet did nothing.
+      await rows.nth(0).focus();
+      await page.keyboard.press("Escape");
+      await expect(menu).toHaveCount(0);
+      await expect(anchor).toBeFocused();
+      await expect(anchor).toHaveAttribute("aria-expanded", "false");
+
+      await anchor.tap();
+      await expect(rows.nth(0)).toBeFocused();
+      await settle(page);
+      await page.touchscreen.tap(195, 40); // backdrop
+      await expect(menu).toHaveCount(0);
+      await expect(anchor).toBeFocused();
+      expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflow)).not.toBe("hidden");
+    });
+  });
+
+  test("a sheet requested on a desktop handles clicks, arrows and Escape", async ({ page }) => {
+    await mountShadowMenu(page, "sheet");
+    const anchor = page.getByRole("button", { name: "Studies" });
+    await anchor.click();
+    const menu = page.getByRole("menu", { name: "Studies menu" });
+    await expect(menu).toHaveAttribute("data-presentation", "sheet");
+    const rows = menu.getByRole("menuitemcheckbox");
+    await expect(rows.nth(0)).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(rows.nth(1)).toBeFocused();
+    await settle(page);
+    await rows.nth(1).click();
+    expect(await menuClicks(page)).toEqual(["SMA 20"]);
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(anchor).toBeFocused();
+  });
+
+  test("an anchored menu toggles from its shadow-root anchor and follows focus", async ({ page }) => {
+    await mountShadowMenu(page, "anchored");
+    const anchor = page.getByRole("button", { name: "Studies" });
+    await anchor.click();
+    const menu = page.getByRole("menu", { name: "Studies menu" });
+    await expect(menu).toHaveAttribute("data-presentation", "anchored");
+    const rows = menu.getByRole("menuitemcheckbox");
+    await expect(rows.nth(0)).toBeFocused();
+    await rows.nth(1).click();
+    expect(await menuClicks(page)).toEqual(["SMA 20"]);
+    await expect(menu).toBeVisible();
+    // Regression: a press on the anchor read as an outside press (the
+    // document saw the shadow host), so the menu closed and the anchor's own
+    // click reopened it instead of toggling it closed.
+    await anchor.click();
+    await expect(menu).toHaveCount(0);
+
+    // Shift+Tab back onto the anchor keeps the menu (the anchor toggles it);
+    // Escape there closes it.
+    await anchor.click();
+    await expect(rows.nth(0)).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(anchor).toBeFocused();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(anchor).toBeFocused();
+
+    // Focus moving anywhere else closes it without pulling focus back.
+    await anchor.click();
+    await expect(rows.nth(0)).toBeFocused();
+    await page.locator("#other").focus();
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator("#other")).toBeFocused();
+  });
+});
+
+test.describe("anchored widget menus", () => {
+  test("pressing a row other than the focused one activates it", async ({ page }) => {
+    await page.goto("/examples/visual.html?case=dark", { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => (window as unknown as { __razeReady?: boolean }).__razeReady === true, { timeout: 30_000 });
+    const sidebar = page.getByRole("toolbar", { name: "Drawing and chart tools" });
+    // Regression: focus-out dismissal ran while the press was moving focus
+    // (document.activeElement is <body> then), so the menu closed before the
+    // pressed row's click and the choice was lost.
+    await sidebar.getByRole("button", { name: /Chart type/ }).click();
+    const typeMenu = page.getByRole("menu", { name: "Chart type" });
+    const types = typeMenu.getByRole("menuitemradio");
+    await expect(types.first()).toBeFocused();
+    const target = (await types.nth(2).getAttribute("aria-label"))!;
+    await types.nth(2).click();
+    await expect(typeMenu).toHaveCount(0);
+    await expect(sidebar.getByRole("button", { name: `Chart type: ${target}` })).toBeVisible();
+
+    await sidebar.getByRole("button", { name: "Indicators" }).click();
+    const indicators = page.getByRole("menu", { name: "Indicators" });
+    const presets = indicators.getByRole("menuitemcheckbox");
+    await expect(presets.first()).toBeFocused();
+    await presets.nth(1).click();
+    await expect(presets.nth(1)).toHaveAttribute("aria-checked", "true");
+    await expect(presets.nth(1)).toBeFocused();
+    await expect(indicators).toBeVisible();
+    // Focus moving elsewhere (here: the chart) still closes it.
+    await page.locator("canvas").first().focus();
+    await expect(indicators).toHaveCount(0);
+  });
+});
+
+test.describe("loading screen", () => {
+  test("a standalone LoadingScreen spins without the widget, in documents and shadow roots", async ({ page }) => {
+    // Strict style-src: the keyframes must come from an adopted sheet.
+    await openHarness(page, "default-src 'self'; script-src 'self'; style-src 'self'");
+    const spinning = await page.evaluate(async () => {
+      const kit = (window as any).RazeKit;
+      const light = new kit.LoadingScreen(undefined, "#131722");
+      document.getElementById("chart")!.appendChild(light.el);
+      const host = document.createElement("div");
+      host.style.cssText = "position:relative;width:200px;height:120px";
+      document.body.appendChild(host);
+      const shadow = host.attachShadow({ mode: "open" });
+      const inShadow = new kit.LoadingScreen({ foregroundColor: "#089981" }, "#ffffff");
+      shadow.appendChild(inShadow.el);
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+      const running = (screen: { el: HTMLElement }): number => screen.el.querySelector(".raze-chart-loading-spinner")!
+        .getAnimations()
+        .filter((animation) => (animation as CSSAnimation).animationName === "raze-chart-spin" && animation.playState === "running")
+        .length;
+      return { light: running(light), shadow: running(inShadow) };
+    });
+    expect(spinning).toEqual({ light: 1, shadow: 1 });
   });
 });
 
@@ -886,6 +1157,16 @@ test.describe("reduced motion", () => {
     await openHarness(page);
     await openSettings(page);
     const animation = await page.locator(".raze-kit-sheet").evaluate((el) => getComputedStyle(el).animationName);
+    expect(animation).toBe("none");
+  });
+
+  test("the loading spinner stands still", async ({ page }) => {
+    await openHarness(page);
+    const animation = await page.evaluate(() => {
+      const screen = new (window as any).RazeKit.LoadingScreen(undefined, "#131722");
+      document.getElementById("chart")!.appendChild(screen.el);
+      return getComputedStyle(screen.el.querySelector(".raze-chart-loading-spinner")).animationName;
+    });
     expect(animation).toBe("none");
   });
 });

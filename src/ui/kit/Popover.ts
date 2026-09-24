@@ -169,9 +169,13 @@ export function openPopover(options: PopoverOptions): PopoverHandle {
   anchor.addEventListener("keydown", onKeyDown);
 
   if (presentation === "sheet") {
-    surface.setAttribute("aria-modal", "true");
+    // A sheet is modal. aria-modal is only valid on dialogs, so a menu,
+    // listbox or group surface gets a dialog container that carries it.
+    const isDialog = (options.role ?? "dialog") === "dialog";
+    if (isDialog) surface.setAttribute("aria-modal", "true");
     frame = createSheetFrame(portal.el, {
       content: surface,
+      modalLabel: isDialog ? undefined : options.label,
       onDismiss: (reason) => close({ reason }),
     });
     unlockScroll = lockScroll(doc);

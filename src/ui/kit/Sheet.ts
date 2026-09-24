@@ -39,6 +39,15 @@ export interface SheetFrameOptions {
   /** Element whose scroll position gates content swipes (defaults to `content`). */
   scroller?: HTMLElement;
   /**
+   * Accessible name for a sheet whose content is not itself a modal dialog
+   * (a menu, listbox or group). The sheet then becomes the `role="dialog"`
+   * `aria-modal="true"` container, because `aria-modal` is only valid on
+   * dialogs; assistive technology keeps its reading cursor inside the sheet
+   * instead of reaching the page behind the backdrop. Omit it when the
+   * content is the dialog (it carries `aria-modal` itself).
+   */
+  modalLabel?: string;
+  /**
    * Called once when the user dismisses by backdrop, swipe or handle. Return
    * `false` to refuse (for example while a dialog is submitting): the sheet
    * snaps back and can be dismissed again later.
@@ -66,6 +75,11 @@ export function createSheetFrame(parent: HTMLElement, options: SheetFrameOptions
 
   const sheet = doc.createElement("div");
   sheet.className = "raze-kit-sheet";
+  if (options.modalLabel) {
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    sheet.setAttribute("aria-label", options.modalLabel);
+  }
   // The entrance animation must run once: re-enabling it after a drag would
   // replay the slide-up from off-screen.
   const entered = (): void => sheet.setAttribute("data-entered", "");

@@ -112,6 +112,16 @@ nonce through `<meta property="csp-nonce" nonce="…">` or
 [capability matrix](./capabilities.md#ui-kit-csp-and-localization) lists the
 remaining gaps.
 
+### Custom sidebar icons: `SidebarCustomItem.icon` type
+
+`SidebarCustomItem.icon` (in `raze.sidebar`) accepts an `Element` as well as
+a markup string, so its type widened from `string` to `string | Element`. An
+Element is cloned into the 32×32 button and needs no HTML sink, which is the
+option for pages that enforce Trusted Types. Code that only builds sidebar
+items compiles unchanged. Code that reads `item.icon` back as a string, for
+example to inspect or serialise a sidebar configuration, now needs a check
+such as `typeof item.icon === "string"` before using it as one.
+
 ## Recharts-shaped JSX
 
 The React entrypoint is a focused translation layer over the native chart

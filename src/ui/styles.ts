@@ -232,6 +232,6 @@ export const BASE_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   ".raze-chart-focusable:focus{outline:none}" +
   ".raze-chart-focusable:focus-visible{outline:2px solid var(--tv-color-toolbar-button-text-hover,#2962ff);outline-offset:1px}" +
   "@media (forced-colors:active){.raze-chart-focusable:focus-visible{outline-color:Highlight}}" +
-  "@keyframes raze-chart-spin{to{transform:rotate(360deg)}}" +
-  "@media (prefers-reduced-motion:reduce){.raze-chart-loading-screen{transition:none!important}.raze-chart-loading-spinner{animation:none!important}.raze-chart-toolbar{scroll-behavior:auto!important}}",
+  // The loading spinner's keyframes ship with LoadingScreen (LOADING_STYLES).
+  "@media (prefers-reduced-motion:reduce){.raze-chart-toolbar{scroll-behavior:auto!important}}",
 );

@@ -14,10 +14,10 @@
 
 import { t } from "../../i18n";
 import { defineStyles, type StyleChunk } from "../styles";
-import { deepActiveElement, focusWithoutScroll, uid } from "./dom";
-import { lockScroll, tabbables, trapFocus } from "./focus";
+import { composedContains, deepActiveElement, focusWithoutScroll, uid } from "./dom";
+import { lockScroll, tabbables, trapFocus, type FocusTrap } from "./focus";
 import { pushLayer, type Layer } from "./layers";
-import { createPortal } from "./portal";
+import { createPortal, type Portal } from "./portal";
 import { resolvePresentation, type Presentation } from "./Popover";
 import { createSheetFrame, SHEET_STYLES, type SheetFrame } from "./Sheet";
 import { button, ICON_CLOSE, iconButton, SURFACE_STYLES } from "./surface";
@@ -148,6 +148,45 @@ export function openDialog(options: DialogOptions): DialogHandle {
   });
   portal.adopt([SURFACE_STYLES, SHEET_STYLES, DIALOG_STYLES]);
 
+  // Mounting runs caller code (the content and tab render callbacks) while
+  // the dialog holds page-wide state. If any of it throws, that state is
+  // released before the error propagates, so a failed open never leaves the
+  // page scroll-locked, focus-trapped or covered by an empty portal.
+  const held: HeldState = { trap: null, popLayer: null, unlockScroll: null };
+  try {
+    return mountDialog(options, { doc, presentation, returnFocus, portal, held });
+  } catch (error) {
+    const focusWasInside = composedContains(portal.el, deepActiveElement(doc));
+    held.trap?.release({ restoreFocus: false });
+    held.popLayer?.();
+    held.unlockScroll?.();
+    portal.destroy();
+    if (focusWasInside && returnFocus?.isConnected) focusWithoutScroll(returnFocus);
+    // Option validation (duplicate or unknown tab ids) already explains itself.
+    if (error instanceof Error && error.message.startsWith("[raze-charts]")) throw error;
+    const reason = error instanceof Error ? error.message : String(error);
+    const failure = new Error(`[raze-charts] dialog content threw while opening "${options.title}"; the dialog was not opened. ${reason}`);
+    (failure as Error & { cause?: unknown }).cause = error;
+    throw failure;
+  }
+}
+
+/** Page-wide state an opening dialog has taken (released if opening fails). */
+interface HeldState {
+  trap: FocusTrap | null;
+  popLayer: (() => void) | null;
+  unlockScroll: (() => void) | null;
+}
+
+interface MountContext {
+  doc: Document;
+  presentation: "dialog" | "sheet";
+  returnFocus: HTMLElement | null;
+  portal: Portal;
+  held: HeldState;
+}
+
+function mountDialog(options: DialogOptions, { doc, presentation, returnFocus, portal, held }: MountContext): DialogHandle {
   // ARIA in HTML does not allow role="dialog" on <form>, so the dialog is a
   // div and a layout-neutral form inside it provides Enter-to-submit. The
   // submit event bubbles to the dialog, where it is handled.
@@ -206,9 +245,14 @@ export function openDialog(options: DialogOptions): DialogHandle {
       panel.setAttribute("aria-labelledby", tabButtons.get(id)!.id);
       panel.hidden = true;
       body.appendChild(panel);
+      try {
+        tab.render(panel);
+      } catch (error) {
+        panel.remove(); // no half-rendered panel; selecting the tab again retries
+        throw error;
+      }
       panels.set(id, panel);
       tabButtons.get(id)!.setAttribute("aria-controls", panel.id);
-      tab.render(panel);
       portal.update(); // adopt styles of controls the panel rendered
     }
     return panel;
@@ -218,6 +262,8 @@ export function openDialog(options: DialogOptions): DialogHandle {
     if (!tabButtons.has(id)) {
       throw new RangeError(`[raze-charts] dialog has no tab "${id}"; expected one of: ${tabs.map((tab) => tab.id).join(", ")}.`);
     }
+    // Render first: if the panel's render throws, the selection is unchanged.
+    const next = ensurePanel(id)!;
     activeTab = id;
     for (const [tabId, tabButton] of tabButtons) {
       const selected = tabId === id;
@@ -226,7 +272,7 @@ export function openDialog(options: DialogOptions): DialogHandle {
       const panel = panels.get(tabId);
       if (panel) panel.hidden = !selected;
     }
-    content = ensurePanel(id)!;
+    content = next;
     content.hidden = false;
     body.scrollTop = 0;
     if (selectOptions?.focus) focusWithoutScroll(tabButtons.get(id)!);
@@ -307,8 +353,8 @@ export function openDialog(options: DialogOptions): DialogHandle {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────
   const layer: Layer = { el: portal.el, modal: true };
-  const popLayer = pushLayer(layer);
-  const unlockScroll = lockScroll(doc);
+  const popLayer = (held.popLayer = pushLayer(layer));
+  const unlockScroll = (held.unlockScroll = lockScroll(doc));
   let frame: SheetFrame | null = null;
   let backdrop: HTMLElement;
   let closed = false;
@@ -409,7 +455,7 @@ export function openDialog(options: DialogOptions): DialogHandle {
   }
 
   portal.update();
-  const trap = trapFocus(dialog, layer, returnFocus);
+  const trap = (held.trap = trapFocus(dialog, layer, returnFocus));
   if (tabs.length) selectTab(options.initialTab ?? tabs[0]!.id);
   focusWithoutScroll(options.initialFocus ?? tabbables(content)[0] ?? (tabs.length ? tabButtons.get(activeTab!)! : null) ?? okButton ?? dialog);
 

@@ -4,8 +4,9 @@
 // consistent — and are implemented once. On phones and narrow viewports menus
 // render as kit bottom sheets instead of anchored flyouts.
 
+import { composedContains, deepActiveElement } from "./kit/dom";
 import { lockScroll, trapFocus, type FocusTrap } from "./kit/focus";
-import { pushLayer, type Layer } from "./kit/layers";
+import { isInLayerAbove, pushLayer, type Layer } from "./kit/layers";
 import { isCoarsePointer, watchSheetPreference } from "./kit/media";
 import { resolvePresentation } from "./kit/Popover";
 import { createPortal, mirrorTheme, type Portal } from "./kit/portal";
@@ -79,6 +80,16 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target.isContentEditable;
 }
 
+/**
+ * The node an event really started on. Document-level listeners see events
+ * from inside a shadow root retargeted to the shadow host; the composed path
+ * still starts at the pressed or focused node (for open shadow roots).
+ */
+function eventOrigin(event: Event): Node | null {
+  const origin = event.composedPath?.()[0] ?? event.target;
+  return origin && typeof (origin as Node).nodeType === "number" ? origin as Node : null;
+}
+
 function popupItems(el: HTMLElement): HTMLElement[] {
   return Array.from(el.querySelectorAll<HTMLElement>(
     '[role="menuitem"]:not([aria-disabled="true"]),' +
@@ -130,7 +141,7 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   const themeRoot = opts.themeRoot ?? opts.anchor?.closest<HTMLElement>(".raze-chart-root");
   if (!sheet) mirrorTheme(el, themeRoot);
 
-  const activeElement = document.activeElement;
+  const activeElement = deepActiveElement(document);
   const returnFocus = opts.anchor ?? (activeElement instanceof HTMLElement ? activeElement : null);
   if (opts.anchor) {
     opts.anchor.setAttribute("aria-haspopup", opts.role ?? "menu");
@@ -142,7 +153,8 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   // a backdrop and a full-width surface. Tapping the backdrop, activating the
   // handle, or swiping down closes the menu and restores focus. The sheet is
   // modal: Tab and Shift+Tab cycle inside it instead of reaching the page
-  // hidden behind the backdrop.
+  // hidden behind the backdrop, and it is exposed as an aria-modal dialog
+  // (the menu role cannot carry aria-modal itself).
   let portal: Portal | null = null;
   let frame: SheetFrame | null = null;
   let unlockScroll: (() => void) | null = null;
@@ -154,7 +166,12 @@ export function openPopup(opts: PopupOptions): PopupHandle {
       className: opts.className ? `${opts.className}-sheet` : undefined,
     });
     portal.adopt(SHEET_STYLES);
-    frame = createSheetFrame(portal.el, { content: el, onDismiss: () => close() });
+    if (role === "dialog") el.setAttribute("aria-modal", "true");
+    frame = createSheetFrame(portal.el, {
+      content: el,
+      modalLabel: role === "dialog" ? undefined : el.getAttribute("aria-label") ?? undefined,
+      onDismiss: () => close(),
+    });
     unlockScroll = lockScroll(document);
   } else {
     document.body.appendChild(el);
@@ -215,6 +232,7 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     closed = true;
     document.removeEventListener("pointerdown", onAway, true);
     document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("focusin", onFocusIn, true);
     el.removeEventListener("keydown", onMenuKey);
     el.removeEventListener("focusout", onFocusOut);
     stopWatching?.();
@@ -235,16 +253,27 @@ export function openPopup(opts: PopupOptions): PopupHandle {
       returnFocus.focus({ preventScroll: true });
     }
   };
+  // Where a node sits relative to the popup. Containment is composed, so a
+  // sheet portalled into the chart's shadow root (and an anchor inside one)
+  // is recognised from document-level listeners.
+  const isInside = (node: Node | null): boolean => !!node && composedContains(surface, node);
+  const isAnchor = (node: Node | null): boolean => !!node && !!opts.anchor && composedContains(opts.anchor, node);
+  const isAbove = (node: Node | null): boolean => isInLayerAbove(layer, node); // an overlay opened from this popup
+
   const onAway = (e: PointerEvent): void => {
-    const target = e.target;
-    if (!(target instanceof Node)) return;
-    if (surface.contains(target)) return;
-    if (opts.anchor?.contains(target)) return; // let the anchor's own toggle run
+    const target = eventOrigin(e);
+    if (!target) return;
+    if (isInside(target) || isAbove(target)) return;
+    if (isAnchor(target)) return; // let the anchor's own toggle run
     close({ restoreFocus: false });
   };
   const onKey = (e: KeyboardEvent): void => {
     if (e.key !== "Escape") return;
-    if (!surface.contains(document.activeElement) && document.activeElement !== opts.anchor) return;
+    // Escape belongs to the popup while focus is in it or on its anchor. The
+    // deep active element and the composed origin both see into (open)
+    // shadow roots, where document.activeElement is only the shadow host.
+    const owned = [deepActiveElement(document), eventOrigin(e)].some((node) => isInside(node) || isAnchor(node));
+    if (!owned) return;
     e.preventDefault();
     e.stopPropagation();
     close();
@@ -254,8 +283,8 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     if (isEditableTarget(e.target)) return;
     const items = popupItems(el);
     if (!items.length) return;
-    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const current = focused ? items.indexOf(focused) : -1;
+    const active = deepActiveElement(document);
+    const current = active ? items.indexOf(active as HTMLElement) : -1;
     let next = current;
     if (e.key === "Home") next = 0;
     else if (e.key === "End") next = items.length - 1;
@@ -264,17 +293,42 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     e.preventDefault();
     items[next]?.focus();
   };
-  const onFocusOut = (): void => {
-    // A sheet's focus trap keeps focus inside; focus-out dismissal is for
-    // anchored menus, where Tab leaving the menu closes it.
-    if (sheet) return;
+  // Focus leaving an anchored menu (Tab, or focus moved by code) closes it.
+  // A sheet's focus trap keeps focus inside instead. The decision is made
+  // when focus ARRIVES somewhere (focusin), from the composed target: during
+  // a user-initiated focus change document.activeElement is <body> while
+  // focusout runs, so a check there closed the menu whenever a press moved
+  // focus from one row to another, before that row's click could run.
+  // Only focus that was inside the popup can leave it: focus moving elsewhere
+  // before the first row is focused (a context menu's canvas) or in popups
+  // that never take focus (a combobox's results) does not close them.
+  let hadFocus = false;
+  const onFocusIn = (e: FocusEvent): void => {
+    if (sheet || closed) return;
+    const target = eventOrigin(e);
+    if (!target) return;
+    if (isInside(target)) {
+      hadFocus = true;
+      return;
+    }
+    if (!hadFocus || isAnchor(target) || isAbove(target)) return;
+    close({ restoreFocus: false });
+  };
+  // Focus that goes nowhere (blur() from code, Tab out of the page) fires no
+  // focusin; close unless focus is still inside, as it is when the window
+  // itself loses focus.
+  const onFocusOut = (e: FocusEvent): void => {
+    if (sheet || e.relatedTarget) return;
     queueMicrotask(() => {
-      if (closed || surface.contains(document.activeElement) || document.activeElement === opts.anchor) return;
+      if (closed) return;
+      const active = deepActiveElement(document);
+      if (isInside(active) || isAnchor(active) || isAbove(active)) return;
       close({ restoreFocus: false });
     });
   };
   el.addEventListener("keydown", onMenuKey);
   el.addEventListener("focusout", onFocusOut);
+  document.addEventListener("focusin", onFocusIn, true);
 
   // Defer so the opening click doesn't immediately dismiss and callers have
   // time to append rows before the first one receives focus.

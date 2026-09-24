@@ -41,7 +41,11 @@ padded by `env(safe-area-inset-bottom)`, with 48px rows and a dimmed
 backdrop. Tapping the backdrop, activating the drag handle, or swiping down
 (on the handle, or on the content while it is scrolled to the top) dismisses
 the sheet and restores focus. Sheets are modal: the page behind is
-scroll-locked and Tab and Shift+Tab stay inside the sheet. On wider touch
+scroll-locked, Tab and Shift+Tab stay inside the sheet, and the sheet is
+exposed as an `aria-modal` dialog. `aria-modal` is only valid on dialogs, so
+a sheet whose content is a dialog (kit dialogs, dialog-role popovers and
+popups) marks that content, and a sheet holding a menu, listbox or group gets
+a `role="dialog"` container named like its content. On wider touch
 screens (tablets) a sheet is a centred column of at most 640px
 (`--raze-sheet-max-width`). Touch-capable laptops with a mouse keep anchored
 menus. `openPopup()` exposes this as
@@ -50,6 +54,13 @@ dialog-role popups such as search results stay anchored. An `auto` menu closes,
 restoring focus to its opener, when a resize, rotation or pointer change flips
 `prefersSheet()` (`watchSheetPreference()`); reopening picks the presentation
 that fits.
+
+Menus from `openPopup()` decide what counts as inside from the composed event
+path and the focused element inside shadow roots, so a sheet portalled into
+the chart's shadow root handles taps, arrow keys and Escape, and an anchor
+inside a shadow root still toggles its anchored menu. An anchored menu closes
+when focus arrives outside it, its anchor and overlays opened from it; moving
+focus between its rows (by keyboard or by pressing a row) keeps it open.
 
 ### Portals
 
@@ -96,6 +107,10 @@ success, warning, shadow, backdrop, radius, row heights, duration, z-index) are
 defined on widget roots and kit portals. They default to the
 TradingView-compatible `--tv-color-*` variables, so existing theme overrides
 keep working.
+
+`LoadingScreen` (a public export) adopts its own spinner keyframes and
+reduced-motion rule into the document, and into the shadow root it is
+mounted in, so it spins without the widget's chrome stylesheet.
 
 ## Translation runtime
 
@@ -168,22 +183,43 @@ factories, the documented host-markup opt-ins (`popupRow`'s `trustedHtml` and
 a string `SidebarCustomItem.icon`), the library chart-type icon table, and the
 native SVG stage, whose markup is generated with escaped text. Comments and
 string contents are ignored, so documentation that mentions a sink does not
-trip the lint. A property name computed at run time (`el[name] = s`) cannot be
-checked statically; keep such code out of UI modules.
+trip the lint.
+
+The eval family is matched by name, not only as a direct call: any code
+reference to `eval` (including `globalThis.eval(s)`, the `window["eval"]` form,
+`(0, eval)(s)` and aliases), the `Function` constructor with or without `new`
+(`Function(s)`, `new window.Function(s)`, `self["Function"]`, a `Function`
+alias, and `fn.constructor(s)`), and `on*` attribute names built at run time
+(`setAttribute("on" + type, …)`, ``setAttribute(`on${type}`, …)``,
+`setAttributeNS`, `createAttribute`). Library code has no other use for these
+names, so the `Function` type is rejected too; write a signature such as
+`(...args: never[]) => unknown`.
+
+Some forms cannot be checked statically. Keep them out of UI modules:
+
+- A property name computed at run time (`el[name] = s`).
+- A string passed to a timer through a variable (`setTimeout(code, 10)`); the
+  lint only sees that the argument is not a literal, and callbacks look the
+  same. Under `require-trusted-types-for 'script'` or a CSP without
+  `'unsafe-eval'` the browser blocks string timers anyway.
+- URLs assembled at run time (`a.href = base + path`,
+  `setAttribute("href", "java" + "script:…")`). Pass them through
+  `safeUrl()` or set them with `h()`, which applies it.
 
 ## Tests
 
 | Test | Covers |
 | --- | --- |
-| `tests/ui-kit.spec.ts` | Real Chromium: dialog audit (plus axe when installed), Tab trap and focus return, keyboard-operable controls and colour popover, header drag, 390×844 touch sheets (kit dialog and the widget's Indicators menu), swipe and backdrop dismissal, Tab trapping in sheet menus, sheet width on tablets, sheet menus closing when a narrow window widens, fullscreen and shadow-root portals, strict CSP for the kit and for the whole widget (zero violations with no `'unsafe-inline'`), nonce fallback, Trusted Types enforcement on the full widget including Element sidebar icons, tooltips, toasts, reduced motion |
-| `tests/ui-kit-dom.mjs` | Stylesheet adoption and nonces (including reuse across roots), placement math, control semantics, dialog lifecycle and busy submits, tooltip and toast lifecycles, the sheet-preference watcher, popup presentation |
+| `tests/ui-kit.spec.ts` | Real Chromium: dialog audit (plus axe when installed), Tab trap and focus return, keyboard-operable controls and colour popover, header drag, 390×844 touch sheets (kit dialog and the widget's Indicators menu), swipe and backdrop dismissal, Tab trapping in sheet menus, sheet modality (menu sheets and menu-role popover sheets are `aria-modal` dialog containers), sheet width on tablets, sheet menus closing when a narrow window widens, fullscreen and shadow-root portals, `openPopup()` menus anchored inside a shadow root (sheet taps, arrows, Escape, backdrop; anchored toggling and focus-out), pressing a non-focused row in an anchored widget menu, a standalone `LoadingScreen` spinning in documents and shadow roots, strict CSP for the kit and for the whole widget (zero violations with no `'unsafe-inline'`), nonce fallback, Trusted Types enforcement on the full widget including Element sidebar icons, tooltips, toasts, reduced motion |
+| `tests/ui-kit-dom.mjs` | Stylesheet adoption and nonces (including reuse across roots), placement math, control semantics, dialog lifecycle and busy submits, cleanup when a content or tab render callback throws, sheet `aria-modal` placement, anchored-menu focus rules, tooltip and toast lifecycles, the sheet-preference watcher, popup presentation |
 | `tests/i18n-runtime.mjs` | Defaults, packs, fallback chain, lazy loaders, overlapping `setLocale()` calls, plurals, hooks, isolation, misuse |
 | `tests/safe-text.mjs` | Escaping, `setMarkup`, Trusted Types policy behaviour, URL filtering, `h()` |
 | `tests/dom-sinks.mjs` | The lint on the repository and on each sink family |
 | `tests/extract-messages.mjs` | Extraction, conflicts, pack coverage |
 
 The browser spec builds the kit from source with esbuild. Every audited
-surface (desktop dialog, sheet dialog, colour popover) gets an in-page
+surface (desktop dialog, sheet dialog, colour popover, the Indicators menu
+sheet, menu-role and dialog-role popover sheets) gets an in-page
 structural check of names, allowed roles, ARIA references and values,
 required parents and children, nested interactive controls and `aria-hidden`
 focus. axe-core is not a dependency yet. The spec runs axe on the same

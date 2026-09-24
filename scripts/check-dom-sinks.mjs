@@ -29,8 +29,23 @@ export const SINKS = [
   { id: "createContextualFragment", pattern: /\bcreateContextualFragment\s*\(/g },
   { id: "DOMParser.parseFromString", pattern: /\bparseFromString\s*\(/g },
   { id: "srcdoc", pattern: /\.\s*srcdoc\s*=(?!=)|\bsetAttribute(?:NS)?\s*\([^)]*?["'`]srcdoc["'`]/g },
-  { id: "event-handler-attribute", pattern: /\bsetAttribute(?:NS)?\s*\([^)]*?["'`]on[a-z]+["'`]/gi },
-  { id: "eval", pattern: /(?<![\w$.])eval\s*\(|\bnew\s+Function\s*\(/g },
+  // on* attributes: a literal name ("onclick"), or a name built at run time
+  // that starts with "on" ("on" + type, `on${type}`), for setAttribute (first
+  // argument), setAttributeNS (second) and createAttribute.
+  {
+    id: "event-handler-attribute",
+    pattern: /\bsetAttribute(?:NS)?\s*\([^)]*?["'`]on[a-z]+["'`]|\b(?:setAttribute|createAttribute)\s*\(\s*["'`]on(?:["'`]|\$\{)|\b(?:setAttributeNS|createAttributeNS)\s*\([^,()]*,\s*["'`]on(?:["'`]|\$\{)/gi,
+  },
+  // Any code reference to the global eval: direct and member calls
+  // (globalThis.eval(s)), indirect calls ((0, eval)(s)), aliases
+  // (const run = eval) and the bracket form (window["eval"]).
+  { id: "eval", pattern: /(?<![\w$])eval(?![\w$])|\[\s*["'`]eval["'`]\s*\]/g },
+  // The Function constructor, called with or without new, directly or as a
+  // member (window.Function), in bracket form, or reached through a
+  // function's constructor ((() => {}).constructor(s)). Library code has no
+  // other use for the name: write a signature such as
+  // (...args: never[]) => unknown instead of the `Function` type.
+  { id: "Function", pattern: /(?<![\w$])Function(?![\w$])|\[\s*["'`]Function["'`]\s*\]|\.\s*constructor\s*\(/g },
   { id: "string-timer", pattern: /\bset(?:Timeout|Interval)\s*\(\s*["'`]/g },
   { id: "javascript-url", pattern: /["'`]\s*javascript:/gi },
   // SafeMarkup is only minted by html`…` and trustedMarkup() in safe.ts.
@@ -307,9 +322,11 @@ function main() {
   if (args.includes("--help")) {
     console.log("Usage: node scripts/check-dom-sinks.mjs [--json] [file-or-directory ...]\n\n" +
       "Fails when src/ uses innerHTML/outerHTML (assigned, named as a string or as an object key),\n" +
-      "insertAdjacentHTML, setHTMLUnsafe, document.write, eval-like APIs, event-handler attributes,\n" +
+      "insertAdjacentHTML, setHTMLUnsafe, document.write, any reference to eval or the Function\n" +
+      "constructor, event-handler attributes (literal or built at run time), string timers,\n" +
       "new SafeMarkup(), or trustedMarkup() with anything but a library constant, outside the\n" +
-      "sanitizer allow-list in this script.");
+      "sanitizer allow-list in this script. Forms it cannot see (el[name] = s, setTimeout(variable),\n" +
+      "URLs assembled at run time) are listed in docs/ui-kit.md.");
     return;
   }
   const json = args.includes("--json");

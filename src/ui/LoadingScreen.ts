@@ -2,6 +2,18 @@
 // option { backgroundColor, foregroundColor } with a small spinner.
 
 import type { LoadingScreenOptions } from "../types/charting_library";
+import { adoptStyles, defineStyles, type StyleChunk } from "./styles";
+
+/**
+ * Spinner keyframes and the reduced-motion rule. Adopted by the screen itself
+ * (constructable stylesheet, so a strict style-src allows it): LoadingScreen is
+ * a public export and must spin without the widget's chrome stylesheet.
+ */
+const LOADING_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
+  "loading-screen",
+  "@keyframes raze-chart-spin{to{transform:rotate(360deg)}}" +
+  "@media (prefers-reduced-motion:reduce){.raze-chart-loading-screen{transition:none!important}.raze-chart-loading-spinner{animation:none!important}}",
+);
 
 export class LoadingScreen {
   readonly el: HTMLDivElement;
@@ -59,8 +71,13 @@ export class LoadingScreen {
       "color:var(--tv-color-toolbar-button-text, currentColor)",
     ].join(";");
     this.el.appendChild(this.message);
-    // The raze-chart-spin keyframes and the reduced-motion rule live in the
-    // scoped chrome stylesheet (BASE_STYLES), which a strict style-src allows.
+    // Install the keyframes in the document now, and in the shadow root the
+    // screen is mounted into (checked once the caller has appended it), so the
+    // spinner turns wherever the screen is shown.
+    adoptStyles(document, LOADING_STYLES);
+    queueMicrotask(() => {
+      if (this.el.isConnected) adoptStyles(this.el, LOADING_STYLES);
+    });
   }
 
   hide(): void {
