@@ -69,6 +69,12 @@ npm run test:visual:update
   claim. Do not tune the portable budget to one workstation result.
 - Verify the packed package when exports, types, build artifacts, or peer
   dependencies change. `npm test` runs the isolated package contract.
+- Declare TradingView-compatible types in the matching `src/types/tv/` module,
+  not in the `src/types/charting_library.d.ts` barrel. After an intentional
+  public type change, review the diff reported by
+  `node tests/types-api-report.mjs` and refresh the snapshot with
+  `node tests/types-api-report.mjs --update`. See
+  [TradingView-compatible declarations](./docs/architecture.md#tradingview-compatible-declarations).
 
 ## Test layers
 
@@ -80,6 +86,8 @@ npm run test:visual:update
 | Data/time/study tests | Async races, gapped sessions, teardown, and incremental indicators |
 | React adapter tests | Exact series props, measured sizing, immutable handles, lifecycle, and React 17/18 types |
 | Build-watch test | Type-only and hand-authored declaration changes rebuild without restarting the watcher |
+| Declaration API report | Every published export and resolved member type matches `tests/types-api-report/*.api.txt` |
+| Compatibility types flattening | `src/types/tv/` modules flatten into a self-contained `dist/charting_library.d.ts` |
 | Packed package contract | ESM, CommonJS, NodeNext declarations, shared runtime identity, optional React peer, export paths, standalone global |
 | Playwright goldens | Product-level financial and native-dashboard appearance and interaction states |
 | Bundle budget | Gzip size of root, native chart, and React ESM entrypoints |
