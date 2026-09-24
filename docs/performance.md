@@ -120,7 +120,10 @@ extremely small cap cannot represent every priority, the tail wins. The
 compiler never reconnects retained segments across invalid data; raise the
 budget or disable decimation when every tiny segment matters.
 
+<!-- prelude: native-data -->
 ```ts
+import { compileChart, defineChart, line } from "@razedotbot/charts/chart";
+
 const chart = defineChart({
   marks: [line(points, { x: "time", y: "value" })],
   performance: {
@@ -157,21 +160,45 @@ benchmark.
 
 ## React update flow
 
-The React `<Chart>` component mounts the framework-neutral runtime once. New
-definition references and options call `MountHandle.update()` instead of
-destroying and recreating the mount.
+The React `<Chart>` component mounts the framework-neutral runtime once and
+calls `MountHandle.update()` (one compile, one repaint) only when something
+that changes the picture changed:
+
+| Prop | Compared by | Recompiles when |
+| --- | --- | --- |
+| `definition` | identity | a new definition object |
+| `width`, `height`, `renderer`, `idPrefix` | value | the value changes |
+| `ariaLabel`, `ariaDescription` | value | the text changes |
+| `interaction` | shallow value | a flag changes; `interaction={{ zoom: true }}` inline is free |
+| `viewport` | value (Dates by time) | the window changes; an inline literal is free |
+| `onViewportChange`, `onSelect` | never | never: stable trampolines always call the latest callback |
+| `viewportGroup`, `syncId` | identity / value | never: joining or leaving a group does not recompile |
+
+Recharts-shaped containers (`<LineChart>` and friends) derive their definition
+from the JSX children. Children are new objects on every React render, so the
+adapter memoizes on a structural key instead: each descriptor's role in order,
+plus its props shallowly (strings, numbers, booleans and Dates by value;
+arrays, objects and functions by identity), plus the `data` array identity. An
+unrelated parent re-render therefore costs a child walk and no DOM work;
+changing a prop such as `<Line stroke>` repaints exactly once. Per-series
+`data` arrays are compared by identity, so keep them stable too.
 
 Keep large input arrays and definitions referentially stable when nothing
-changed. In Recharts-shaped JSX, `useMemo` can prevent avoidable definition
-work in the host, but data changes still require a full native compile:
+changed; a new data array is always a full native compile. With `<Chart>`,
+build the definition in `useMemo`:
 
+<!-- prelude: native-data -->
 ```tsx
-const definition = useMemo(
-  () => defineChart({ marks: [line(points, { x: "time", y: "value" })] }),
-  [points],
-);
+import { useMemo } from "react";
+import { Chart, defineChart, line } from "@razedotbot/charts/react";
 
-return <Chart definition={definition} renderer="canvas" />;
+export function PriceChart({ points }: { points: { time: number; value: number }[] }) {
+  const definition = useMemo(
+    () => defineChart({ marks: [line(points, { x: "time", y: "value" })] }),
+    [points],
+  );
+  return <Chart definition={definition} renderer="canvas" />;
+}
 ```
 
 ## Financial data correctness
@@ -250,12 +277,16 @@ node scripts/benchmark-widget.mjs
 | `--no-raster` | Skip the per-frame canvas readback, so only script time is measured. |
 
 `PW_PORT` selects the static server port (default 8798). The suite uses its
-own [playwright.perf.config.ts](../playwright.perf.config.ts), so the visual
+own `playwright.perf.config.ts` (in the
+[repository](https://github.com/razedotbot/raze-charts/blob/main/playwright.perf.config.ts),
+not the npm package), so the visual
 and accessibility suites (`npx playwright test`) never run it.
 
 ### Method
 
-- The page is [examples/benchmark.html](../examples/benchmark.html). It uses a
+- The page is `examples/benchmark.html` in the
+  [repository](https://github.com/razedotbot/raze-charts/blob/main/examples/benchmark.html)
+  (the npm package does not ship examples). It uses a
   1100x620 CSS px viewport at DPR 1, the same surface as the visual goldens.
   Widget chrome is on by default; the countdown and hint popups are disabled.
 - The data is a deterministic 1-minute OHLCV random walk. The whole series is

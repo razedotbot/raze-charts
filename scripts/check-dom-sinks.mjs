@@ -16,8 +16,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Injection sinks. Patterns run on source with comments blanked out. */
 export const SINKS = [
-  // el.innerHTML = / += / ??= / ||= / &&= (and outerHTML).
-  { id: "innerHTML", pattern: /\.\s*(?:inner|outer)HTML\s*(?:\+|\?\?|\|\||&&)?=(?!=)/g },
+  // el.innerHTML = / += / ??= / ||= / &&= (and outerHTML), including the
+  // parenthesised target form (el.innerHTML) = … and ((el).innerHTML) = ….
+  { id: "innerHTML", pattern: /\.\s*(?:inner|outer)HTML\s*(?:\)\s*)*(?:\+|\?\?|\|\||&&)?=(?![=>])/g },
+  // React's escape hatch, as a JSX attribute or a props object key.
+  { id: "dangerouslySetInnerHTML", pattern: /\bdangerouslySetInnerHTML\b/g },
   // The property named as a string: el["innerHTML"] = …, Reflect.set(el, "innerHTML", …),
   // Object.defineProperty(el, "outerHTML", …).
   { id: "innerHTML-string", pattern: /["'`](?:inner|outer)HTML["'`]/g },
@@ -25,7 +28,15 @@ export const SINKS = [
   { id: "innerHTML-key", pattern: /(?<![\w$.])(?:inner|outer)HTML\s*:(?!:)/g },
   { id: "insertAdjacentHTML", pattern: /\binsertAdjacentHTML\s*\(/g },
   { id: "setHTMLUnsafe", pattern: /\b(?:setHTMLUnsafe|parseHTMLUnsafe)\s*\(/g },
-  { id: "document.write", pattern: /\bdocument\s*\.\s*write(?:ln)?\s*\(/g },
+  // document.write in any form, not only a direct call: a reference taken for
+  // later (const w = document.write.bind(document)), optional chaining, the
+  // bracket form (document["write"]), other document handles
+  // (el.ownerDocument.write, frame.contentDocument.write, doc.write) and
+  // destructuring (const { write } = document).
+  {
+    id: "document.write",
+    pattern: /\b(?:document|ownerDocument|contentDocument|doc)\s*(?:\?\.|\.)\s*write(?:ln)?\b(?!\s*:)|\b(?:document|ownerDocument|contentDocument|doc)\s*(?:\?\.)?\s*\[\s*["'`]write(?:ln)?["'`]\s*\]|\{[^{}]*\bwrite(?:ln)?\b[^{}]*\}\s*=\s*(?:[\w$]+\s*(?:\?\.|\.)\s*)*(?:document|ownerDocument|contentDocument)\b/g,
+  },
   { id: "createContextualFragment", pattern: /\bcreateContextualFragment\s*\(/g },
   { id: "DOMParser.parseFromString", pattern: /\bparseFromString\s*\(/g },
   { id: "srcdoc", pattern: /\.\s*srcdoc\s*=(?!=)|\bsetAttribute(?:NS)?\s*\([^)]*?["'`]srcdoc["'`]/g },
@@ -319,10 +330,17 @@ export function scanPaths(paths = [resolve(root, "src")]) {
 
 function main() {
   const args = process.argv.slice(2);
+  const knownFlags = ["--json", "--help"];
+  const unknown = args.find((arg) => arg.startsWith("--") && !knownFlags.includes(arg));
+  if (unknown) {
+    console.error(`[raze-charts] Unknown option "${unknown}". Supported options: ${knownFlags.join(", ")}.`);
+    process.exit(2);
+  }
   if (args.includes("--help")) {
     console.log("Usage: node scripts/check-dom-sinks.mjs [--json] [file-or-directory ...]\n\n" +
       "Fails when src/ uses innerHTML/outerHTML (assigned, named as a string or as an object key),\n" +
-      "insertAdjacentHTML, setHTMLUnsafe, document.write, any reference to eval or the Function\n" +
+      "dangerouslySetInnerHTML, insertAdjacentHTML, setHTMLUnsafe, any reference to document.write,\n" +
+      "any reference to eval or the Function\n" +
       "constructor, event-handler attributes (literal or built at run time), string timers,\n" +
       "new SafeMarkup(), or trustedMarkup() with anything but a library constant, outside the\n" +
       "sanitizer allow-list in this script. Forms it cannot see (el[name] = s, setTimeout(variable),\n" +

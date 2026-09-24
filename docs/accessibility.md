@@ -11,6 +11,7 @@ Always replace the generic `"Chart"` fallback with a useful accessible name.
 Use `ariaDescription` for the message a visual reader would infer from trend,
 unit, period, or comparison.
 
+<!-- prelude: native, native-data -->
 ```ts
 const definition = defineChart({
   marks: [line(revenue, { x: "month", y: "value", name: "Revenue" })],
@@ -33,9 +34,10 @@ without hover, fine pointer control, or color perception.
 
 Set the accessible name and summary under `raze`:
 
+<!-- prelude: financial -->
 ```ts
 new widget({
-  // ...required widget options
+  ...requiredWidgetOptions, // container, symbol, interval, datafeed
   raze: {
     aria_label: "ETH/USD one-minute financial chart",
     aria_description: "Live candlesticks in US dollars with volume and EMA 21.",

@@ -114,6 +114,7 @@ mounted in, so it spins without the widget's chrome stylesheet.
 
 ## Translation runtime
 
+<!-- no-check: contributor example; src/i18n is library-internal and imported by relative path, not a package export -->
 ```ts
 import { t, plural, setLocale, registerMessages, registerLocaleLoader } from "../../i18n";
 

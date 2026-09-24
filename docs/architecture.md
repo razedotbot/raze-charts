@@ -282,6 +282,7 @@ typed data + mark builders + ChartSpec
 accessible SVG string in Node. `mountChart` owns resize and pointer behavior in
 a browser and returns a small lifecycle handle:
 
+<!-- prelude: native -->
 ```ts
 interface MountHandle {
   update(definition: ChartDefinition, options?: MountChartOptions): void;

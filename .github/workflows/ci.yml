@@ -51,6 +51,12 @@ jobs:
       - name: Bundle budgets (published artifacts and consumer scenarios)
         run: npm run check:size
       - run: node scripts/benchmark.mjs --check
+      # Smoke run of the Chromium widget benchmark at the smallest size: proves
+      # the harness still drives the widget and catches order-of-magnitude
+      # regressions against the portable 1k budgets in widget-baseline.json.
+      - run: npx playwright install --with-deps chromium
+      - name: Widget browser benchmark smoke (1k bars)
+        run: node scripts/benchmark-widget.mjs --check --sizes=1k
 
   visual:
     name: Visual regression

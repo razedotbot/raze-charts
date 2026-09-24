@@ -136,6 +136,22 @@ change event and requests one repaint. The widget's own code is still moving
 from direct field writes to these setters. [Shared seams](./seams.md) lists
 every field.
 
+A shell that assembles its own `FinanceView` for the painters (instead of
+calling `ChartRenderer.financeView()`) must now fill six more fields. The
+built-in renderer fills them, so widget users are unaffected:
+
+| Field | Type | What to pass |
+| --- | --- | --- |
+| `dpr` | `number` | Device pixels per CSS pixel of the canvas backing store, used to snap lines to the bitmap grid. |
+| `timescaleMarkScreen` | `TimescaleMarkHit[]` | A fresh empty array; the timescale-mark painter fills it for hit-testing. |
+| `hoverTimescaleMark` | `TimescaleMark \| null` | The hovered timescale mark, or `null`. |
+| `hoverShapeId` | `string \| null` | The hovered drawing id, or `null`; drawing handles paint only when hovered or selected. |
+| `axisTags` | `AxisTag[]` | A fresh empty array per frame; drawings, trading lines and studies queue price/time axis tags into it. |
+| `axisChromeRect` | `Rect` | The price-axis by time-axis corner cell (`x` = plot right edge, `y` = time-axis top, `w` = price-axis width, `h` = time-axis height), the only area the timezone/countdown chrome may paint. |
+
+Spreading `renderer.financeView()` and overriding only what the shell owns is
+the least fragile way to build one.
+
 ## Recharts-shaped JSX
 
 The React entrypoint is a focused translation layer over the native chart
@@ -186,31 +202,48 @@ export function Trend({ data }: { data: Point[] }) {
 | `CartesianGrid` | Enable grid | No line-style prop mapping. |
 | `Tooltip` | Enable built-in pointer tooltip | It is a configuration descriptor, not a rendered React overlay. |
 | `Legend` | Enable built-in legend | It is a configuration descriptor, not a customizable React child. |
-| `ReferenceLine` | Add a numeric horizontal or vertical rule | Exactly one of `y` or `x`. |
-| `ResponsiveContainer` | Measure the wrapper and inject numeric width/height into one chart child | It requires exactly one valid chart child and does not mirror every Recharts sizing behavior. |
+| `ReferenceLine` | Add a horizontal (`y`, a number) or vertical (`x`, a category, number or Date) rule | Exactly one of `y` or `x`. |
+| `ResponsiveContainer` | Measure the wrapper and inject numeric width/height into its child | The child is one component element (a chart, or your own wrapper that forwards `width`/`height`) or a render function `({ width, height }) => …`; host elements such as `<div>` are rejected. |
 | `Brush` | Window the native viewport | `startIndex`/`endIndex` or a time domain; it is not the Recharts brush overlay API. |
+| `syncId` | Share the X window between charts | Same idea as Recharts: charts with the same `syncId` pan and zoom together. `viewportGroup` is the explicit form. |
 
 ### Exact React prop surface
 
-All series accept `dataKey` and optional per-series `data`. The remaining
-implemented props are deliberately small and exact:
+The adapter accepts exactly these props. Series descriptors are validated at
+run time as well as in TypeScript, so an unlisted prop throws with the
+supported list instead of being ignored. The table is generated from the
+adapter source, and `npm run check:docs` fails when it drifts.
 
-| Component | Additional series props |
+<!-- react-props:start -->
+<!-- Generated from src/react/index.tsx (SUPPORTED_PROPS and the public prop interfaces) by `node scripts/check-docs.mjs --write`. Do not edit by hand. -->
+
+| Component | Accepted props |
 | --- | --- |
-| `Line` | `name`, `stroke`, `strokeWidth`, `lastValue`, `dashed`, `curve` |
-| `Area` | `name`, `stroke`, `fill`, `fillOpacity`, `strokeWidth`, `lastValue`, `dashed`, `curve`, `y0` |
-| `Bar` | `name`, `fill`, `stackId`, `lastValue`, `fade` |
-| `Scatter` | `name`, `fill`, `fillOpacity`, `r` |
-| `Pie` | `name`, `innerRadius`, `outerRadius` |
-| `Radar` | `name`, `stroke`, `fill`, `fillOpacity`, `strokeWidth` |
-| `Heatmap` | No additional series props; X/Y channels come from axes or typed factory defaults. |
+| `LineChart`, `BarChart`, `AreaChart`, `ScatterChart`, `PieChart`, `RadarChart`, `HeatmapChart`, `ComposedChart` | `data`, `width`, `height`, `renderer`, `children`, `ariaLabel`, `ariaDescription`, `idPrefix`, `className`, `style`, `onReady`, `onViewportChange`, `onSelect`, `viewportGroup`, `syncId` |
+| `Chart` | `definition`, `width`, `height`, `renderer`, `ariaLabel`, `ariaDescription`, `idPrefix`, `className`, `style`, `onReady`, `interaction`, `viewport`, `onViewportChange`, `onSelect`, `viewportGroup`, `syncId` |
+| `ResponsiveContainer` | `children`, `width`, `height`, `className`, `style` |
+| `Line` | `dataKey`, `data`, `name`, `stroke`, `strokeWidth`, `lastValue`, `dashed`, `curve` |
+| `Area` | `dataKey`, `data`, `name`, `stroke`, `fill`, `fillOpacity`, `strokeWidth`, `lastValue`, `dashed`, `curve`, `y0` |
+| `Bar` | `dataKey`, `data`, `name`, `fill`, `stackId`, `lastValue`, `fade` |
+| `Scatter` | `dataKey`, `data`, `name`, `fill`, `fillOpacity`, `r` |
+| `Pie` | `dataKey`, `data`, `name`, `innerRadius`, `outerRadius` |
+| `Radar` | `dataKey`, `data`, `name`, `stroke`, `fill`, `fillOpacity`, `strokeWidth` |
+| `Heatmap` | `dataKey`, `data` |
+| `XAxis` | `dataKey` |
+| `YAxis` | `dataKey` |
+| `CartesianGrid` | No props |
+| `Tooltip` | No props |
+| `Legend` | No props |
+| `ReferenceLine` | `y`, `x`, `stroke`, `strokeWidth`, `name` |
+| `Brush` | `dataKey`, `height`, `startIndex`, `endIndex` |
 
-Chart containers accept `data`, `width`, `height`, `renderer`, `children`,
-`ariaLabel`, `ariaDescription`, `idPrefix`, `className`, `style`, and `onReady`.
-`XAxis` / `YAxis` accept `dataKey`; `ReferenceLine` accepts `y`, `stroke`,
-`strokeWidth`, and `name`. `Chart.style` cannot set dimensions.
-`ResponsiveContainer.style` cannot set `width`, `height`, `position`, or
-`minWidth`, because those values are owned by its measurement contract.
+<!-- react-props:end -->
+
+Series take `data` to override the container's rows for that series. `Heatmap`
+reads its X/Y channels from the axes or the typed factory defaults.
+`Chart.style` cannot set dimensions. `ResponsiveContainer.style` cannot set
+`width`, `height`, `position`, or `minWidth`, because those values are owned
+by its measurement contract.
 
 Unknown React children are currently ignored because they may be ordinary
 composition wrappers. Known-but-unsupported Raze descriptors must throw. Do
@@ -221,11 +254,64 @@ Pie and heatmap containers compile as standalone coordinate systems. A composed
 radar chart may contain multiple radar series only when all category axes
 match. Move mixed Cartesian/polar layouts into separate chart instances.
 
+### Synchronized charts
+
+Recharts' `syncId` maps to a viewport group. Charts in the same group share
+one X window: a wheel zoom, drag pan, brush or range preset on any member moves
+the others. Each chart joins when it mounts and leaves when it unmounts.
+
+```tsx
+import { LineChart, Line, XAxis, createViewportGroup } from "@razedotbot/charts/react";
+
+type Row = { t: number; price: number; volume: number };
+
+// Create the group once (module scope or useMemo), not on every render.
+const dashboard = createViewportGroup();
+
+export function Dashboard({ rows }: { rows: Row[] }) {
+  return (
+    <>
+      <LineChart data={rows} height={240} viewportGroup={dashboard}>
+        <XAxis dataKey="t" />
+        <Line dataKey="price" />
+      </LineChart>
+      <LineChart data={rows} height={120} syncId="dashboard-volume">
+        <XAxis dataKey="t" />
+        <Line dataKey="volume" />
+      </LineChart>
+    </>
+  );
+}
+```
+
+`syncId="…"` is shorthand for a group shared by every chart with the same id.
+Use `viewportGroup` when the host also drives the window (for example
+`dashboard.setViewport({ x: [from, to] })` from a date picker) or reads it
+back with `dashboard.getViewport()`. `onReady` handles also satisfy
+`ViewportHandle`, so `group.add(handle)` works for charts you wire up by hand;
+call the function it returns when that chart unmounts. Only the chart the user
+interacted with calls its `onViewportChange`; followers are moved
+programmatically.
+
+### Next.js App Router and Server Components
+
+`@razedotbot/charts/react` starts with a `"use client"` directive, so a Server
+Component can render its charts directly; you do not need your own client
+wrapper file. Props cross the server/client boundary, so they must be
+serializable: pass data rows and strings, not functions. Callbacks such as
+`onSelect` or `onReady`, and a `viewportGroup` object, belong in a client
+component of your own (a `syncId` string works from the server). Charts measure
+and paint in the browser: during server rendering the chart host is an empty,
+correctly sized `<div>`. The framework-neutral `/chart` entry has no directive
+and stays usable on the server, for example `renderChartSvg()` in a route
+handler.
+
 ## Moving from JSX to the native grammar
 
 Use `/chart` when you need typed accessors, explicit scale/domain control,
 server-generated SVG, scene inspection, or custom mark plugins.
 
+<!-- prelude: native-data -->
 ```ts
 import { defineChart, line, renderChartSvg } from "@razedotbot/charts/chart";
 

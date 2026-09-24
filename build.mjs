@@ -99,9 +99,12 @@ function targetsFor(entry) {
     ...(entry.jsx ? { jsx: entry.jsx } : {}),
     ...(entry.external ? { external: [...entry.external] } : {}),
   };
+  // A module directive such as "use client" must be the first statement of
+  // the file, so it is emitted as a banner ahead of esbuild's own preamble.
+  const directive = entry.directive ? { banner: { js: `${JSON.stringify(entry.directive)};` } } : {};
   const formats = [
-    { format: "esm", outfile: resolve(out, artifacts.esm) },
-    { format: "cjs", outfile: resolve(out, artifacts.cjs) },
+    { format: "esm", outfile: resolve(out, artifacts.esm), ...directive },
+    { format: "cjs", outfile: resolve(out, artifacts.cjs), ...directive },
   ];
   if (entry.standalone) {
     formats.push({

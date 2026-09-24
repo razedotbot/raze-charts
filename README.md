@@ -137,7 +137,7 @@ import {
 declare const datafeed: IBasicDataFeed;
 
 const financialChart = new widget({
-  container: document.querySelector("#chart")!,
+  container: document.getElementById("chart")!,
   symbol: "MYTOKEN",
   interval: "1" as ResolutionString,
   datafeed,
@@ -174,6 +174,7 @@ The fluent order/position adapters mirror the TradingView integration style;
 `createBracketOrder` links entry, stop-loss, and take-profit with live
 risk/reward shading and callbacks.
 
+<!-- prelude: financial, trading-host -->
 ```ts
 financialChart.onChartReady(async () => {
   const chart = financialChart.activeChart();
@@ -282,9 +283,10 @@ phantom candles for drawings or marks. See
 
 Chrome is data-driven through `favorites`, feature flags, and `raze` options:
 
+<!-- prelude: financial -->
 ```ts
 new widget({
-  // ...required widget options
+  ...requiredWidgetOptions, // container, symbol, interval, datafeed
   favorites: { intervals: ["1", "5", "15"] as ResolutionString[] },
   disabled_features: ["scale_bar"],
   raze: {
@@ -329,11 +331,12 @@ and shape price labels. A TradingView-shaped factory takes precedence; return
 `null` to fall through to the Raze-native formatter and then the built-in
 `pricescale` formatter.
 
+<!-- prelude: financial -->
 ```ts
 declare function formatTokenPrice(value: number, pricescale?: number): string;
 
 new widget({
-  // ...required widget options
+  ...requiredWidgetOptions, // container, symbol, interval, datafeed
   custom_formatters: {
     priceFormatterFactory: (symbolInfo) =>
       symbolInfo ? { format: (value) => formatTokenPrice(value) } : null,
@@ -419,10 +422,24 @@ Recharts API. See the
 
 Each series component accepts only the options it implements, both in
 TypeScript and at runtime. `ResponsiveContainer` measures its box and injects
-numeric dimensions into exactly one chart child; set visual size through chart
-props or the container, not `Chart.style.width` / `height`. `onReady` exposes
-only detached, deeply frozen scene snapshots, while React retains lifecycle
-and teardown ownership.
+numeric dimensions into its one child: a chart, your own wrapper component
+that forwards `width`/`height`, or a render function
+`({ width, height }) => …`. Set visual size through chart props or the
+container, not `Chart.style.width` / `height`. `onReady` exposes detached,
+deeply frozen scene snapshots plus `setViewport`/`getViewport`, while React
+retains lifecycle and teardown ownership.
+
+Re-rendering is cheap: inline callbacks, `interaction={{ zoom: true }}` and
+viewport literals never recompile, and Recharts-shaped charts memoize on the
+structure of their JSX children, so only a real data or prop change repaints
+([React update flow](./docs/performance.md#react-update-flow)). Charts with the
+same `syncId` (or `viewportGroup` from `createViewportGroup()`) pan and zoom
+together ([synchronized charts](./docs/migration.md#synchronized-charts)).
+
+The React entry ships with a `"use client"` directive, so Next.js App Router
+Server Components can render `<LineChart>` without a client wrapper file of
+your own; pass serializable props from the server and keep callbacks in client
+components ([details](./docs/migration.md#nextjs-app-router-and-server-components)).
 
 ## Design and accessibility
 
@@ -471,6 +488,12 @@ studies, declaration watch mode, the packed ESM/CJS/NodeNext package contract,
 documentation, bundle budgets for published artifacts and tree-shaken consumer
 scenarios, and compiler performance. Visual tests use
 Playwright Chromium snapshots and remain a separate platform-specific gate.
+
+`npm run check:docs` type-checks every `ts`/`tsx` fence in this README and
+`docs/` against the built declarations, with both Bundler and NodeNext
+resolution. A fragment can declare hidden setup with
+`<!-- prelude: financial -->` (see `scripts/check-doc-snippets.mjs`) or opt
+out with `<!-- no-check: reason -->`.
 
 Use `npm run typecheck` as the faster type-only feedback loop while editing.
 
