@@ -75,23 +75,19 @@ export interface HeatmapValues {
   format: NumberFormatter;
 }
 
-const heatmapValueCache = new WeakMap<HeatmapChartMark, HeatmapValues>();
-
-function validateValueFormat(format: unknown): void {
-  if (format === undefined || typeof format === "function") return;
-  if (!HEATMAP_VALUE_FORMATS.includes(format as never)) {
+/**
+ * Colour domain and value formatter for a heatmap mark. compileChart computes
+ * it once per compile and hands it to the layout and the mark, so data
+ * mutated in place is re-read on every compile (update, resize).
+ */
+export function heatmapValues(m: HeatmapChartMark): HeatmapValues {
+  const format = m.valueFormat;
+  if (format !== undefined && typeof format !== "function" && !HEATMAP_VALUE_FORMATS.includes(format)) {
     throw new ChartCompileError(
       "E_MARK_OPTION",
-      `heatmap valueFormat must be ${HEATMAP_VALUE_FORMATS.map((name) => `"${name}"`).join(", ")}, or a function; received ${String(format)}.`,
+      `heatmap valueFormat must be "${HEATMAP_VALUE_FORMATS.join('", "')}", or a function; received ${String(format)}.`,
     );
   }
-}
-
-/** Colour domain and value formatter for a heatmap mark (computed once per mark). */
-export function heatmapValues(m: HeatmapChartMark): HeatmapValues {
-  const cached = heatmapValueCache.get(m);
-  if (cached) return cached;
-  validateValueFormat(m.valueFormat);
   const zs: number[] = [];
   for (const row of m.data) {
     const z = asNumber(readChannel(row as never, m.valueKey as never));
@@ -103,18 +99,15 @@ export function heatmapValues(m: HeatmapChartMark): HeatmapValues {
     min = -mag;
     max = mag;
   }
-  const values: HeatmapValues = { min, max, format: heatmapValueFormatter(m.valueFormat, zs) };
-  heatmapValueCache.set(m, values);
-  return values;
+  return { min, max, format: heatmapValueFormatter(format, zs) };
 }
 
 /** Colour-bar labels (max, zero, min) for margin measurement. */
-export function heatmapColorLabels(m: HeatmapChartMark): string[] {
-  const { min, max, format } = heatmapValues(m);
+export function heatmapColorLabels({ min, max, format }: HeatmapValues): string[] {
   return [format(max), format(min), ...(min < 0 && max > 0 ? [format(0)] : [])];
 }
 
-export function compileHeatmap(ctx: MarkCompileContext, m: HeatmapChartMark): void {
+export function compileHeatmap(ctx: MarkCompileContext, m: HeatmapChartMark, { min: zLo, max: zHi, format }: HeatmapValues): void {
   const { theme, nodes } = ctx;
   const xb = ctx.xScale as BandScale<string | number>;
   const yb = ctx.yScale as BandScale<string | number>;
@@ -124,7 +117,6 @@ export function compileHeatmap(ctx: MarkCompileContext, m: HeatmapChartMark): vo
     y: yb.start(readChannel(row as never, m.y as never) as string | number),
     z: asNumber(readChannel(row as never, m.valueKey as never)),
   })).filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.y) && Number.isFinite(entry.z));
-  const { min: zLo, max: zHi, format } = heatmapValues(m);
   ctx.colorBar = { min: zLo, max: zHi };
   for (const entry of validRows) {
     const { row, x, y, z: zv } = entry;

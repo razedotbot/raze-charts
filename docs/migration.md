@@ -248,10 +248,10 @@ read differently after upgrading:
 - Heatmaps no longer add a `+` sign and `%` to every value. Add
   `valueFormat: "signed-percent"` to a heatmap mark that shows returns (values
   in percentage points), or `"percent"`, `"signed"` or a function for other
-  data.
+  data. The colour bar uses the same format.
 - Values from a million up use compact notation (`1.2T` instead of
-  `1,200,000,000,000`) in ticks, chips and tooltips. Pass
-  `scales.y.tickFormat` to keep full digits.
+  `1,200,000,000,000`, `25.0004M` for 25,000,400) in ticks, chips and
+  tooltips. Pass `scales.y.tickFormat` to keep full digits.
 - Tick labels take their decimals from the tick step (`1.0850` rather than
   `1.1`), and time axes label calendar boundaries (`2025`, `Feb`, `14 Feb`,
   `09:30`) instead of `D Mon` at fixed day steps.

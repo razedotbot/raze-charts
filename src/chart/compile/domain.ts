@@ -58,23 +58,26 @@ function windowMarkData(mark: ChartMark, viewport: ChartViewport | undefined): r
   });
 }
 
-function isDateViewport(x: readonly [number | Date, number | Date]): boolean {
-  return x[0] instanceof Date || x[1] instanceof Date;
-}
-
-/** True when every Cartesian x value of the marks is a Date (the rule inferXType applies to the full data). */
+/**
+ * True when the marks' x values are Dates: every Cartesian mark (hidden ones
+ * included) votes with its first x value, and gaps (null, objects) do not
+ * vote, as in collectDomainValues. One value per mark keeps pan and zoom
+ * compiles from rescanning the data.
+ */
 function marksHaveDateX(marks: readonly ChartMark[]): boolean {
-  let seen = false;
+  let dates = false;
   for (const mark of marks) {
     if (!isBuiltinMark(mark) || !(mark.kind === "line" || mark.kind === "area" || mark.kind === "bar" || mark.kind === "point")) continue;
     for (const row of mark.data) {
       const x = rowXValue(mark, row);
-      // Gaps (null, objects) do not vote, exactly as in collectDomainValues.
-      if (x instanceof Date) seen = true;
-      else if (isBandCategory(x)) return false;
+      if (x instanceof Date) {
+        dates = true;
+        break;
+      }
+      if (isBandCategory(x)) return false;
     }
   }
-  return seen;
+  return dates;
 }
 
 /**
@@ -89,7 +92,7 @@ export function windowChartSpec(spec: ChartSpec, visibleMarks: readonly ChartMar
   // The scale type comes from the whole data set, before windowing: a window
   // must never turn a Date axis into a linear one (or guess from magnitude).
   const windowXType = viewport?.x && isQuantitativeViewportX(viewport.x)
-    ? spec.scales?.x?.type ?? (isDateViewport(viewport.x) || marksHaveDateX(marks) ? "time" : undefined)
+    ? spec.scales?.x?.type ?? (viewport.x.some((end) => end instanceof Date) || marksHaveDateX(spec.marks) ? "time" : undefined)
     : undefined;
   marks = marks.map((mark) => ({ ...mark, data: windowMarkData(mark, viewport) }));
   const scales = { ...spec.scales };

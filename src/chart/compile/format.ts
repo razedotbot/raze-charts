@@ -10,9 +10,12 @@
 //   a series quoted to 5 decimals reads 1.08520, not 1.0852 next to 1.08523.
 //
 // Magnitudes of a million and more switch to compact notation (1.5M, 1.2T)
-// so axis gutters and chips stay narrow. Every Intl formatter comes from the
-// shared cache in src/util/intl.ts and is held per decimal count here, so a
-// label costs a cached `format()` call, never a `toLocaleString` construction.
+// so axis gutters and chips stay narrow; value labels keep up to six
+// significant digits there (25.0004M), so they never hide the data.
+//
+// Every Intl formatter comes from the shared cache in src/util/intl.ts and is
+// held per decimal count here, so a label costs a cached `format()` call,
+// never a `toLocaleString` construction.
 
 import { numberFormat } from "../../util/intl";
 import type { HeatmapValueFormat } from "./marks";
@@ -22,12 +25,14 @@ import type { ChartSpec, XScaleKind } from "./types";
 export const MAX_VALUE_DECIMALS = 8;
 /** Most decimals a tick label may need (a 1e-12 step still gets distinct labels). */
 const MAX_TICK_DECIMALS = 12;
-/** Magnitudes from here on use compact notation (K/M/B/T). */
+/** Magnitudes from here on use compact notation (M/B/T). */
 export const COMPACT_THRESHOLD = 1e6;
+/** Significant digits a single value keeps when it has no precision of its own, and in compact notation. */
+const SIGNIFICANT_DIGITS = 6;
 
 /** English short month names; /chart labels dates in UTC and English. */
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const COMPACT_UNITS: readonly (readonly [number, string])[] = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
+const COMPACT_UNITS: readonly (readonly [number, string])[] = [[1e12, "T"], [1e9, "B"], [1e6, "M"]];
 
 /**
  * Fraction digits needed to write `value` exactly, ignoring binary floating
@@ -64,32 +69,24 @@ export function formatFixed(value: number, decimals: number): string {
 }
 
 function compactUnit(magnitude: number): readonly [number, string] {
-  for (const unit of COMPACT_UNITS) if (magnitude >= unit[0]) return unit;
-  return [1, ""];
+  return COMPACT_UNITS.find((unit) => magnitude >= unit[0]) ?? [1, ""];
 }
 
-/** Exponent notation for magnitudes compact units cannot hold (1e15 and up): 1.5e15. */
-function formatExponent(value: number, decimals: number, trim: boolean): string {
-  const [mantissa = "", exponent = "0"] = value.toExponential(Math.min(decimals, 6)).split("e");
-  return `${trim ? String(Number(mantissa)) : mantissa}e${Number(exponent)}`;
-}
-
-/** One value in compact notation with up to two decimals: 1M, 1.25B, 1.5T. */
+/**
+ * One value in compact notation with up to six significant digits, trailing
+ * zeros dropped: 1M, 1.25B, 1.2T, 25.0004M (never 25.00M for 25,000,400).
+ * Magnitudes past the trillions stay in T (1,500T).
+ */
 function formatCompact(value: number): string {
-  const magnitude = Math.abs(value);
-  if (magnitude >= 1e15) return formatExponent(value, 2, true);
-  const [unit, suffix] = compactUnit(magnitude);
+  const [unit, suffix] = compactUnit(Math.abs(value));
   const scaled = value / unit;
-  return `${formatFixed(scaled, decimalsOf(scaled, 2))}${suffix}`;
+  return `${formatFixed(scaled, decimalsOf(scaled, Math.max(0, SIGNIFICANT_DIGITS - String(Math.trunc(Math.abs(scaled))).length)))}${suffix}`;
 }
 
 /** Nonzero magnitudes that `decimals` fraction digits would print as zero use three significant digits. */
 function formatTiny(value: number): string {
   return String(Number(value.toPrecision(3)));
 }
-
-/** Significant digits shown for a single computed (unquantised) value. */
-const SIGNIFICANT_DIGITS = 6;
 
 /**
  * Default formatting for a single value, with the value's own precision
@@ -183,10 +180,6 @@ export function numericTickLabels(values: readonly number[], log = false): strin
     if (gap > 0 && gap < step) step = gap;
   }
   const maxMagnitude = Math.max(...finite.map(Math.abs));
-  if (maxMagnitude >= 1e15) {
-    const decimals = Number.isFinite(step) ? Math.min(6, Math.max(0, Math.ceil(Math.log10(maxMagnitude / step)))) : 2;
-    return values.map((value) => (value === 0 ? "0" : Number.isFinite(value) ? formatExponent(value, decimals, false) : ""));
-  }
   const [unit, suffix] = maxMagnitude >= COMPACT_THRESHOLD ? compactUnit(maxMagnitude) : [1, ""] as const;
   let decimals = Number.isFinite(step)
     ? decimalsOf(step / unit, MAX_TICK_DECIMALS)
@@ -205,7 +198,7 @@ export function numericTickLabels(values: readonly number[], log = false): strin
 // ---------------------------------------------------------------------------
 // Dates
 
-const pad2 = (value: number): string => (value < 10 ? `0${value}` : String(value));
+export const pad2 = (value: number): string => (value < 10 ? `0${value}` : String(value));
 
 /** Finest calendar unit that distinguishes the given instants (UTC). */
 type TimeResolution = "day" | "hour" | "minute" | "second" | "millisecond";
@@ -301,6 +294,8 @@ export interface AxisFormatters {
 export interface AxisFormatterData {
   xValues: readonly unknown[];
   yValues: readonly number[];
+  /** The Y axis is a band of categories (heatmap rows): numbers print as-is, like its ticks. */
+  yBand?: boolean;
 }
 
 function toNumber(value: unknown): number {
@@ -332,7 +327,7 @@ export function axisFormatters(spec: ChartSpec, xType: XScaleKind, data?: AxisFo
     },
     formatY: (value: unknown): string => {
       if (yTickFormat) return yTickFormat(value);
-      if (typeof value === "number") return (formatYNumber ??= valueFormatter(data?.yValues ?? []))(value);
+      if (typeof value === "number" && !data?.yBand) return (formatYNumber ??= valueFormatter(data?.yValues ?? []))(value);
       return String(value ?? "");
     },
   };

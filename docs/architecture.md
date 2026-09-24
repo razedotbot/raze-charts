@@ -212,6 +212,12 @@ part of its tree-shaking contract. Those budgets therefore have to rise when
 the core is adopted: native to at least 49 KiB and the root widget to at
 least 60 KiB, before any other growth in those packages.
 
+Native `/chart` has not adopted `calendarTicks` (W1B-01): with measured axes
+its 50 KiB cap leaves no room for the selector's 7.5 KiB, so
+`src/chart/compile/axes.ts` keeps a compact UTC ladder (about 0.9 KiB) with
+the same label scheme. It can switch once the core builds its rung tables
+lazily and UTC-only callers can skip `zone.ts` (see docs/performance.md).
+
 ### Async ownership
 
 A symbol/resolution change starts a new data generation. History, marks,

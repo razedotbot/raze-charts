@@ -86,6 +86,28 @@ test.describe("native measured axes", () => {
     expect(text.x + text.width).toBeLessThanOrEqual(rect.x + rect.width);
   });
 
+  test("last-value chips of computed series keep their text inside the chip and off the plot", async ({ page }) => {
+    const series = {
+      sine: "Array.from({ length: 50 }, (_, x) => ({ x, y: Math.sin(x / 5) }))",
+      walk: "(() => { let v = 100, s = 7; return Array.from({ length: 200 }, (_, x) => ({ x, y: (v += ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5) })); })()",
+      compact: "Array.from({ length: 10 }, (_, x) => ({ x, y: 25_000_000 + 400 * x / 9 }))",
+    };
+    for (const [name, rows] of Object.entries(series)) {
+      for (const width of [360, 600]) {
+        const rendered = await renderSvg(page, `
+          return { marks: [chart.line(${rows}, { x: "x", y: "y", name: "${name}" })] };
+        `, { width, height: 260 });
+        expect(rendered.chips.length, `${name} @ ${width}px`).toBe(1);
+        const [{ text, rect }] = rendered.chips;
+        const label = `${name} @ ${width}px: "${text.text}"`;
+        expect(rect.x, label).toBeGreaterThanOrEqual(rendered.plot.x + rendered.plot.w);
+        expect(rect.x + rect.width, label).toBeLessThanOrEqual(rendered.width);
+        expect(text.x, label).toBeGreaterThanOrEqual(rect.x);
+        expect(text.x + text.width, label).toBeLessThanOrEqual(rect.x + rect.width);
+      }
+    }
+  });
+
   test("Canvas measureText agrees that value labels fit their gutter", async ({ page }) => {
     const result = await page.evaluate(() => {
       const chart = (window as unknown as { chart: Record<string, any> }).chart;

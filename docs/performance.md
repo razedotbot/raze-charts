@@ -67,11 +67,11 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
 | | Scenario: Widget only | `import { widget }` | 63 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 58 KiB |
-| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 44 KiB |
-| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 33 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 50 KiB |
+| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 38 KiB |
+| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 27 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
-| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 47 KiB |
+| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 41 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
 | Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 5 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
@@ -105,20 +105,26 @@ the controller and interaction-handler split of the widget (about 2.1 KiB).
 72 KiB is a ceiling, not a target: AD-01 requires a later wave to win back at
 least 10 KiB of headroom.
 
-The native artifact budget was raised from 44 KiB to 58 KiB, its "Line-only
-mount" scenario from 33 KiB to 44 KiB, "Static line SVG" from 23 KiB to
-33 KiB, and the React "React LineChart" scenario (which ships the same
-runtime) from 37 KiB to 47 KiB, when the native compiler adopted the shared
-time core and measured axes (W1B-01). Measured then, the artifact is 56.9 KiB
-and the scenarios 42.2, 31.4 and 45.4 KiB. The shared calendar-tick selector,
-zone arithmetic and Intl cache (`src/util/time`, `src/util/intl.ts`) account
-for 7.4 KiB of the artifact; step-derived tick precision, compact notation,
-cached formatters, label measurement, margin fitting, x-label
-thinning/rotation/ellipsis and heatmap value formats for 6.5 KiB. The artifact
-is unminified, so consumer bundles are smaller than it. The time core's
-eagerly built rung tables also reach the "Grammar only" scenario (1.9 KiB of
-its 2 KiB); making those tables lazy, and letting UTC-only callers skip the
-IANA zone machinery, are the known ways to win this back.
+The native artifact budget was raised from 44 KiB to 50 KiB, its "Line-only
+mount" scenario from 33 KiB to 38 KiB, "Static line SVG" from 23 KiB to
+27 KiB, and the React "React LineChart" scenario (which ships the same
+runtime) from 37 KiB to 41 KiB, when the native compiler gained measured axes
+(W1B-01). 50 KiB is that package's hard cap. Measured then, the artifact is
+49.3 KiB and the scenarios 37.1, 26.3 and 40.2 KiB. The compact UTC calendar
+ladder costs about 0.9 KiB and the shared Intl cache (`src/util/intl.ts`)
+0.45 KiB; step-derived tick precision, compact notation, label measurement,
+margin fitting, x-label thinning/rotation/ellipsis, heatmap value formats and
+the scene v2 formatters and measured axes account for the rest. The artifact
+is unminified, so consumer bundles are smaller than it.
+
+The native time axis does not use the shared `calendarTicks()` selector yet.
+Importing it costs about 7.5 KiB of the artifact (its zone arithmetic and
+eagerly built rung tables), more than the 6.8 KiB the cap left for the whole
+package, and its tables also reached the "Grammar only" scenario (1.9 KiB of
+its 2 KiB; 1 KiB without them). `src/chart/compile/axes.ts` keeps a compact
+UTC ladder with the same label scheme instead, marked with a TODO for W1B-05:
+once the core builds its tables lazily and lets UTC-only callers skip the
+IANA zone machinery, `/chart` can switch back.
 
 ## Dense native charts
 

@@ -8,7 +8,7 @@
 
 import { SCENE_CONTRACT_VERSION } from "../sceneTypes";
 import { resolveChartTheme, type DashboardTheme } from "../theme";
-import { hasValueChips, layoutAxes, resolveMargin, type AxisScales } from "./axes";
+import { layoutAxes, resolveMargin, type AxisScales } from "./axes";
 import { compileBar, compileLineArea, compilePoint, compileRuleX, compileRuleY, createBarState, planBars } from "./cartesian";
 import { createMarkContext } from "./context";
 import {
@@ -81,7 +81,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
   ));
   const { xValues, yValues } = collectDomainValues(spec, cartesianMarks, pluginDomains);
   const xType = inferXType(spec, xValues);
-  const formatters = axisFormatters(spec, xType, { xValues, yValues });
+  const formatters = axisFormatters(spec, xType, { xValues, yValues, yBand: heatmap });
   appendStackExtents(spec, xType, yValues);
   if (!heatmap) {
     validateCartesianDomain(spec, { xType, xValues, yValues, cartesianMarks, pluginDomains, hasBar, hasArea });
@@ -89,11 +89,12 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
 
   // Margins are measured from the tick labels, so scales are built per layout pass.
   const hm = heatmap ? spec.marks.find((mark) => isBuiltinKind(mark, "heatmap")) : undefined;
+  // Colour domain and value format, read from the data once per compile.
+  const heat = hm && heatmapValues(hm);
   const includeZero = hasBar || hasArea || Array.from(pluginDomains.values()).some((domain) => domain.includeZero);
   const { margin, plot, xScale, yScale, xTicks, yTicks, axes } = layoutAxes({
     spec, width, height, margin: baseMargin, xType, heatmap, polar, font: theme.font, formatters,
-    chips: hasValueChips(spec.marks),
-    colorLabels: hm ? heatmapColorLabels(hm) : undefined,
+    colorLabels: heat && heatmapColorLabels(heat),
     scales: (area, areaMargin): AxisScales => (hm
       ? heatmapLayout(spec, hm, areaMargin, area)
       : {
@@ -121,7 +122,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     else if (m.kind === "ruleY") compileRuleY(ctx, m, name, color);
     else if (m.kind === "ruleX") compileRuleX(ctx, m, name, color);
     else if (m.kind === "bar") compileBar(ctx, m, name, color, barState);
-    else if (m.kind === "heatmap") compileHeatmap(ctx, m);
+    else if (m.kind === "heatmap") compileHeatmap(ctx, m, heat!);
     else if (m.kind === "pie") compilePie(ctx, m, name);
     else if (m.kind === "radar") compileRadar(ctx, m, name, color, radarState);
   }
@@ -148,7 +149,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     formatters: {
       x: formatters.formatX,
       y: formatters.formatY,
-      ...(hm ? { color: (value: unknown): string => (typeof value === "number" ? heatmapValues(hm).format(value) : String(value ?? "")) } : {}),
+      ...(heat ? { color: (value: unknown): string => (typeof value === "number" ? heat.format(value) : String(value ?? "")) } : {}),
     },
     axes,
     diagnostics: {

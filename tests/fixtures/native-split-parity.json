@@ -216,17 +216,17 @@
       "tooltips": "27e7fb8b2e8999a25e7433e4"
     },
     "scene/dense-128": {
-      "scene": "55aa7f27a1c904a452bdc397",
-      "svg": "07370e1bc03f2a4ad7a85aeb",
-      "canvas": "84d2e124a17a4feeb35fd10f",
-      "hits": "ffe31356a26cd8da02e31531",
+      "scene": "3a1ab94c65d82910b3b4528c",
+      "svg": "e0dc82b925260bce9bc88e7c",
+      "canvas": "9805a77d0e280e718cb67474",
+      "hits": "a77a861adb5a164a1bd2d141",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-exact": {
-      "scene": "f95a96eb51453d1916cb2b04",
-      "svg": "f14d828aaf99d72f6d8c65b5",
-      "canvas": "3cc75d97004dce546071f96b",
-      "hits": "5ea3eacafb650b9a3e2e8647",
+      "scene": "4beb9d281102de7dcc09db2c",
+      "svg": "ba2a8c36dc8505173877b5ff",
+      "canvas": "cc34a38a069a549b39efd096",
+      "hits": "7aa838e856ca344307783fe6",
       "tooltips": "20ae432550a4733e68d911d3"
     },
     "scene/dense-narrow": {
@@ -237,52 +237,52 @@
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-1": {
-      "scene": "bbb73d0e20618b64d597b304",
-      "svg": "095ff5c62c1d81ed2bfdbe2a",
-      "canvas": "b1f7ca007a6fa687dd7070e7",
-      "hits": "71b08ba936662bb606b77477",
+      "scene": "ddc3d99d5603c87f4e67ee8f",
+      "svg": "4c44a888118d90ceb93613d1",
+      "canvas": "4b93ac093fea82e9857374af",
+      "hits": "1550e767fa212887e4cb2e08",
       "tooltips": "00ebef0ab85c6069a40e7b93"
     },
     "scene/dense-cap-2": {
-      "scene": "26dac5c2660f4c5031a83ce5",
-      "svg": "2d3824122a98e2715d5be9a4",
-      "canvas": "205c5af835e8d6bb270c2198",
-      "hits": "17d7f15e1f25e2362ac5c73e",
+      "scene": "685be5c6bc6fd252faf8a62a",
+      "svg": "f5516953fa838e02e7500c13",
+      "canvas": "100122641e6775eb3f79a6c6",
+      "hits": "6de0d7ff51f4f72cec7e6c3e",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-3": {
-      "scene": "e57ff786cff050fd2ecfef7e",
-      "svg": "437f3a1e2e4249d479b175c2",
-      "canvas": "d1a205de8ed2966ec6819749",
-      "hits": "682bad2664410d3b7b327cc4",
+      "scene": "ffb7c7eea901755108484450",
+      "svg": "33a826755d869b74e84423e3",
+      "canvas": "a750e6d04297a92beed727eb",
+      "hits": "12c72b77f14a6fd721f3d961",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-4": {
-      "scene": "68267a52a4a259859778a4ee",
-      "svg": "64dced89118e2f1e87a6162e",
-      "canvas": "37e25e0d3a1a793b2bf23997",
-      "hits": "6167c8ac7825fce5923e060b",
+      "scene": "eb049182f4f876e0bee49b2e",
+      "svg": "be6b9740f7e7beabaabcbe94",
+      "canvas": "d99b9ebdfd8ff9c424308c2a",
+      "hits": "b8ea93555a7e3713f1184232",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-5": {
-      "scene": "68267a52a4a259859778a4ee",
-      "svg": "b2f726b0d9f5a4ebc4e76ee7",
-      "canvas": "37e25e0d3a1a793b2bf23997",
-      "hits": "6167c8ac7825fce5923e060b",
+      "scene": "eb049182f4f876e0bee49b2e",
+      "svg": "3b8332a8338a6cc905bfc225",
+      "canvas": "d99b9ebdfd8ff9c424308c2a",
+      "hits": "b8ea93555a7e3713f1184232",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-15": {
-      "scene": "fb3aa213123e23d36ce27d62",
-      "svg": "ff701b08f8ff84f7e6a44596",
-      "canvas": "39b7c9a3f6918ad5ffc62f40",
-      "hits": "06a91c4af1ca47fa037145b0",
+      "scene": "66ea83f9b1641ebd55d5b1ff",
+      "svg": "0618351eb2403eccb69fa926",
+      "canvas": "09e7bcec8092d2c9f1f1948c",
+      "hits": "6c1bea028eecb23bb84fae83",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/dense-cap-16": {
-      "scene": "d9ec8b4481d2e1699cacbc53",
-      "svg": "60247604d8bd7cfe474471cf",
-      "canvas": "fe58915a74e6456a030986a2",
-      "hits": "df0b0b7493ac86865196318f",
+      "scene": "2087022ca9fcccc5f30ddcdd",
+      "svg": "0f30f27ea496688b385eec4a",
+      "canvas": "a85eb055c98d0ef30d9ad402",
+      "hits": "7612455bd9bfb3ccf4735861",
       "tooltips": "7942804a43ee4b3ce49615b6"
     },
     "scene/gap": {
@@ -293,10 +293,10 @@
       "tooltips": "88bf30415f75d82e811e3fe8"
     },
     "scene/fragmented": {
-      "scene": "891730c15443078c18cb3c9e",
-      "svg": "2017646ffc93237c881bf523",
-      "canvas": "5a23bd6551be67a7e712ac53",
-      "hits": "be0e02af2ec2f702a080455f",
+      "scene": "54f085f71d7232496ba9d06e",
+      "svg": "6ec017592960221f5a4491d7",
+      "canvas": "1d05cd234af7dbf5737236b6",
+      "hits": "80a5a4f7b7fde8302d68bca5",
       "tooltips": "1a59fa610d49c704a9e83990"
     },
     "scene/isolated-spike": {
@@ -335,10 +335,10 @@
       "tooltips": "bc7c94ef3210ef536583d76a"
     },
     "scene/decimated-area": {
-      "scene": "4cf916f78eb3fefd60c83a4c",
-      "svg": "3726cdd55a587cea3c89bbff",
-      "canvas": "eb0f8c7fc4605ada3cd6e0f9",
-      "hits": "484f109ca313dbe176fec2a4",
+      "scene": "67330b7976aba79ce31c8e30",
+      "svg": "37557285c4a2754ada5ade2e",
+      "canvas": "2f57aacdbcab4a2808cd04bf",
+      "hits": "8f9b55145c1debcdc23abd48",
       "tooltips": "d747ac8c9f0c335bba35b8a2"
     },
     "scene/ranged-area": {
@@ -391,14 +391,14 @@
       "tooltips": "e454bedf9a3204aa97906f54"
     },
     "scene/viewport-time": {
-      "scene": "8d5e55066f3a7654343dca1a",
+      "scene": "dd9a63f6ec8fe8feedfcc5d8",
       "svg": "c745893da85b51d861cde848",
       "canvas": "bd09e04df2f08912ccbe40d3",
       "hits": "fcf3e48e14ca0d8d4a5be4cb",
       "tooltips": "77728daf4d48f3d2687b4f91"
     },
     "scene/viewport-dates": {
-      "scene": "3f8b0735e4ea990859ea4ac5",
+      "scene": "3c3b55c76cb12dc4a27f299e",
       "svg": "1619cc2c561f05f3b23c3ef2",
       "canvas": "a5a115c6a7cda068f2cece59",
       "hits": "4e10647ba7f71e1ac8357698",
@@ -440,9 +440,9 @@
       "tooltips": "c43c127bbabdf422659cdcb8"
     },
     "scene/rule-x-time": {
-      "scene": "a3fa3e8c5b324d3e6f958c57",
-      "svg": "103570d25e318f13d7de8c87",
-      "canvas": "20310e14246b3331c4e8fe47",
+      "scene": "eb794d188834b08361620fdc",
+      "svg": "b17102e2ea853d0a60c0aa38",
+      "canvas": "4d001eb67bcb61318cc75e01",
       "hits": "a2f6be74c3117e5641086038",
       "tooltips": "a0068f8edd400b4e2e8a8f4d"
     },
@@ -490,8 +490,8 @@
     },
     "scene/heatmap-sparse": {
       "scene": "7700da15310bdda925a4da6d",
-      "svg": "3bb6f8e2927573d9d88fe934",
-      "canvas": "5e9ef09e731a12c6f5431c7d",
+      "svg": "f6f6a1f91e7c72a1bc633a01",
+      "canvas": "0a7e39ea3a8fa7466d4fd291",
       "hits": "936e6fe0cbd4baad38e119aa",
       "tooltips": "3ab4e82ad6226984ed3b80b0"
     },
@@ -504,8 +504,8 @@
     },
     "scene/heatmap-positive": {
       "scene": "d3379934a38470d5cd781c5e",
-      "svg": "e60561b57fc8ae4fa388e076",
-      "canvas": "30a4bec67a672afa3dcac9ad",
+      "svg": "e1a9089f44229f5639437607",
+      "canvas": "f644a6973ecfca066f78be40",
       "hits": "d690e14460286632d770bed8",
       "tooltips": "9b789b5db27566a40f66b5af"
     },
@@ -531,7 +531,7 @@
       "tooltips": "d31267b3658a90ab49a11a9e"
     },
     "scene/stack-time": {
-      "scene": "aa187fe3d7f8486e49d7ea4c",
+      "scene": "4b2933ca1e5d8a584000260d",
       "svg": "2bd6385d8558e29d1870ab9c",
       "canvas": "3dd589601bebb28a740782b3",
       "hits": "7b112a1063c6e5c39a10caa1",
@@ -573,14 +573,14 @@
       "tooltips": "5eb90513cfafadb970d54d92"
     },
     "scene/bars-time": {
-      "scene": "3ef6a8a68dbcdcc3ae984b8c",
+      "scene": "2d283973ac18465e8f5efa4c",
       "svg": "b87d5336738c18c19b49c8ec",
       "canvas": "2ca56fe645f4f888c5ad8550",
       "hits": "5b280da77399ef21c61b19ad",
       "tooltips": "6234df914fe7bbbde9b44495"
     },
     "scene/bars-time-single": {
-      "scene": "01fb2e80f88e109912a6f79f",
+      "scene": "414285806d98678837ed4138",
       "svg": "43f41fdb7c0e8d805e8e90da",
       "canvas": "6a897de99be40006e8f44da6",
       "hits": "578d79070094591c87f19f91",
@@ -692,21 +692,21 @@
       "tooltips": "871e179be78a808db59aff70"
     },
     "scene/epoch-time": {
-      "scene": "3a03d904dd9aafab577d2f44",
+      "scene": "f649dec4973f29fa10edf249",
       "svg": "d978cdc48e5562f933551800",
       "canvas": "4af47ad6aa1c0be6fe97123b",
       "hits": "fc8a24fcb35777083435ade9",
       "tooltips": "7b0a2bf722bc1b35d2b8ffd6"
     },
     "scene/inferred-dates": {
-      "scene": "a8915086c246f1b05df45df1",
+      "scene": "3d6c4820491641785b14e33e",
       "svg": "85811ab7c74874448446282c",
       "canvas": "4af47ad6aa1c0be6fe97123b",
       "hits": "fc8a24fcb35777083435ade9",
       "tooltips": "8740ac09fe5256e2f4be7d9c"
     },
     "scene/long-time": {
-      "scene": "4f4068d29325763724fd5531",
+      "scene": "073db0b04f4b721ae03fbbef",
       "svg": "60aacc0b07cb9dd62a90b299",
       "canvas": "4a05e0006ad3125d75a2f307",
       "hits": "08dcd2407c863f2ea6c8a476",
@@ -765,7 +765,7 @@
       "tooltips": "fa88cc7e8e92ab35e8646630"
     },
     "scene/dashboard-revenue": {
-      "scene": "6b91d405ff602838ec7c246e",
+      "scene": "8ab767bfcdad22f960a827ed",
       "svg": "c031545652d9fc0ba74ffc79",
       "canvas": "16bdca0845e0e677da8b4159",
       "hits": "ed91cc931f80deb66d75571b",
@@ -898,11 +898,11 @@
       "tooltips": "4f53cda18c2baa0c0354bb5f"
     },
     "mount/time-svg": {
-      "dom": "e190406804e4f8f688665a3e",
+      "dom": "b4efb6df2b18abca838c3955",
       "events": "3cbb657bf4d686921f17314b"
     },
     "mount/time-chrome-svg": {
-      "dom": "8ec12735dae71f6792633ba3",
+      "dom": "03e3367fb7fbbbb9c522d086",
       "events": "921c136fcb9be930f1c8e23e"
     },
     "mount/time-static-svg": {
@@ -934,8 +934,8 @@
       "events": "0ea27d82ad28d6fd76822bb6"
     },
     "mount/dense-128-svg": {
-      "dom": "6775e5ec8a5e1c7ccda05204",
-      "events": "8ca54fef1dc8b2e5c880345e"
+      "dom": "aef3959233a5efd0c07cace8",
+      "events": "b96882b29c078d0aff8583f7"
     },
     "mount/hidden-series-svg": {
       "dom": "cd616ad18d236f3bd38c03f5",
@@ -1014,11 +1014,11 @@
       "events": "42a491355c770685c0310229"
     },
     "mount/time-canvas": {
-      "dom": "da0e8db8840dbd59a6a573f6",
+      "dom": "aa88bf47703f70977656d24a",
       "events": "3cbb657bf4d686921f17314b"
     },
     "mount/time-chrome-canvas": {
-      "dom": "e984f2c0c67eb813100b6f10",
+      "dom": "127872eb2eeb8f67e46b9cf0",
       "events": "921c136fcb9be930f1c8e23e"
     },
     "mount/time-static-canvas": {
@@ -1050,8 +1050,8 @@
       "events": "a2320b068b9d11a2149599d9"
     },
     "mount/dense-128-canvas": {
-      "dom": "760e17ac8e637de0389709de",
-      "events": "e7f60300a6f85ca7be30c227"
+      "dom": "f87b621375d598f92a76790c",
+      "events": "760cb36a06c70cd795f2dc6f"
     },
     "mount/hidden-series-canvas": {
       "dom": "aa6124c2eaa7c92a909a91f9",

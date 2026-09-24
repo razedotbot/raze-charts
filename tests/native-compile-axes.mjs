@@ -26,7 +26,7 @@ try {
       contents: [
         'export * from "./src/chart/compile/format.ts";',
         'export { measureText, ellipsize, TIME_TICK_SPACING } from "./src/chart/compile/axes.ts";',
-        'export { crosshairValueLabel } from "./src/chart/render/chips.ts";',
+        'export { crosshairCategoryLabel, crosshairValueLabel } from "./src/chart/render/chips.ts";',
       ].join("\n"),
       resolveDir: root,
       loader: "ts",
@@ -44,7 +44,7 @@ try {
 }
 const {
   decimalsOf, formatNum, heatmapValueFormatter, numericTickLabels, timeValueFormatter, valueFormatter,
-  measureText, ellipsize, TIME_TICK_SPACING, crosshairValueLabel,
+  measureText, ellipsize, TIME_TICK_SPACING, crosshairCategoryLabel, crosshairValueLabel,
 } = internals;
 
 let passed = 0;
@@ -105,7 +105,10 @@ check("single values keep their own precision, grouping and compact notation", (
   assert.equal(formatNum(1.08523), "1.08523");
   assert.equal(formatNum(12345.5), "12,345.5");
   assert.equal(formatNum(1_200_000_000_000), "1.2T");
-  assert.equal(formatNum(1_234_567), "1.23M");
+  assert.equal(formatNum(1_234_567), "1.23457M", "compact values keep six significant digits");
+  assert.equal(formatNum(25_000_400), "25.0004M", "compact notation never hides the data (not 25.00M)");
+  assert.equal(formatNum(1_000_050), "1.00005M");
+  assert.equal(formatNum(-2_500_000), "-2.5M");
   assert.equal(formatNum(0.00123), "0.00123");
   assert.equal(formatNum(1.2e-8), "1.2e-8");
   assert.equal(formatNum(100.60553987364), "100.606", "computed floats show six significant digits");
@@ -206,6 +209,44 @@ check("1.2e12 labels are compact and never overlap the plot", () => {
   assert.equal(scene.axes.y.size, scene.width - plotRight);
 });
 
+function assertChipsFit(scene, name) {
+  assert.ok(scene.lastValues.length > 0, `${name}: has a chip`);
+  for (const chip of scene.lastValues) {
+    const text = measureText(chip.label, 10, scene.theme.font);
+    assert.ok(text + 18 <= scene.width - scene.plot.x - scene.plot.w + 1e-9, `${name}: chip "${chip.label}" (${text}px) fits its ${scene.margin.right}px gutter`);
+  }
+}
+
+check("last-value chips of computed series fit their gutter", () => {
+  let level = 100;
+  const walk = Array.from({ length: 200 }, (_, x) => ({ x, y: (level += rnd() - 0.5) }));
+  const sine = Array.from({ length: 50 }, (_, x) => ({ x, y: Math.sin(x / 5) }));
+  const average = walk.map((row, x) => ({ x, y: walk.slice(Math.max(0, x - 9), x + 1).reduce((sum, r) => sum + r.y, 0) / Math.min(10, x + 1) }));
+  for (const [name, rows] of [["random walk", walk], ["sine", sine], ["moving average", average]]) {
+    for (const width of [320, 600]) assertChipsFit(compile([line(rows, { x: "x", y: "y" })], {}, { width, height: 260 }), `${name} @ ${width}px`);
+  }
+  assertChipsFit(compile([
+    line(sine, { x: "x", y: "y", name: "a" }),
+    line(Array.from({ length: 10 }, (_, x) => ({ x, y: x * 0.123456 })), { x: "x", y: "y", name: "b" }),
+  ]), "two series");
+  assertChipsFit(compile([bar(sine.slice(0, 12), { x: "x", y: "y", lastValue: true })]), "bar chip");
+  // A disabled chip does not widen the gutter.
+  const quiet = compile([line(sine, { x: "x", y: "y", lastValue: false })]);
+  assert.equal(quiet.lastValues.length, 0);
+  assert.equal(quiet.margin.right, 56);
+});
+
+check("compact chips and tooltips keep the data (25,000,400 is not 25.00M)", () => {
+  const rows = Array.from({ length: 10 }, (_, x) => ({ x, y: 25_000_000 + (400 * x) / 9 }));
+  rows[9].y = 25_000_400;
+  const scene = compile([line(rows, { x: "x", y: "y", name: "Volume" })]);
+  assert.equal(scene.lastValues[0].label, "25.0004M");
+  assert.match(scene.samples[scene.samples.length - 1].tip, /25\.0004M$/);
+  assert.ok(scene.yTicks.every((tick) => /^25\.000\dM$/.test(tick.label)), scene.yTicks.map((t) => t.label).join(" "));
+  assert.equal(valueFormatter([1_000_000, 1_000_050])(1_000_050), "1.00005M");
+  assertChipsFit(scene, "compact");
+});
+
 check("long custom labels widen the value axis up to a cap, then ellipsize", () => {
   const rows = Array.from({ length: 5 }, (_, x) => ({ x, y: 1000 + x * 250 }));
   const money = compile([line(rows, { x: "x", y: "y" })], { scales: { y: { tickFormat: (v) => `$${Number(v).toFixed(2)} USD` } } });
@@ -288,6 +329,28 @@ check("calendar ticks align to boundaries and name the higher unit", () => {
   const seconds = Array.from({ length: 120 }, (_, i) => ({ t: Date.UTC(2025, 8, 9, 9, 30) + i * 1000, v: i }));
   const secondScene = compile([line(seconds, { x: "t", y: "v" })], { scales: { x: { type: "time" } } });
   assert.ok(secondScene.xTicks.some((tick) => /^\d\d:\d\d:\d\d$/.test(tick.label)), "second ticks print seconds");
+});
+
+check("calendar ticks before 1970 and across the millennia", () => {
+  const evening = Array.from({ length: 60 }, (_, i) => ({ t: new Date(Date.UTC(1969, 11, 31, 18) + i * 10 * 60_000), v: i }));
+  const scene = compile([line(evening, { x: "t", y: "v" })]);
+  const labels = scene.xTicks.map((tick) => tick.label);
+  assert.ok(labels.includes("1970"), `the new year shows the year: ${labels.join(" | ")}`);
+  assert.ok(labels.filter((label) => /^\d\d:\d\d$/.test(label)).length >= 3, labels.join(" | "));
+  for (const tick of scene.xTicks) assert.ok(tick.value % 3_600_000 === 0, `"${tick.label}" sits on an hour`);
+  const ancient = compile([line([{ t: Date.UTC(-500, 0, 1), v: 1 }, { t: Date.UTC(1500, 0, 1), v: 2 }], { x: "t", y: "v" })], { scales: { x: { type: "time" } } });
+  assert.ok(ancient.xTicks.length >= 2 && ancient.xTicks.every((tick) => /^-?\d+$/.test(tick.label)), ancient.xTicks.map((t) => t.label).join(" | "));
+  const beyond = compile([line([{ t: -9e15, v: 1 }, { t: 9e15, v: 2 }], { x: "t", y: "v" })], { scales: { x: { type: "time" } } });
+  assert.ok(beyond.xTicks.length >= 2, "instants outside the Date range fall back to numeric ticks");
+});
+
+check("a zoomed Date axis stays a time axis when every series is hidden", () => {
+  const rows = Array.from({ length: 36 }, (_, i) => ({ t: new Date(Date.UTC(1960, i, 1)), v: i }));
+  const hidden = compile([line(rows, { x: "t", y: "v", name: "a" })], {
+    hiddenSeries: ["a"],
+    viewport: { x: [Date.UTC(1960, 3, 1), Date.UTC(1961, 3, 1)] },
+  });
+  assert.ok(hidden.xTicks.some((tick) => tick.label === "1961"), hidden.xTicks.map((t) => t.label).join(" | "));
 });
 
 check("time axes never overlap labels at 400px", () => {
@@ -428,6 +491,55 @@ check("dense heatmaps thin their labels and format values without a hard-coded %
     const cell = wideBar.nodes.find((n) => n.type === "rect" && Math.abs(n.x + n.w / 2 - node.x) < 1 && Math.abs(n.y + n.h / 2 - node.y) < 1);
     assert.ok(cell && measureText(node.label, 9, wideBar.theme.font) <= cell.w, "cell labels fit their cell");
   }
+});
+
+check("heatmap values are re-read on every compile of the same definition", () => {
+  const cells = [{ x: "a", y: "r", v: 1 }, { x: "b", y: "r", v: 2 }];
+  const definition = defineChart({ marks: [heatmap(cells, { x: "x", y: "y", valueKey: "v" })] });
+  const before = compileChart(definition, { width: 400, height: 200 });
+  assert.deepEqual(before.colorBar, { min: 1, max: 2 });
+  cells.push({ x: "c", y: "r", v: 500.25 });
+  cells[0].v = -40;
+  const after = compileChart(definition, { width: 400, height: 200 });
+  assert.deepEqual(after.colorBar, { min: -500.25, max: 500.25 });
+  const tips = after.nodes.filter((node) => node.tip).map((node) => node.tip);
+  assert.deepEqual(tips, ["r  ·  a\n-40.00", "r  ·  b\n2.00", "r  ·  c\n500.25"]);
+  assert.equal(after.formatters.color(500.25), "500.25");
+});
+
+check("heatmap crosshair chips name the hovered cell on thinned axes", () => {
+  const tokens = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "DOT", "ADA", "XRP", "LTC", "UNI", "ATOM"];
+  const cells = [];
+  for (let h = 0; h < 24; h++) for (const token of tokens) cells.push({ h, token, value: ((h * 7 + token.length) % 9) - 4 });
+  const scene = compile([heatmap(cells, { x: "h", y: "token", valueKey: "value" })], {}, { width: 420, height: 200 });
+  assert.ok(!scene.xTicks.some((tick) => tick.value === 1), "column 1 is unlabelled at 420px");
+  const hovered = scene.nodes.filter((n) => n.role === "heat" && (n.datum.h === 1 || n.datum.h === 23));
+  assert.equal(hovered.length, 2 * tokens.length);
+  for (const node of hovered) {
+    const target = { hit: node, sample: null, isBar: false, isLine: false, isPoint: false, scanX: node.x + node.w / 2, scanY: node.y + node.h / 2, y: node.y };
+    assert.equal(crosshairCategoryLabel(scene, target), String(node.datum.h));
+    assert.equal(crosshairValueLabel(scene, target), node.datum.token);
+  }
+  const regions = ["North America", "South America", "Europe", "Middle East & Africa"];
+  const narrow = compile([bar(regions.map((k, v) => ({ k, v: v + 1 })), { x: "k", y: "v" })], { scales: { x: { type: "band", labels: { rotate: false } } } }, { width: 240, height: 200 });
+  const target = narrow.nodes.find((node) => node.role === "bar" && node.datum.k === "Middle East & Africa");
+  assert.equal(
+    crosshairCategoryLabel(narrow, { hit: target, sample: null, isBar: true, isLine: false, isPoint: false, scanX: target.x + target.w / 2, scanY: target.y, y: target.y }),
+    "Middle East & Africa",
+    "the chip shows the full category, never a thinned neighbour or an ellipsized label",
+  );
+  const numericRows = compile([heatmap([{ x: "a", y: 1.5, v: 1 }, { x: "a", y: 2.5, v: 2 }], { x: "x", y: "y", valueKey: "v" })]);
+  const row = numericRows.nodes.find((node) => node.role === "heat" && node.datum.y === 1.5);
+  assert.equal(crosshairValueLabel(numericRows, { hit: row, sample: null, isBar: false, isLine: false, isPoint: false, scanX: row.x, scanY: row.y + row.h / 2, y: row.y }), "1.5");
+});
+
+check("the colour bar paints the heatmap's value format", () => {
+  const scene = compile([heatmap([{ x: "a", y: "b", v: 2.4 }, { x: "b", y: "b", v: -1 }], { x: "x", y: "y", valueKey: "v", valueFormat: "signed-percent" })]);
+  const barX = scene.plot.x + scene.plot.w + 22;
+  const labels = [...svgFromCompiled(scene).matchAll(/<text x="([\d.]+)"[^>]*>([^<]*)<\/text>/g)]
+    .filter((match) => Math.abs(Number(match[1]) - barX) < 0.01)
+    .map((match) => match[2]);
+  assert.deepEqual(labels, ["+2.4%", "0", "-2.4%"], "the colour bar reads +2.4% … -2.4%, like the cells and the measured margin");
 });
 
 // ---------------------------------------------------------------------------
