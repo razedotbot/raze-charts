@@ -43,27 +43,53 @@ machines.
 
 ## Bundle budgets
 
-The bundle gate measures built public ESM files with gzip level 9. Source maps
-are excluded; React is external in the React adapter and remains an optional
-peer dependency.
+The bundle gate measures every public entrypoint twice, with gzip level 9 and
+without source maps:
+
+- **Artifact** — the published `dist/<entry>.esm.js` file as shipped. It guards
+  accidental growth of the distributable. `/chart`, `/react`, and `/studies` are
+  deliberately unminified so their PURE annotations survive for downstream tree
+  shaking, so this number over-states what a consumer ships.
+- **Scenario** — what a consumer ships: a browser bundle of a realistic named
+  import from the packed package, resolved through `exports`, tree-shaken and
+  minified by esbuild. React stays external as an optional peer; `/react`
+  scenarios include the shared `/chart` runtime they pull in.
 
 ```bash
 npm run build
-node scripts/check-bundle-size.mjs
+npm run check:size
 ```
 
-| Entrypoint | Artifact | Gzip budget |
-| --- | --- | ---: |
-| Root financial widget | `charting_library.esm.js` | 52 KiB |
-| Native chart | `chart.esm.js` | 42 KiB |
-| React adapter | `react.esm.js` | 30 KiB |
+<!-- bundle-budgets:start -->
+<!-- Generated from benchmarks/budgets/*.json by `node scripts/check-bundle-size.mjs --write-docs`. Do not edit by hand. -->
 
-Budgets live in [bundle-budgets.json](../benchmarks/bundle-budgets.json). They
-guard accidental growth of the distributable entrypoint, not the amount a
-consumer receives after tree shaking. Use `--json` for machine-readable
-measurements. The native allowance includes the complete runtime validation
-boundary, renderer-neutral compiler, SVG and Canvas renderers, interactions,
-and color system; it does not hide those costs in runtime dependencies.
+| Entrypoint | Measurement | Contents | Gzip budget |
+| --- | --- | --- | ---: |
+| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 55 KiB |
+| | Scenario: Widget only | `import { widget }` | 49 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 42 KiB |
+| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33 KiB |
+| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 23 KiB |
+| React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
+| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 37 KiB |
+| | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
+| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 5 KiB |
+| | Scenario: Single kernel | `import { ema }` | 1 KiB |
+| | Scenario: Registry with built-ins | `import { StudyRegistry }` | 3 KiB |
+
+<!-- bundle-budgets:end -->
+
+Each entrypoint has one budget file, `benchmarks/budgets/<entry>.json`, keyed
+by the entry ids in `scripts/entries.mjs`. The gate fails when an entrypoint
+has no budget file, when a budget file names no entrypoint, or when a scenario
+imports a name the entrypoint does not export. The table above is generated
+from those files and `npm run check:docs` fails when it drifts; regenerate it
+with `node scripts/check-bundle-size.mjs --write-docs`. Use `--json` for
+machine-readable measurements, including the largest inputs of each scenario.
+
+The native allowance includes the complete runtime validation boundary,
+renderer-neutral compiler, SVG and Canvas renderers, interactions, and color
+system; it does not hide those costs in runtime dependencies.
 
 ## Dense native charts
 

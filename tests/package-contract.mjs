@@ -6,6 +6,12 @@ import { tmpdir } from "node:os";
 import { gzipSync } from "node:zlib";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
+import {
+  PACKAGE_ENTRIES,
+  bundleArtifacts,
+  entryArtifacts,
+  entrySpecifier,
+} from "../scripts/entries.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sandbox = mkdtempSync(join(tmpdir(), "raze-package-contract-"));
@@ -65,34 +71,36 @@ try {
   mkdirSync(join(prepareProject, "src"), { recursive: true });
   mkdirSync(join(prepareDist, "types"), { recursive: true });
   cpSync(join(root, "scripts", "prepare.mjs"), join(prepareProject, "scripts", "prepare.mjs"));
+  cpSync(join(root, "scripts", "entries.mjs"), join(prepareProject, "scripts", "entries.mjs"));
   writeFileSync(join(prepareProject, "src", "index.ts"), "export const fixture = true;\n");
   writeFileSync(
     join(prepareProject, "build.mjs"),
     `import { writeFileSync } from "node:fs";\nwriteFileSync(new URL("./build-ran", import.meta.url), "yes");\n`,
   );
-  const prepareBundles = [
-    "charting_library.esm.js",
-    "charting_library.cjs",
-    "charting_library.standalone.js",
-    "chart.esm.js",
-    "chart.cjs",
-    "react.esm.js",
-    "react.cjs",
-  ];
+  const prepareBundles = bundleArtifacts();
   for (const artifact of [
     ...prepareBundles,
     ...prepareBundles.map((entry) => `${entry}.map`),
     "charting_library.d.ts",
     "datafeed-api.d.ts",
-    join("types", "index.d.ts"),
-    join("types", "chart", "index.d.ts"),
-    join("types", "react", "index.d.ts"),
+    ...PACKAGE_ENTRIES.map((entry) => entryArtifacts(entry).types),
   ]) {
     mkdirSync(dirname(join(prepareDist, artifact)), { recursive: true });
     writeFileSync(join(prepareDist, artifact), "fixture\n");
   }
   run(process.execPath, [join(prepareProject, "scripts", "prepare.mjs")], prepareProject);
   assert.equal(existsSync(prepareSentinel), false, "prepare should skip a complete dist tree");
+  // Every entry's declaration is required, not a fixed list of subpaths.
+  const newestDeclaration = join(prepareDist, entryArtifacts(PACKAGE_ENTRIES.at(-1)).types);
+  rmSync(newestDeclaration);
+  run(process.execPath, [join(prepareProject, "scripts", "prepare.mjs")], prepareProject);
+  assert.equal(
+    existsSync(prepareSentinel),
+    true,
+    `prepare should rebuild when ${PACKAGE_ENTRIES.at(-1).subpath} declarations are missing`,
+  );
+  rmSync(prepareSentinel);
+  writeFileSync(newestDeclaration, "fixture\n");
   writeFileSync(join(prepareDist, "react.cjs"), "");
   run(process.execPath, [join(prepareProject, "scripts", "prepare.mjs")], prepareProject);
   assert.equal(existsSync(prepareSentinel), true, "prepare should rebuild a partial dist tree");
@@ -158,15 +166,20 @@ try {
     "docs/capabilities.md",
     "docs/migration.md",
     "docs/performance.md",
-    "benchmarks/bundle-budgets.json",
     "benchmarks/dashboard-baseline.json",
+    ...PACKAGE_ENTRIES.map((entry) => `benchmarks/budgets/${entry.id}.json`),
   ]) {
     assert.ok(
       existsSync(join(installedDir, publishedResource)),
       `published documentation resource is missing: ${publishedResource}`,
     );
   }
-  for (const entry of [".", "./chart", "./react"]) {
+  assert.deepEqual(
+    Object.keys(installedPackage.exports).filter((key) => key !== "./package.json"),
+    PACKAGE_ENTRIES.map((entry) => entry.subpath),
+    "packed exports must list exactly the entries in scripts/entries.mjs",
+  );
+  for (const entry of PACKAGE_ENTRIES.map((candidate) => candidate.subpath)) {
     const conditions = installedPackage.exports[entry];
     for (const condition of ["types", "import", "require", "default"]) {
       assert.ok(conditions[condition], `${entry} is missing its ${condition} condition`);
@@ -198,6 +211,25 @@ try {
       import rootDefault, { widget, version } from "@razedotbot/charts";
       import * as chart from "@razedotbot/charts/chart";
       import * as react from "@razedotbot/charts/react";
+      import { BUILTIN_STUDIES, StudyRegistry, ema } from "@razedotbot/charts/studies";
+
+      // Every public entry resolves to its own ESM artifact and exports real code.
+      const entries = ${JSON.stringify(PACKAGE_ENTRIES.map((entry) => ({
+        specifier: entrySpecifier(entry, "@razedotbot/charts"),
+        artifact: entryArtifacts(entry).esm,
+        smoke: entry.smoke,
+      })))};
+      for (const entry of entries) {
+        const namespace = await import(entry.specifier);
+        assert.equal(typeof namespace[entry.smoke], "function", entry.specifier + " must export " + entry.smoke);
+        assert.ok(
+          import.meta.resolve(entry.specifier).endsWith("/dist/" + entry.artifact),
+          entry.specifier + " must resolve to dist/" + entry.artifact,
+        );
+      }
+      assert.deepEqual(ema([1, 2, 3, 4], 2), [null, 1.5, 2.5, 3.5]);
+      assert.equal(new StudyRegistry().resolve("rsi")?.name, "RSI");
+      assert.ok(BUILTIN_STUDIES.length > 0);
 
       assert.equal(typeof widget, "function");
       assert.equal(typeof version, "string");
@@ -231,6 +263,22 @@ try {
       const chart = require("@razedotbot/charts/chart");
       const react = require("@razedotbot/charts/react");
       const metadata = require("@razedotbot/charts/package.json");
+      const studies = require("@razedotbot/charts/studies");
+
+      // Every public entry resolves to its own CommonJS artifact and exports real code.
+      const entries = ${JSON.stringify(PACKAGE_ENTRIES.map((entry) => ({
+        specifier: entrySpecifier(entry, "@razedotbot/charts"),
+        artifact: entryArtifacts(entry).cjs,
+        smoke: entry.smoke,
+      })))};
+      for (const entry of entries) {
+        assert.equal(typeof require(entry.specifier)[entry.smoke], "function", entry.specifier + " must export " + entry.smoke);
+        assert.ok(
+          require.resolve(entry.specifier).replaceAll("\\\\", "/").endsWith("/dist/" + entry.artifact),
+          entry.specifier + " must resolve to dist/" + entry.artifact,
+        );
+      }
+      assert.deepEqual(studies.sma([2, 4, 6], 2), [null, 3, 5]);
 
       assert.equal(typeof root.widget, "function");
       assert.equal(typeof root.version, "string");
@@ -262,6 +310,7 @@ try {
       assert.match(require.resolve("@razedotbot/charts"), /charting_library\\.cjs$/);
       assert.match(require.resolve("@razedotbot/charts/chart"), /chart\\.cjs$/);
       assert.match(require.resolve("@razedotbot/charts/react"), /react\\.cjs$/);
+      assert.match(require.resolve("@razedotbot/charts/studies"), /studies\\.cjs$/);
     `,
   );
   run(process.execPath, ["--conditions=browser", browserCjsConsumer], consumerDir);
@@ -277,7 +326,8 @@ try {
       import rootDefault, { version } from "@razedotbot/charts";
       import { defineChart } from "@razedotbot/charts/chart";
       import { Chart } from "@razedotbot/charts/react";
-      export { rootDefault, version, defineChart, Chart };
+      import { rsi } from "@razedotbot/charts/studies";
+      export { rootDefault, version, defineChart, Chart, rsi };
     `,
   );
   const esbuild = join(root, "node_modules", "esbuild", "bin", "esbuild");
@@ -303,7 +353,7 @@ try {
   assert.ok(existsSync(browserBundle), "browser consumer bundle was not emitted");
   const browserInputs = Object.keys(JSON.parse(readFileSync(browserMetafile, "utf8")).inputs)
     .map((path) => path.replaceAll("\\", "/"));
-  for (const target of ["charting_library.esm.js", "chart.esm.js", "react.esm.js"]) {
+  for (const target of PACKAGE_ENTRIES.map((entry) => entryArtifacts(entry).esm)) {
     assert.ok(
       browserInputs.some((path) => path.endsWith(`/dist/${target}`)),
       `browser bundling did not select ${target}`,
@@ -386,6 +436,27 @@ try {
         type SceneNode,
         type XScaleSpec,
       } from "@razedotbot/charts/chart";
+      import {
+        StudyRegistry,
+        macd,
+        type Bar,
+        type StudyDefinition,
+      } from "@razedotbot/charts/studies";
+
+      const studyBars: Bar[] = [{ time: 0, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }];
+      const spread: StudyDefinition = {
+        name: "Spread",
+        pane: "pane",
+        compute: (bars) => bars.map((bar) => bar.high - bar.low),
+      };
+      const studyRegistry = new StudyRegistry([spread]);
+      const macdHistogram: (number | null)[] = macd([1, 2, 3], 12, 26, 9).hist;
+      // @ts-expect-error a study definition requires a compute function
+      const invalidStudy: StudyDefinition = { name: "Broken", pane: "overlay" };
+      void studyBars;
+      void studyRegistry;
+      void macdHistogram;
+      void invalidStudy;
 
       type Row = { x: number; y: number };
       const rows: Row[] = [{ x: 0, y: 1 }];

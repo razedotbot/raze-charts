@@ -24,6 +24,14 @@ Legend:
 | Partial custom theme | TradingView-style overrides and CSS variables | Yes — `Partial<DashboardTheme>` | Yes — through a native definition |
 | Custom price formatter | Yes | No dedicated formatter hook | No dedicated formatter hook |
 
+Indicator math also ships on its own: `@razedotbot/charts/studies` exports the
+pure kernels (`sma`, `ema`, `rsi`, `stdev`, `bollinger`, `macd`, `vwap`,
+`closesFromBars`), `StudyRegistry`, `BUILTIN_STUDIES`, and the
+`StudyDefinition` contract types, with no DOM or widget code (**Yes** — ESM,
+CommonJS, and NodeNext types are covered by the packed package contract). A
+registry created there is standalone; pass definitions to a widget through
+`raze.custom_studies`.
+
 ## Financial domain
 
 | Capability | Status | Notes |

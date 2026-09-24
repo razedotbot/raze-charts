@@ -49,6 +49,18 @@
       },
       "default": "./dist/react.esm.js"
     },
+    "./studies": {
+      "types": "./dist/types/studies/index.d.ts",
+      "import": {
+        "browser": "./dist/studies.esm.js",
+        "default": "./dist/studies.esm.js"
+      },
+      "require": {
+        "browser": "./dist/studies.cjs",
+        "default": "./dist/studies.cjs"
+      },
+      "default": "./dist/studies.esm.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -58,6 +70,9 @@
       ],
       "react": [
         "./dist/types/react/index.d.ts"
+      ],
+      "studies": [
+        "./dist/types/studies/index.d.ts"
       ]
     }
   },
@@ -76,10 +91,10 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.type-tests.json",
-    "test": "npm run typecheck && node build.mjs && node examples/smoke.mjs && node tests/time-index.mjs && node tests/study-store.mjs && node tests/chart.mjs && node tests/chart-edge-cases.mjs && node tests/color-theme.mjs && node tests/renderer-parity.mjs && node tests/chart-renderer-cache.mjs && node tests/react-adapter.mjs && node tests/symbol-search.mjs && node tests/popup-ui.mjs && node tests/data-source.mjs && node tests/data-manager.mjs && node tests/financial-runtime.mjs && node tests/build-watch.mjs && node tests/package-contract.mjs",
+    "test": "node scripts/run-tests.mjs",
     "test:visual": "node build.mjs && npx playwright test",
     "test:visual:update": "node build.mjs && npx playwright test --update-snapshots",
-    "check:docs": "node scripts/check-docs.mjs",
+    "check:docs": "node scripts/check-docs.mjs && node scripts/check-bundle-size.mjs --check-docs",
     "check:size": "node scripts/check-bundle-size.mjs",
     "benchmark": "node scripts/benchmark.mjs",
     "quality": "npm test && npm run check:docs && npm run check:size && npm run benchmark -- --check",

@@ -8,9 +8,12 @@
 //   dist/charting_library.standalone.js  — IIFE that assigns window.TradingView
 //   dist/charting_library.d.ts           — hand-authored drop-in types (copied verbatim)
 //   dist/datafeed-api.d.ts               — alias of the above (TV layout parity)
-//   dist/chart.esm.js / chart.cjs        — dashboard grammar (tree-shaken, no widget)
-//   dist/react.esm.js / react.cjs        — React adapter (peer: react)
+//   dist/<subpath>.esm.js / <subpath>.cjs — one pair per public subpath
 //   dist/types/**                        — tsc-generated declarations
+//
+// Public entrypoints are data, not code: scripts/entries.mjs lists every
+// subpath once, and this file derives one esbuild target per output format
+// from that table. Adding a subpath never requires editing this file.
 //
 // The drop-in `.d.ts` is authored by hand (src/types/charting_library.d.ts)
 // rather than generated, so it stays a small, stable, structurally-compatible
@@ -35,13 +38,13 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { PACKAGE_ENTRIES, entryArtifacts, entryById } from "./scripts/entries.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const out = resolve(root, "dist");
 
 const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 const watch = process.argv.includes("--watch");
-const entry = resolve(root, "src/index.ts");
 
 const common = {
   bundle: true,
@@ -52,72 +55,66 @@ const common = {
 };
 
 // The full widget needs production compaction to stay within its public size
-// budget. Keep the composable chart and React entrypoints unminified: their
-// emitted PURE annotations are part of the downstream tree-shaking contract.
-const compactWidget = {
+// budget. Entries without `compact` stay unminified: their emitted PURE
+// annotations are part of the downstream tree-shaking contract.
+const compact = {
   minifySyntax: true,
   minifyWhitespace: true,
 };
 
-const widgetTargets = [
-  { format: "esm", outfile: resolve(out, "charting_library.esm.js") },
-  { format: "cjs", outfile: resolve(out, "charting_library.cjs") },
-  {
-    format: "iife",
-    globalName: "RazeCharts",
-    outfile: resolve(out, "charting_library.standalone.js"),
-    footer: {
-      js: "if(typeof window!=='undefined'){window.TradingView=window.TradingView||{};window.TradingView.widget=RazeCharts.widget;window.TradingView.version=RazeCharts.version;}",
-    },
-  },
-];
-
-const chartEntry = resolve(root, "src/chart/index.ts");
-const reactEntry = resolve(root, "src/react/index.tsx");
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * Keep the dashboard runtime as a single module instance when consumers mix
- * `@razedotbot/charts/chart` and `/react`. Besides reducing bytes, this keeps
- * exported functions and error constructors referentially identical.
+ * Keep a shared runtime as a single module instance when consumers mix
+ * subpaths (for example `@razedotbot/charts/chart` and `/react`). Besides
+ * reducing bytes, this keeps exported functions and error constructors
+ * referentially identical.
  */
-function externalChartRuntime(format) {
-  const target = format === "cjs" ? "./chart.cjs" : "./chart.esm.js";
+function sharedRuntimePlugin(entry, format) {
+  const rewrites = Object.entries(entry.shareRuntime ?? {}).map(([specifier, targetId]) => {
+    const artifacts = entryArtifacts(entryById(targetId));
+    return { specifier, path: `./${format === "cjs" ? artifacts.cjs : artifacts.esm}` };
+  });
   return {
-    name: `external-chart-runtime-${format}`,
+    name: `shared-runtime-${entry.id}-${format}`,
     setup(buildContext) {
-      buildContext.onResolve({ filter: /^\.\.\/chart$/ }, () => ({ path: target, external: true }));
+      for (const { specifier, path } of rewrites) {
+        const filter = new RegExp(`^${escapeRegExp(specifier)}$`);
+        buildContext.onResolve({ filter }, () => ({ path, external: true }));
+      }
     },
   };
 }
 
-const buildTargets = [
-  ...widgetTargets.map((target) => ({
+function targetsFor(entry) {
+  const artifacts = entryArtifacts(entry);
+  const base = {
     ...common,
-    ...compactWidget,
-    entryPoints: [entry],
+    ...(entry.compact ? compact : {}),
+    entryPoints: [resolve(root, entry.source)],
+    ...(entry.jsx ? { jsx: entry.jsx } : {}),
+    ...(entry.external ? { external: [...entry.external] } : {}),
+  };
+  const formats = [
+    { format: "esm", outfile: resolve(out, artifacts.esm) },
+    { format: "cjs", outfile: resolve(out, artifacts.cjs) },
+  ];
+  if (entry.standalone) {
+    formats.push({
+      format: "iife",
+      globalName: entry.standalone.globalName,
+      outfile: resolve(out, artifacts.standalone),
+      footer: { js: entry.standalone.footer },
+    });
+  }
+  return formats.map((target) => ({
+    ...base,
     ...target,
-  })),
-  ...(["esm", "cjs"]).flatMap((format) => {
-    const filename = format === "cjs" ? "cjs" : "esm.js";
-    return [
-      {
-        ...common,
-        entryPoints: [chartEntry],
-        format,
-        outfile: resolve(out, `chart.${filename}`),
-      },
-      {
-        ...common,
-        entryPoints: [reactEntry],
-        format,
-        outfile: resolve(out, `react.${filename}`),
-        jsx: "automatic",
-        external: ["react", "react/jsx-runtime", "react/jsx-dev-runtime"],
-        plugins: [externalChartRuntime(format)],
-      },
-    ];
-  }),
-];
+    ...(entry.shareRuntime ? { plugins: [sharedRuntimePlugin(entry, target.format)] } : {}),
+  }));
+}
+
+const buildTargets = PACKAGE_ENTRIES.flatMap(targetsFor);
 
 function synchronizeDirectory(source, destination) {
   const present = new Set();
@@ -221,8 +218,8 @@ async function run() {
 }
 
 if (watch) {
-  // A clean clone gets every public artifact immediately; all seven JS
-  // variants then remain synchronized while source files change.
+  // A clean clone gets every public artifact immediately; every JS variant
+  // then remains synchronized while source files change.
   await run();
   const { context } = await import("esbuild");
   let typeTimer;

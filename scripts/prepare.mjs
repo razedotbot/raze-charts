@@ -6,29 +6,22 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { PACKAGE_ENTRIES, bundleArtifacts, entryArtifacts } from "./entries.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = resolve(root, "src");
 const distRoot = resolve(root, "dist");
 
-const generatedBundles = [
-  "charting_library.esm.js",
-  "charting_library.cjs",
-  "charting_library.standalone.js",
-  "chart.esm.js",
-  "chart.cjs",
-  "react.esm.js",
-  "react.cjs",
-];
+// Every bundle and entry declaration comes from the public entry table, so a
+// new subpath is covered here without editing this script.
+const generatedBundles = bundleArtifacts();
 
 const requiredArtifacts = [
   ...generatedBundles,
   ...generatedBundles.map((artifact) => `${artifact}.map`),
   "charting_library.d.ts",
   "datafeed-api.d.ts",
-  join("types", "index.d.ts"),
-  join("types", "chart", "index.d.ts"),
-  join("types", "react", "index.d.ts"),
+  ...PACKAGE_ENTRIES.map((entry) => join(...entryArtifacts(entry).types.split("/"))),
 ];
 
 function collectDeclarationArtifacts(directory) {

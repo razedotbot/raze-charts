@@ -18,6 +18,7 @@ defaults, honest compatibility, and escape hatches that remain typed.
 | `@razedotbot/charts` | Realtime financial charts and low-level financial building blocks | TradingView-shaped compatibility subset plus Raze-native exports |
 | `@razedotbot/charts/chart` | Framework-neutral product and dashboard charts | Native typed grammar, SVG string rendering, SVG/Canvas DOM mounting |
 | `@razedotbot/charts/react` | React product charts or an incremental Recharts migration | Thin adapter over `/chart`; React is an optional peer dependency |
+| `@razedotbot/charts/studies` | Indicator math and study definitions without the widget (servers, workers, screeners) | Pure kernels (`sma`, `ema`, `rsi`, `macd`, `bollinger`, `vwap`, …), `StudyRegistry`, `BUILTIN_STUDIES`, and the `StudyDefinition` contract |
 
 Those are the only public package subpaths today. Imports from `src/**` or
 `dist/**` are implementation details and are not a compatibility contract.
@@ -352,7 +353,25 @@ The root also exports `DataManager`, `TimeIndex`, `ChartEngine`,
 resolution helpers, `defineDataSource` / `createDatafeed`, and the default UI
 chrome. These pieces are useful for a custom financial shell, but currently
 share the widget's mutable `ChartContext`; they are not separate package
-subpaths.
+subpaths. The exception is indicator math: import it from
+`@razedotbot/charts/studies` to compute studies without bundling the widget.
+
+```ts
+import { ema, StudyRegistry, type StudyDefinition } from "@razedotbot/charts/studies";
+
+const spread: StudyDefinition = {
+  name: "Spread",
+  pane: "pane",
+  compute: (bars) => bars.map((bar) => bar.high - bar.low),
+};
+const registry = new StudyRegistry(); // built-ins plus anything you register
+registry.register(spread);
+const fast = ema([10, 11, 12, 13], 3); // [null, null, 11, 12]
+```
+
+The same `StudyDefinition` works in the widget through `raze.custom_studies`.
+The `/studies` bundle is separate from the root widget, so registering on a
+`StudyRegistry` created there does not change a mounted widget.
 
 ## React
 
@@ -437,10 +456,11 @@ npm run test:visual
 ```
 
 `npm run quality` runs strict source/API type checks, builds the distributable
-artifacts, and exercises the widget, dashboard compiler and edge cases,
+artifacts, runs every discovered `tests/*.mjs` suite, and exercises the widget, dashboard compiler and edge cases,
 SVG/Canvas color parity, React 17/18/19 contracts, data races, time indexing,
 studies, declaration watch mode, the packed ESM/CJS/NodeNext package contract,
-documentation, bundle budgets, and compiler performance. Visual tests use
+documentation, bundle budgets for published artifacts and tree-shaken consumer
+scenarios, and compiler performance. Visual tests use
 Playwright Chromium snapshots and remain a separate platform-specific gate.
 
 Use `npm run typecheck` as the faster type-only feedback loop while editing.
