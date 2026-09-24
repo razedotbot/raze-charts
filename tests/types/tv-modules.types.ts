@@ -15,6 +15,7 @@ import type { CreateShapeOptions } from "../../src/types/tv/shapes";
 import type { ITradingLineAdapter } from "../../src/types/tv/trading";
 import type { IChartWidgetApi } from "../../src/types/tv/chart-api";
 import type { ChartLayoutSnapshot } from "../../src/types/tv/layout";
+import type { ContextMenuCallback, ContextMenuItem } from "../../src/types/tv/context-menu";
 import type { IChartingLibraryWidget, widget } from "../../src/types/tv/widget";
 import type { ChartingLibraryWidgetOptions, RazeChartsOptions } from "../../src/types/tv/options";
 import type { StudyDefinition } from "../../src/types/tv/studies";
@@ -31,6 +32,8 @@ export type ModulesAreTheBarrel = [
   Expect<Equal<ITradingLineAdapter, Barrel.ITradingLineAdapter>>,
   Expect<Equal<IChartWidgetApi, Barrel.IChartWidgetApi>>,
   Expect<Equal<ChartLayoutSnapshot, Barrel.ChartLayoutSnapshot>>,
+  Expect<Equal<ContextMenuItem, Barrel.ContextMenuItem>>,
+  Expect<Equal<Parameters<IChartingLibraryWidget["onContextMenu"]>[0], ContextMenuCallback>>,
   Expect<Equal<IChartingLibraryWidget, Barrel.IChartingLibraryWidget>>,
   Expect<Equal<widget, Barrel.widget>>,
   Expect<Equal<ChartingLibraryWidgetOptions, Barrel.ChartingLibraryWidgetOptions>>,

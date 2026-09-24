@@ -188,7 +188,7 @@ test("hover docs match the tv modules and no module header documents a declarati
 
 test("the barrel owns the seams later packages extend", () => {
   const barrel = readFileSync(resolve(root, "src/types/charting_library.d.ts"), "utf8");
-  for (const module of ["common", "datafeed", "shapes", "trading", "chart-api", "layout", "widget", "options", "studies"]) {
+  for (const module of ["common", "datafeed", "shapes", "trading", "chart-api", "layout", "context-menu", "widget", "options", "studies"]) {
     assert.match(barrel, new RegExp(`^export \\* from "\\./tv/${module}";$`, "m"), `re-exports ./tv/${module}`);
   }
 });

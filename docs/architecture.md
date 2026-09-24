@@ -40,7 +40,8 @@ is a barrel that only re-exports one domain module per concern:
 | `trading.d.ts` | Order, position and bracket lines |
 | `chart-api.d.ts` | `IChartWidgetApi` |
 | `layout.d.ts` | `ChartLayoutSnapshot` for `save()` and `load()` |
-| `widget.d.ts` | `IChartingLibraryWidget`, the `widget` class, context menu and header button types, `version` |
+| `context-menu.d.ts` | `ContextMenuItem` and the `onContextMenu` callback |
+| `widget.d.ts` | `IChartingLibraryWidget`, the `widget` class, header button options, `version` |
 | `options.d.ts` | `ChartingLibraryWidgetOptions`, the `raze` chrome options, formatters |
 | `studies.d.ts` | `StudyDefinition` and Indicators panel presets |
 

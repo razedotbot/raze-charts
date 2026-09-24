@@ -28,6 +28,7 @@ export * from "./tv/shapes";
 export * from "./tv/trading";
 export * from "./tv/chart-api";
 export * from "./tv/layout";
+export * from "./tv/context-menu";
 export * from "./tv/widget";
 export * from "./tv/options";
 export * from "./tv/studies";

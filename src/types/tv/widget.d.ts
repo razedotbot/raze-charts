@@ -1,19 +1,12 @@
-// The widget: its interface, header buttons, context menu hooks and the
-// runtime `widget` constructor and `version` exports.
+// The widget: its interface, header buttons, and the runtime `widget`
+// constructor and `version` exports.
 
 import type { ResolutionString } from "./common";
 import type { IChartWidgetApi } from "./chart-api";
+import type { ContextMenuCallback } from "./context-menu";
 import type { ChartLayoutSnapshot } from "./layout";
 import type { ChartingLibraryWidgetOptions } from "./options";
 import type { DrawingEventType } from "./shapes";
-
-// ── Context menu ────────────────────────────────────────────────────────────
-export interface ContextMenuItem {
-  position: "top" | "bottom";
-  text: string;
-  click: () => void;
-}
-export type ContextMenuCallback = (unixTime: number, price: number) => ContextMenuItem[] | Promise<ContextMenuItem[]>;
 
 // ── Header button ───────────────────────────────────────────────────────────
 export interface CreateButtonOptions {
