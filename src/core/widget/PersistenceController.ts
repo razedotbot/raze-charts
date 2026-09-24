@@ -108,11 +108,20 @@ export class PersistenceController implements WidgetController {
     if (!isCurrent()) return;
 
     // Fetch everything before replacing drawings/studies. This keeps the
-    // visible object model coherent if a compare/range request fails and lets
-    // a newer load supersede this one without leaving half a snapshot behind.
+    // visible object model coherent if a range request fails and lets a newer
+    // load supersede this one without leaving half a snapshot behind. A compare
+    // that no longer resolves or loads is reported and skipped, so the rest of
+    // the layout still loads (the symbol and interval are already committed).
     const comparisons: PreparedCompare[] = [];
     for (const symbol of state.compare ?? []) {
-      const prepared = await controllers.compare.prepare(symbol);
+      let prepared: PreparedCompare | null;
+      try {
+        prepared = await controllers.compare.prepare(symbol);
+      } catch (error) {
+        if (!isCurrent()) return;
+        lifecycle.reportError(`restore compare "${symbol}"; the layout loads without it`, error);
+        continue;
+      }
       if (!isCurrent()) return;
       if (prepared) comparisons.push(prepared);
     }

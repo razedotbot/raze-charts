@@ -226,7 +226,9 @@ Compare series follow the same rule. `CompareController` watches the main
 series (`dataChanged` and viewport changes) and, through `CompareLoader`,
 refetches each compare after a symbol or resolution commit, pages it over the
 range the main series just added, and gives it its own live subscription and
-reset callback. Every compare request belongs to a cancellable group, so a
+reset callback. `resetData()` refetches compares once the main series has
+committed its reset, over the reloaded window, so a stale main window is never
+copied. Every compare request belongs to a cancellable group, so a
 newer reload, `removeEntity()` or `remove()` drops pending callbacks, and a
 compare never keeps bars of another resolution on the axis while it reloads.
 A failed reload leaves the compare on the failed target (empty, or with its
@@ -252,9 +254,11 @@ calls.
 
 `widget.save()` / `widget.load()` serialize a versioned JSON snapshot: symbol,
 interval, visible range, style/scale flags, drawings with stable IDs and behavior
-flags, study specs (not derived values), and compare symbols. `load()` fetches
-every compare before it replaces anything, so a compare symbol that no longer
-resolves rejects the load and keeps the committed chart. The host owns
+flags, study specs (not derived values), and compare symbols. `load()` switches
+the symbol and interval, then fetches every compare before it replaces
+drawings, studies and compares. A compare that no longer resolves or loads is
+reported with a `[raze-charts]` console error and skipped, so the rest of the
+layout still loads. The host owns
 storage. A drawing with `disableSave` remains live but is omitted from the
 snapshot. `executeActionById("undo"|"redo")`
 walks a command stack for drawings and studies. `disableUndo` on a shape skips

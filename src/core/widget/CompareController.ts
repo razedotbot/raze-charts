@@ -5,6 +5,8 @@
 //     series' window, rejecting (and adding nothing) when either step fails;
 //   - a symbol or resolution change of the main series refetches every compare
 //     at the new target, and never draws bars of another resolution meanwhile;
+//   - resetData() refetches every compare over the main series' window once
+//     the main reset has committed, so a stale main window is never copied;
 //   - left pagination of the main series pages each compare over the same
 //     range;
 //   - each compare has its own live subscription (its own listener GUID),
@@ -93,6 +95,8 @@ interface CompareSeries {
   failedKey: string | null;
   /** Main-series oldest second at the last failed page; retried once the main series pages further. */
   pageFailedFrom: number | null;
+  /** resetData() asked for a refetch that waits for the main series' reset to commit. */
+  resetPending: boolean;
   subscription: CompareSubscription | null;
 }
 
@@ -106,6 +110,12 @@ export class CompareController implements WidgetController {
   private loaderInstance: CompareLoader | null = null;
   /** Scale state the first compare replaced; null when there is none or the user owns the mode since. */
   private percentFrom: ScaleBeforeCompare | null = null;
+  /**
+   * Main bars array a pending resetData() replaces. The main series commits a
+   * reset (or any reload) by assigning a new array, so a different array
+   * means compares waiting on the reset can load the new window.
+   */
+  private resetFrom: readonly Bar[] | null = null;
   private destroyed = false;
   private readonly sync = (): void => this.syncWithMainSeries();
   private readonly onScaleChanged = (change: ScaleChange): void => {
@@ -207,19 +217,31 @@ export class CompareController implements WidgetController {
     const listed = context.compare.some((item) => item.id === key);
     if (!series && !listed) return false;
     if (series) this.teardown(series);
+    if (!this.series.size) this.resetFrom = null;
     if (listed) context.compare = context.compare.filter((item) => item.id !== key);
     if (!context.compare.length) this.leavePercent();
     context.requestPaint();
     return true;
   }
 
-  /** resetData(): refetch every compare series, including ones whose last reload failed. */
+  /**
+   * resetData(): refetch every compare series, including ones whose last
+   * reload failed. Call it right after the main series starts its reset: the
+   * refetch waits until the main series commits new bars, then covers that
+   * window, because the pre-reset window of a stale main series would leave a
+   * gap up to now that live ticks never fill. Compares keep their bars and
+   * live ticks meanwhile. A compare whose last reload failed is retried at
+   * once as well, so it recovers even if the main reset fails.
+   */
   reload(): void {
     if (this.isDestroyed()) return;
     this.reconcile();
-    for (const series of this.series.values()) {
+    if (!this.series.size) return;
+    this.resetFrom = this.host.context.bars;
+    for (const series of Array.from(this.series.values())) {
       series.pageFailedFrom = null;
-      this.reloadSeries(series);
+      series.resetPending = true;
+      if (series.failedKey !== null) this.reloadSeries(series);
     }
   }
 
@@ -325,6 +347,8 @@ export class CompareController implements WidgetController {
       pendingKey: null,
       failedKey: null,
       pageFailedFrom: null,
+      // Loaded over the pre-reset window while a reset runs: refetch it too.
+      resetPending: this.resetFrom !== null,
       subscription: null,
     };
     this.series.set(id, series);
@@ -491,9 +515,19 @@ export class CompareController implements WidgetController {
   private syncWithMainSeries(): void {
     if (this.isDestroyed()) return;
     this.reconcile();
-    if (!this.series.size) return;
+    if (!this.series.size) {
+      this.resetFrom = null;
+      return;
+    }
+    const mainReset = this.resetFrom !== null && this.host.context.bars !== this.resetFrom;
+    if (mainReset) this.resetFrom = null;
     const key = targetKey(this.mainTarget());
     for (const series of Array.from(this.series.values())) {
+      if (mainReset && series.resetPending) {
+        series.resetPending = false;
+        this.reloadSeries(series);
+        continue;
+      }
       const wanted = series.pending === "reload" ? series.pendingKey : targetKey(series.target);
       // Guard the entry's resolution too: the painter maps compare bars with
       // it, so it must never disagree with the chart once no reload runs.

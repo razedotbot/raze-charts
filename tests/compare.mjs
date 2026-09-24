@@ -85,6 +85,15 @@ function makeFeed() {
     failingHistory: new Map([["BROKEN@1", "history backend offline"]]),
     /** symbols whose resolveSymbol never answers. */
     hanging: new Set(),
+    /** Unix second the feed has data until (exclusive); null means up to the request's `to`. */
+    endAt: null,
+    /** symbols whose getBars answers wait for release(). */
+    held: new Set(),
+    heldAnswers: [],
+    release() {
+      feed.held.clear();
+      for (const answer of feed.heldAnswers.splice(0)) answer();
+    },
     onReady(callback) { queueMicrotask(() => callback({ supported_resolutions: ["1", "5", "15"] })); },
     searchSymbols(_input, _exchange, _type, callback) { callback([]); },
     resolveSymbol(name, onResolve, onError) {
@@ -104,11 +113,14 @@ function makeFeed() {
       const step = STEP_SEC[resolution];
       const bars = [];
       const start = Math.max(params.from, DATA_START);
-      for (let t = Math.ceil(start / step) * step; t < params.to; t += step) {
+      const end = feed.endAt === null ? params.to : Math.min(params.to, feed.endAt);
+      for (let t = Math.ceil(start / step) * step; t < end; t += step) {
         const close = info.name.length * 100 + (t / step) % 17;
         bars.push({ time: t * 1000, open: close, high: close + 1, low: close - 1, close, volume: 1 });
       }
-      queueMicrotask(() => onResult(bars, { noData: bars.length === 0 }));
+      const answer = () => queueMicrotask(() => onResult(bars, { noData: bars.length === 0 }));
+      if (feed.held.has(info.name)) feed.heldAnswers.push(answer);
+      else answer();
     },
     subscribeBars(info, resolution, onTick, guid, onReset) {
       feed.subscriptions.set(guid, { symbol: info.name, resolution, onTick, onReset, guid });
@@ -340,6 +352,8 @@ function makeHost(feed, symbol = "AAA") {
   await spinUntil(() => feed.callsFor("BBB").length > callsBeforeReset && feed.subscriptionFor("BBB").length === 1, "the compare reset reload");
   assert(feed.callsFor("BBB").at(-1).firstDataRequest === true, "onResetCacheNeeded refetches the compare");
   const callsBeforeApiReset = feed.callsFor("BBB").length;
+  // The resetData() dep: the main series resets, then the compares follow it.
+  data.resetData();
   compare.reload();
   await spinUntil(() => feed.callsFor("BBB").length > callsBeforeApiReset && feed.subscriptionFor("BBB").length === 1, "the resetData reload");
   assert(feed.subscriptionFor("BBB").length === 1, "a reset keeps exactly one live compare subscription");
@@ -359,9 +373,19 @@ function makeHost(feed, symbol = "AAA") {
   assert(entry().bars.length === 0 && entry().resolution === "5", "a failed reload shows no bars of the old resolution");
   assert(callsAt5() === callsAt5Before + 1, "later main updates do not hammer a failing compare");
   feed.failingHistory.delete("BBB@5");
-  compare.reload();
-  await spinUntil(() => entry().bars.length > 0 && feed.subscriptionFor("BBB").length === 1, "the retried reload");
-  assert(stepOf(entry().bars) === 300, "resetData retries a failed compare reload");
+  // The main reset fails here, so no new main bars arrive; the failed compare is retried anyway.
+  feed.failingHistory.set("AAA@5", "main history offline");
+  const resetErrors = await captureErrors(async () => {
+    data.resetData();
+    compare.reload();
+    await spinUntil(
+      () => entry().bars.length > 0 && feed.subscriptionFor("BBB").length === 1 && feed.subscriptionFor("AAA").length === 1,
+      "the retried reload and the failed main reset",
+    );
+  });
+  feed.failingHistory.delete("AAA@5");
+  assert(resetErrors.length === 1 && /data reset failed/.test(resetErrors[0]), "the failing main reset is reported");
+  assert(stepOf(entry().bars) === 300, "resetData retries a failed compare reload even when the main reset fails");
 
   // Removal unsubscribes and restores the scale mode the compare replaced.
   const beforeRemove = feed.subscriptionFor("BBB")[0];
@@ -551,6 +575,89 @@ function makeHost(feed, symbol = "AAA") {
   data.destroy();
 }
 
+{
+  // resetData() after the main series went stale (a dead feed, the usual
+  // reason to reset): the compare refetches over the main series' reloaded
+  // window, up to its new last bar, not over the stale pre-reset window.
+  const feed = makeFeed();
+  const { context, data, compare } = makeHost(feed);
+  const deadSince = Math.floor(Date.now() / 1000) - 3 * 3600;
+  feed.endAt = deadSince;
+  await data.resolveAndLoad();
+  const id = await compare.create("BBB");
+  const entry = () => context.compare.find((item) => item.id === id);
+  const staleLast = context.bars.at(-1).time;
+  assert(staleLast < deadSince * 1000 && entry().bars.at(-1).time === staleLast, "the compare ends where the stale main series ends");
+  // Scroll far back, so the stale window is much deeper than a reset reloads.
+  for (let page = 0; page < 3; page += 1) {
+    context.setViewport({ from: 0, to: 60 }, "pan");
+    await data.maybeLoadMoreHistory();
+  }
+  await spinUntil(() => entry().bars[0].time === context.bars[0].time && feed.subscriptionFor("BBB").length === 1, "the compare to page with the main series");
+  const staleLength = context.bars.length;
+
+  feed.endAt = null;
+  const callsBeforeReset = feed.callsFor("BBB").length;
+  data.resetData();
+  compare.reload();
+  assert(feed.callsFor("BBB").length === callsBeforeReset, "resetData() waits for the main reset before refetching compares");
+  await spinUntil(
+    () => feed.callsFor("BBB").length > callsBeforeReset
+      && feed.subscriptionFor("BBB").length === 1
+      && entry().bars.at(-1)?.time === context.bars.at(-1).time,
+    "the compare to follow the main reset",
+  );
+  assert(context.bars.at(-1).time > staleLast + 3600_000, "the main reset loads up to now");
+  const resetCall = feed.callsFor("BBB")[callsBeforeReset];
+  assert(feed.callsFor("BBB").length === callsBeforeReset + 1 && resetCall.firstDataRequest === true, "one reset refetches the compare once");
+  assert(
+    resetCall.from === Math.floor(context.bars[0].time / 1000)
+      && resetCall.to === Math.floor(context.bars.at(-1).time / 1000) + 60
+      && resetCall.countBack === context.bars.length,
+    "the compare reset request covers the reloaded main window",
+  );
+  assert(resetCall.countBack < staleLength, "the reset does not refetch the deep pre-reset window");
+  assert(
+    entry().bars[0].time === context.bars[0].time && entry().bars.at(-1).time === context.bars.at(-1).time && stepOf(entry().bars) === 60,
+    "after resetData() the compare covers the main series up to its new last bar",
+  );
+  const [liveAfterReset] = feed.subscriptionFor("BBB");
+  liveAfterReset.onTick({ time: context.bars.at(-1).time + 60_000, open: 1, high: 1, low: 1, close: 5 });
+  assert(entry().bars.at(-1).close === 5, "live compare ticks continue after the reset");
+
+  // A compare created while the reset runs loads over the stale window, so it
+  // follows the reset too.
+  feed.endAt = deadSince;
+  data.resetData();
+  await spinUntil(() => context.bars.at(-1).time < deadSince * 1000, "the main series to go stale again");
+  const staleAgain = context.bars.at(-1).time;
+  feed.endAt = null;
+  feed.held.add("AAA");
+  const callsBeforeLate = feed.callsFor("BBB").length;
+  data.resetData();
+  compare.reload();
+  const lateId = await compare.create("DDDD");
+  const late = () => context.compare.find((item) => item.id === lateId);
+  assert(
+    context.bars.at(-1).time === staleAgain && late().bars.at(-1).time === staleAgain,
+    "a compare created while the main reset runs loads over the stale window",
+  );
+  const lateCalls = feed.callsFor("DDDD").length;
+  feed.release();
+  await spinUntil(
+    () => context.bars.at(-1).time > deadSince * 1000
+      && late().bars.at(-1)?.time === context.bars.at(-1).time
+      && entry().bars.at(-1)?.time === context.bars.at(-1).time,
+    "both compares to follow the main reset",
+  );
+  assert(
+    feed.callsFor("BBB").length === callsBeforeLate + 1 && feed.callsFor("DDDD").length === lateCalls + 1,
+    "a compare created during a reset refetches once the reset commits, like the others",
+  );
+  compare.destroy();
+  data.destroy();
+}
+
 // ── Part B: the built widget, end to end ───────────────────────────────────
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true });
 const { window } = dom;
@@ -622,13 +729,44 @@ const { widget } = await import("../dist/charting_library.esm.js");
   assert(feed.unsubscribed.includes(guid) && instance.save().compare.length === 0, "removeEntity unsubscribes the compare");
   assert(instance.save().percentScale === false, "removing the last compare restores the price scale");
 
-  // Layout restore brings compares back live; an unresolvable one rejects the load.
+  // Layout restore brings compares back live.
   const snapshot = { ...instance.save(), compare: ["BBB"] };
   await instance.load(snapshot);
   assert(instance.save().compare.join() === "BBB" && feed.subscriptionFor("BBB").length === 1, "layout load restores a live compare");
-  const badLoad = await rejection(instance.load({ ...snapshot, compare: ["NOPE"] }));
-  assert(/compare symbol "NOPE" could not be resolved/.test(badLoad?.message ?? ""), "a layout with an unresolvable compare rejects");
-  assert(instance.save().compare.join() === "BBB", "a rejected layout load keeps the committed compares");
+
+  // A layout with another symbol and interval and a compare that no longer
+  // resolves loads fully without that compare, and reports it once.
+  await api.createShape({ time: Math.floor(Date.now() / 1000) - 600, price: 101 }, { shape: "horizontal_line" });
+  const current = instance.save();
+  assert(
+    current.symbol === "AAA" && current.interval === "5" && current.compare.join() === "BBB" && current.drawings.length === 1,
+    "the live chart has a compare and a drawing before the layout load",
+  );
+  const layout = {
+    ...current,
+    symbol: "CCCC",
+    interval: "15",
+    drawings: [{ id: "layout_line", shape: "horizontal_line", points: [{ time: Math.floor(Date.now() / 1000) - 7200, price: 250 }] }],
+    compare: ["BBB", "NOPE"],
+  };
+  let loadError = null;
+  const loadErrors = await captureErrors(async () => {
+    loadError = await rejection(instance.load(layout));
+  });
+  assert(loadError === null, "a layout with an unresolvable compare still loads");
+  const loaded = instance.save();
+  assert(loaded.symbol === "CCCC" && loaded.interval === "15", "the loaded symbol and interval come from the layout");
+  assert(loaded.drawings.map((drawing) => drawing.id).join() === "layout_line", "the loaded drawings replace the previous chart's drawings");
+  assert(loaded.compare.join() === "BBB", "the unresolvable compare is skipped and the others are restored");
+  const [restoredSub] = feed.subscriptionFor("BBB");
+  assert(
+    feed.subscriptionFor("BBB").length === 1 && restoredSub.resolution === "15" && feed.callsFor("BBB").at(-1).resolution === "15",
+    "the restored compare is loaded and live at the layout's interval",
+  );
+  assert(
+    loadErrors.length === 1 && /restore compare "NOPE"/.test(loadErrors[0]) && /could not be resolved: unknown symbol/.test(loadErrors[0]),
+    "the skipped compare is reported once with its symbol and reason",
+  );
 
   const liveGuid = feed.subscriptionFor("BBB")[0].guid;
   instance.remove();
