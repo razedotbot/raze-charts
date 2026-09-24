@@ -151,7 +151,12 @@ try {
     const { budgets } = loadBudgets();
     const table = renderDocsTable(budgets, pkg.name);
     assert.ok(table.startsWith(DOCS_START) && table.endsWith(DOCS_END));
-    assert.match(table, /\| Root financial widget \(`@razedotbot\/charts`\) \| Published artifact \| `charting_library\.esm\.js` \| 55 KiB \|/);
+    const rootKiB = budgets.find((budget) => budget.entry.id === "root").artifact.gzipBytes / 1024;
+    assert.ok(Number.isInteger(rootKiB), "the root artifact budget is a whole number of KiB");
+    assert.ok(
+      table.includes(`| Root financial widget (\`@razedotbot/charts\`) | Published artifact | \`charting_library.esm.js\` | ${rootKiB} KiB |`),
+      "the root artifact row shows benchmarks/budgets/root.json",
+    );
     assert.match(table, /\| \| Scenario: Line-only mount \| `import \{ defineChart, line, mountChart \}` \| \d+(?:\.\d+)? KiB \|/);
     const docs = readFileSync(resolve(root, "docs/performance.md"), "utf8");
     assert.equal(docsDrift(docs, budgets, pkg.name), null, "docs/performance.md is in sync");
@@ -160,7 +165,8 @@ try {
   await test("a docs table that disagrees with the budgets is detected and rewritten", () => {
     const { budgets } = loadBudgets();
     const docs = readFileSync(resolve(root, "docs/performance.md"), "utf8");
-    const stale = docs.replace(/\| 55 KiB \|/, "| 52 KiB |");
+    const rootKiB = budgets.find((budget) => budget.entry.id === "root").artifact.gzipBytes / 1024;
+    const stale = docs.replace(`| ${rootKiB} KiB |`, `| ${rootKiB - 3} KiB |`);
     assert.notEqual(stale, docs);
     assert.match(docsDrift(stale, budgets, pkg.name), /disagrees with benchmarks\/budgets\/\*\.json; run "node scripts\/check-bundle-size\.mjs --write-docs"/);
     assert.equal(writeDocsTable(stale, budgets, pkg.name), docs);
