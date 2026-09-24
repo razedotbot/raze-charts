@@ -96,6 +96,44 @@ The financial widget owns the host DOM and wires five responsibilities:
 5. Toolbar, sidebar, interval selector, scale bar, menus, and loading state are
    optional chrome around the plot.
 
+### Widget composition
+
+`Widget` (the exported `widget` class) is a thin facade. Its only runtime
+surface is the documented `IChartingLibraryWidget` methods; all state lives in
+one `#private` `WidgetRuntime` (`src/core/widget/runtime.ts`). The runtime
+builds the `ChartContext`, owns the kernel (data manager, stores, engine,
+renderer) and drives the controllers registered in
+`src/core/widget/controllers.ts` through four phases:
+
+```text
+create   controllers in list order; DOM the engine measures (chrome shell, layout grid)
+attach   kernel exists; plot chrome, API wiring, event forwarding, context menu
+boot     first load settled; header controls, layout children, shortcuts
+destroy  reverse list order, after the kernel stops
+```
+
+The built-in controllers are chrome, layout, API, events, actions, compare,
+persistence and context menu. `LifecycleController` sits beside them and owns
+readiness, teardown state and the "newest data change wins" rule. A new
+controller implements `WidgetController`, adds its id to `WidgetControllerMap`
+through declaration merging, and appends itself to the list.
+
+`ChartApi` is composed the same way: each module in `src/core/api/*` exports
+`this: ChartApi` methods, `src/core/api/index.ts` lists them, and they are
+installed on the prototype as non-enumerable methods. Per-instance state is
+held in a module-private `WeakMap` (`apiScope(this)`), so an instance has no
+own properties. Two modules cannot define the same method.
+
+Canvas interaction follows the same pattern. `src/engine/gestures.ts` owns
+the listeners, pointer bookkeeping, pinch and long press, and the active
+`DragSession`. It routes every press, wheel, double-click and key to the
+`InteractionHandler`s listed in `src/engine/interaction/handlers.ts`, ordered
+by ascending `priority`: drawing draft 100, trading lines 200, drawing edit
+300, price axis 400, time axis 500, viewport 1000. The first handler to
+return a truthy result consumes the event. A handler that returns a session
+owns the drag: the session commits on the last pointer up, and it rolls back
+on pointer cancel or when a second finger turns the gesture into a pinch.
+
 ### Time is a logical bar axis
 
 Financial time is not a wall-clock ruler. A Friday bar and the next Monday bar
@@ -420,9 +458,12 @@ src/
   chart/       typed native grammar, scales, scene compiler (compile/),
                SVG/Canvas output and mounts (render/)
   react/       lifecycle adapter and Recharts-shaped descriptors
-  core/        financial widget, API, context, theme, shape state
+  core/        financial widget facade, API, context, theme, shape state
+    widget/    widget runtime, lifecycle and controllers
+    api/       ChartApi method modules
   data/        financial feed orchestration and TimeIndex
-  engine/      financial layout, interactions, renderer, Canvas paint layers
+  engine/      financial layout, gesture coordinator, renderer, Canvas paint layers
+    interaction/  pointer, wheel and keyboard handlers
   studies/     built-in calculations, registry, active study state
                (index.ts is the /studies entrypoint)
   types/       TradingView-compatible declarations: barrel over tv/ modules
