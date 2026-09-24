@@ -326,6 +326,13 @@ export interface AxisFormatters {
   formatX(value: unknown): string;
   /** Formats Y values for tooltips, chips and rule labels; honors scales.y.tickFormat. */
   formatY(value: unknown): string;
+  /**
+   * Formats a computed Y value that is not in the data (a radar ring label):
+   * as {@link AxisFormatters.formatY}, except that without a tickFormat a
+   * number keeps its own precision, so the data's precision never rounds it
+   * (the 2.5 ring over integer data reads 2.5, not 3).
+   */
+  formatYValue(value: unknown): string;
 }
 
 /** The data each axis formats, for data-precision value labels. */
@@ -348,7 +355,7 @@ export function axisFormatters(spec: ChartSpec, xType: XScaleKind, data?: AxisFo
   let formatXNumber: NumberFormatter | null = null;
   let formatXTime: ((value: unknown) => string) | null = null;
   let formatYNumber: NumberFormatter | null = null;
-  return {
+  const formatters: AxisFormatters = {
     formatX: (value: unknown): string => {
       if (xTickFormat) return xTickFormat(value);
       if (xType === "time") return (formatXTime ??= timeValueFormatter(xNumbers()))(value);
@@ -364,5 +371,9 @@ export function axisFormatters(spec: ChartSpec, xType: XScaleKind, data?: AxisFo
       if (typeof value === "number" && !data?.yBand) return (formatYNumber ??= valueFormatter(data?.yValues ?? []))(value);
       return String(value ?? "");
     },
+    formatYValue: (value: unknown): string => (
+      !yTickFormat && typeof value === "number" && !data?.yBand ? formatNum(value) : formatters.formatY(value)
+    ),
   };
+  return formatters;
 }

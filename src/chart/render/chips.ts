@@ -3,6 +3,7 @@
 
 import type { HoverSample, CompiledChart, SceneNode } from "../compile/types";
 import type { AnyScale, BandScale, LinearScale } from "../scales";
+import type { SceneHoverSample } from "../sceneTypes";
 import { chartColorWithOpacity, readableTextColor } from "../theme";
 import { esc, hair, traceRoundRect } from "./primitives";
 
@@ -140,7 +141,10 @@ export interface CrosshairTarget {
   y: number;
 }
 
-/** Value-axis crosshair chip text. */
+/**
+ * Value-axis crosshair chip text, through the scene's Y formatter: the
+ * hovered datum's own value on a line or point, never a pixel read back.
+ */
 export function crosshairValueLabel(c: CompiledChart, target: CrosshairTarget): string {
   const { hit, sample, isBar, isLine, isPoint, scanY, y } = target;
   if (c.yScale.kind === "band") return bandLabel(c.yScale, scanY, c.formatters?.y);
@@ -152,7 +156,11 @@ export function crosshairValueLabel(c: CompiledChart, target: CrosshairTarget): 
   const format = c.formatters?.y ?? ((value: number): string => (
     Number.isInteger(value) ? String(value) : value.toFixed(Math.abs(value) < 1 ? 2 : 1)
   ));
-  if ((isLine || isPoint) && sample) return format((c.yScale as LinearScale).invert(sample.y));
+  // The hovered datum's own value on a line or point, never a pixel read back.
+  if ((isLine || isPoint) && sample) {
+    const value = (sample as Partial<SceneHoverSample>).yValue;
+    return format(typeof value === "number" ? value : (c.yScale as LinearScale).invert(sample.y));
+  }
   return format((c.yScale as LinearScale).invert(y));
 }
 

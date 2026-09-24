@@ -67,7 +67,7 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
 | | Scenario: Widget only | `import { widget }` | 63 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 50 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 51 KiB |
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 38 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 27 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
@@ -101,6 +101,25 @@ exact-decimal steps chosen against the tick budget, decade-aware log ticks
 with a sub-decade linear fallback, and nice-domain iteration add about
 0.8 KiB to `src/chart/scales.ts`, which every Cartesian chart imports.
 Together with the colour-blind theme presets the artifact grows about 1.2 KiB.
+
+Wave 1B package W1B-02 (native marks and legend) raised the native artifact
+from 44 to 50 KiB, its "Line-only mount" and "Static line SVG" scenarios from
+33 to 38 KiB and from 23 to 27 KiB, and the React "React LineChart" scenario
+from 37 to 41 KiB. Measured on that branch, the artifact grew from 42.96 to
+49.19 KiB (unminified, so every name counts). The growth is the measured legend
+layout (wrapping rows, the compacting side column, `+N more`, text metrics and
+ellipsis) and its shared SVG/Canvas painter (about 2.9 KiB), stable series ids
+with disambiguated names and reversible hidden rows (about 1 KiB), structured
+hover samples, rule-label options, zero-bar hit proxies and the curve-following
+ranged-area fill (about 1.5 KiB), and the validation of the new mark options
+(about 0.8 KiB). Its review fixes then raised the artifact budget from 50 to
+51 KiB. With legend toggles that can show series hidden through
+`hiddenSeries` (the keys that hide each row), numbered rows for reused
+explicit names, a second legend-planning pass for plugin rows, legend rows for
+hidden plugins and value chips formatted from the datum, the artifact measured
+50.15 KiB. That is about 0.4 KiB of new code, less 0.2 KiB saved by dropping
+the renderer's duplicate monotone-tangent code in favour of the compiler's
+copy. The scenario budgets did not change.
 
 The root artifact budget was raised from 55 KiB to the 72 KiB hard cap set by
 architecture decision AD-01, and the "Widget only" scenario from 49 KiB to

@@ -13,16 +13,30 @@ import { asNumber, isBandCategory, isRecord, isRuntimeArray, readChannel, stackK
 import type { ChartPerformanceOptions, ChartSpec, MarkKind } from "./types";
 
 const BUILTIN_MARK_KEYS: Record<MarkKind, ReadonlySet<string>> = {
-  line: new Set(["kind", "data", "x", "y", "name", "stroke", "strokeWidth", "lastValue", "dashed", "curve"]),
-  area: new Set(["kind", "data", "x", "y", "y0", "name", "stroke", "fill", "fillOpacity", "strokeWidth", "lastValue", "dashed", "curve"]),
-  bar: new Set(["kind", "data", "x", "y", "name", "fill", "stackId", "lastValue", "fade"]),
-  point: new Set(["kind", "data", "x", "y", "name", "fill", "fillOpacity", "r"]),
-  ruleY: new Set(["kind", "data", "y", "name", "stroke", "strokeWidth"]),
-  ruleX: new Set(["kind", "data", "x", "name", "stroke", "strokeWidth"]),
-  pie: new Set(["kind", "data", "name", "valueKey", "labelKey", "innerRadius", "outerRadius"]),
-  radar: new Set(["kind", "data", "x", "y", "name", "stroke", "fill", "fillOpacity", "strokeWidth"]),
-  heatmap: new Set(["kind", "data", "x", "y", "name", "valueKey", "valueFormat"]),
+  line: new Set(["kind", "data", "x", "y", "name", "id", "stroke", "strokeWidth", "lastValue", "dashed", "curve"]),
+  area: new Set(["kind", "data", "x", "y", "y0", "name", "id", "stroke", "stroke0", "fill", "fillOpacity", "strokeWidth", "lastValue", "dashed", "curve"]),
+  bar: new Set(["kind", "data", "x", "y", "name", "id", "fill", "stackId", "lastValue", "fade", "minBarHeight"]),
+  point: new Set(["kind", "data", "x", "y", "name", "id", "fill", "fillOpacity", "r"]),
+  ruleY: new Set(["kind", "data", "y", "name", "id", "stroke", "strokeWidth", "dashed", "label", "labelPosition"]),
+  ruleX: new Set(["kind", "data", "x", "name", "id", "stroke", "strokeWidth", "dashed", "label", "labelPosition"]),
+  pie: new Set(["kind", "data", "name", "id", "valueKey", "labelKey", "innerRadius", "outerRadius"]),
+  radar: new Set(["kind", "data", "x", "y", "name", "id", "stroke", "fill", "fillOpacity", "strokeWidth"]),
+  heatmap: new Set(["kind", "data", "x", "y", "name", "id", "valueKey", "valueFormat"]),
 };
+
+/** Marks' `name` and `id` must be strings; ids must also be non-empty. */
+function validateSeriesIdentity(mark: ChartMark, index: number): void {
+  if (mark.name !== undefined && typeof mark.name !== "string") {
+    throw new ChartCompileError("E_MARK_OPTION", `marks[${index}].name must be a string.`);
+  }
+  const id: unknown = mark.id;
+  if (id !== undefined && (typeof id !== "string" || !id.trim())) {
+    throw new ChartCompileError(
+      "E_MARK_OPTION",
+      `marks[${index}].id must be a non-empty string; it keys legend toggles and hiddenSeries.`,
+    );
+  }
+}
 
 function validateBuiltinMarkOptions(mark: BuiltinChartMark, index: number): void {
   const allowed = BUILTIN_MARK_KEYS[mark.kind];
@@ -40,9 +54,6 @@ function validateBuiltinMarkOptions(mark: BuiltinChartMark, index: number): void
     if (value !== undefined && typeof value !== "string" && typeof value !== "function") {
       throw new ChartCompileError("E_MARK_CHANNEL", `marks[${index}].${key} must be a property name or accessor function.`);
     }
-  }
-  if (mark.name !== undefined && typeof mark.name !== "string") {
-    throw new ChartCompileError("E_MARK_OPTION", `marks[${index}].name must be a string.`);
   }
   for (const key of ["stroke", "fill"] as const) {
     const value = values[key];
@@ -78,6 +89,38 @@ function validateBuiltinMarkOptions(mark: BuiltinChartMark, index: number): void
   }
   if (values.y0 !== undefined && typeof values.y0 !== "string" && typeof values.y0 !== "function") {
     throw new ChartCompileError("E_MARK_CHANNEL", `marks[${index}].y0 must be a property name or accessor function.`);
+  }
+  const stroke0 = values.stroke0;
+  if (stroke0 !== undefined) {
+    if (typeof stroke0 !== "boolean" && (typeof stroke0 !== "string" || !stroke0.trim())) {
+      throw new ChartCompileError(
+        "E_MARK_OPTION",
+        `marks[${index}].stroke0 must be a boolean or a non-empty CSS color string.`,
+      );
+    }
+    if (values.y0 === undefined) {
+      throw new ChartCompileError(
+        "E_MARK_OPTION",
+        `marks[${index}].stroke0 strokes a ranged area's lower edge and requires a y0 channel.`,
+      );
+    }
+  }
+  const minBarHeight = values.minBarHeight;
+  if (minBarHeight !== undefined && (
+    typeof minBarHeight !== "number" || !Number.isFinite(minBarHeight) || minBarHeight < 0
+  )) {
+    throw new ChartCompileError("E_MARK_OPTION", `marks[${index}].minBarHeight must be a finite non-negative number of pixels.`);
+  }
+  const label = values.label;
+  if (label !== undefined && label !== false && typeof label !== "string") {
+    throw new ChartCompileError("E_MARK_OPTION", `marks[${index}].label must be a string, or false for no label.`);
+  }
+  const labelPosition = values.labelPosition;
+  if (labelPosition !== undefined && labelPosition !== "start" && labelPosition !== "middle" && labelPosition !== "end") {
+    throw new ChartCompileError(
+      "E_MARK_OPTION",
+      `marks[${index}].labelPosition must be "start", "middle", or "end"; received ${String(labelPosition)}.`,
+    );
   }
 }
 
@@ -337,6 +380,7 @@ function validateMark(mark: ChartMark, index: number): void {
   if (!mark || !isRuntimeArray(mark.data)) {
     throw new ChartCompileError("E_MARK_DATA", `marks[${index}].data must be an array.`);
   }
+  validateSeriesIdentity(mark, index);
   if (!BUILTIN_MARK_KINDS.has(mark.kind as MarkKind) && !mark.plugin) {
     throw new ChartCompileError(
       "E_MARK_KIND",
@@ -362,7 +406,7 @@ function validateMark(mark: ChartMark, index: number): void {
         `Mark kind "${mark.kind}" does not match plugin kind "${mark.plugin.kind}".`,
       );
     }
-    const pluginKeys = new Set(["kind", "data", "plugin", "pluginOptions", "name", "stroke", "fill"]);
+    const pluginKeys = new Set(["kind", "data", "plugin", "pluginOptions", "name", "id", "stroke", "fill"]);
     for (const key of Object.keys(mark)) {
       if (!pluginKeys.has(key)) {
         throw new ChartCompileError(
@@ -469,6 +513,34 @@ function validateMark(mark: ChartMark, index: number): void {
   }
 }
 
+/**
+ * Series ids key legend toggles and `hiddenSeries`, so they must be unique.
+ * An explicit id may not reuse another mark's default `mark-<index>` either.
+ */
+function validateSeriesIds(marks: readonly ChartMark[]): void {
+  const owners = new Map<string, number>();
+  for (let index = 0; index < marks.length; index++) owners.set(`mark-${index}`, index);
+  const explicit = new Map<string, number>();
+  marks.forEach((mark, index) => {
+    if (mark.id === undefined) return;
+    const earlier = explicit.get(mark.id);
+    if (earlier !== undefined) {
+      throw new ChartCompileError(
+        "E_MARK_OPTION",
+        `marks[${index}].id "${mark.id}" duplicates marks[${earlier}].id. Series ids must be unique.`,
+      );
+    }
+    explicit.set(mark.id, index);
+    const owner = owners.get(mark.id);
+    if (owner !== undefined && owner !== index && marks[owner]!.id === undefined) {
+      throw new ChartCompileError(
+        "E_MARK_OPTION",
+        `marks[${index}].id "${mark.id}" collides with the default id of marks[${owner}]. Choose another id.`,
+      );
+    }
+  });
+}
+
 /** Heatmap and pie stand alone; radar overlays only radar; polar charts take no Cartesian scales. */
 function validateComposition(spec: ChartSpec): void {
   const heatmaps = spec.marks.filter((mark) => isBuiltinKind(mark, "heatmap"));
@@ -527,5 +599,6 @@ export function validateChartSpec(spec: ChartSpec, width: number, height: number
   validateScaleSpec("x", spec.scales?.x, hasHeatmap);
   validateScaleSpec("y", spec.scales?.y, hasHeatmap);
   for (let index = 0; index < spec.marks.length; index++) validateMark(spec.marks[index]!, index);
+  validateSeriesIds(spec.marks);
   validateComposition(spec);
 }

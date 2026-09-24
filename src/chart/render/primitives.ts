@@ -1,6 +1,9 @@
 // Geometry and styling primitives shared by the SVG and Canvas renderers:
 // escaping, pixel snapping, curve and arc paths, rounded bars, and shading.
 
+// One tangent implementation for the stroked curve and the compiler's flattened
+// ranged-area fill, so the fill always lies on its stroke.
+import { monotoneTangents } from "../compile/curve";
 import type { ChartCurve, SceneNode } from "../compile/types";
 import { formatChartColor, parseChartColor } from "../theme";
 
@@ -17,37 +20,6 @@ export function round(n: number): string {
 /** Center a 1px stroke on the pixel grid. */
 export function hair(n: number): number {
   return Math.round(n) + 0.5;
-}
-
-/** Fritsch–Carlson monotone cubic. No Catmull overshoot on peaks. */
-function monotoneTangents(pts: readonly { x: number; y: number }[]): number[] {
-  const n = pts.length;
-  const m: number[] = [];
-  for (let i = 0; i < n - 1; i++) {
-    const dx = pts[i + 1]!.x - pts[i]!.x;
-    m[i] = dx === 0 ? 0 : (pts[i + 1]!.y - pts[i]!.y) / dx;
-  }
-  const t: number[] = [m[0]!];
-  for (let i = 1; i < n - 1; i++) {
-    t[i] = m[i - 1]! * m[i]! <= 0 ? 0 : (m[i - 1]! + m[i]!) / 2;
-  }
-  t[n - 1] = m[n - 2]!;
-  for (let i = 0; i < n - 1; i++) {
-    if (Math.abs(m[i]!) < 1e-12) {
-      t[i] = 0;
-      t[i + 1] = 0;
-      continue;
-    }
-    const a = t[i]! / m[i]!;
-    const b = t[i + 1]! / m[i]!;
-    const sum = a * a + b * b;
-    if (sum > 9) {
-      const factor = 3 / Math.sqrt(sum);
-      t[i] = factor * a * m[i]!;
-      t[i + 1] = factor * b * m[i]!;
-    }
-  }
-  return t;
 }
 
 function monotonePath(pts: readonly { x: number; y: number }[]): string {

@@ -10,6 +10,8 @@ export interface ChartMarkBase {
   x?: Accessor<never> | string;
   y?: Accessor<never> | string;
   name?: string;
+  /** Stable series id for legends, `hiddenSeries` and hover payloads. Defaults to `mark-<index>`. */
+  id?: string;
   key?: Accessor<never> | string;
   stroke?: string;
   fill?: string;
@@ -29,13 +31,24 @@ export interface ChartMarkBase {
   fade?: boolean;
   curve?: ChartCurve;
   y0?: Accessor<never> | string;
+  /** Ranged-area lower-edge stroke: `true` for the series colour, or a CSS colour. */
+  stroke0?: string | boolean;
+  /** Minimum painted height, in pixels, for non-zero bars. Zero stays empty. */
+  minBarHeight?: number;
+  /** Reference-rule label text, or `false` for none. */
+  label?: string | false;
+  /** Where a reference-rule label sits along the rule. */
+  labelPosition?: RuleLabelPosition;
 }
+
+/** Reference-rule label placement along the rule: its start (left/top), middle, or end (right/bottom). */
+export type RuleLabelPosition = "start" | "middle" | "end";
 
 type BuiltinBase = Omit<
   ChartMarkBase,
   "x" | "y" | "key" | "stroke" | "fill" | "fillOpacity" | "strokeWidth" | "r"
   | "stackId" | "innerRadius" | "outerRadius" | "angleKey" | "valueKey" | "labelKey"
-  | "lastValue" | "dashed" | "fade" | "curve" | "y0"
+  | "lastValue" | "dashed" | "fade" | "curve" | "y0" | "stroke0" | "minBarHeight" | "label" | "labelPosition"
 > & { plugin?: never; pluginOptions?: never };
 type BuiltinCartesian = BuiltinBase & { x: Accessor<never> | string; y: Accessor<never> | string };
 
@@ -57,6 +70,7 @@ export type AreaChartMark = BuiltinCartesian & {
   dashed?: boolean;
   curve?: ChartCurve;
   y0?: Accessor<never> | string;
+  stroke0?: string | boolean;
 };
 export type BarChartMark = BuiltinCartesian & {
   kind: "bar";
@@ -64,6 +78,7 @@ export type BarChartMark = BuiltinCartesian & {
   stackId?: string;
   lastValue?: boolean;
   fade?: boolean;
+  minBarHeight?: number;
 };
 export type PointChartMark = BuiltinCartesian & {
   kind: "point";
@@ -76,12 +91,18 @@ export type RuleYChartMark = BuiltinBase & {
   y: Accessor<never> | string;
   stroke?: string;
   strokeWidth?: number;
+  dashed?: boolean;
+  label?: string | false;
+  labelPosition?: RuleLabelPosition;
 };
 export type RuleXChartMark = BuiltinBase & {
   kind: "ruleX";
   x: Accessor<never> | string;
   stroke?: string;
   strokeWidth?: number;
+  dashed?: boolean;
+  label?: string | false;
+  labelPosition?: RuleLabelPosition;
 };
 export type PieChartMark = BuiltinBase & {
   kind: "pie";
@@ -124,7 +145,7 @@ export type BuiltinChartMark =
   | HeatmapChartMark;
 
 /** A custom layer. Use customMark() so data and options remain inferred. */
-export type PluginChartMark = Pick<ChartMarkBase, "data" | "name"> & {
+export type PluginChartMark = Pick<ChartMarkBase, "data" | "name" | "id"> & {
   kind: string;
   plugin: ErasedMarkPlugin;
   pluginOptions: unknown;
@@ -160,7 +181,13 @@ export function isBuiltinKind<K extends MarkKind>(
 }
 
 interface NamedMarkOptions {
+  /** Series name shown in the legend and tooltips. Defaults to the y accessor name or the mark kind. */
   name?: string;
+  /**
+   * Stable series id: the key `hiddenSeries`, legend toggles and hover
+   * payloads use. Defaults to `mark-<index>`; ids must be unique per chart.
+   */
+  id?: string;
 }
 
 export interface CartesianMarkOptions<T> extends NamedMarkOptions {
@@ -184,14 +211,24 @@ export interface AreaMarkOptions<T> extends CartesianMarkOptions<T> {
   lastValue?: boolean;
   dashed?: boolean;
   curve?: ChartCurve;
+  /** Lower edge of a ranged area (a band between `y0` and `y`). */
   y0?: Accessor<T>;
+  /** Stroke the ranged area's lower edge: `true` uses the series colour, a string sets it. */
+  stroke0?: string | boolean;
 }
 
 export interface BarMarkOptions<T> extends CartesianMarkOptions<T> {
   fill?: string;
   stackId?: string;
   lastValue?: boolean;
+  /** Earlier bars fade toward the chart background so later bars read as “now”. */
   fade?: boolean;
+  /**
+   * Minimum painted height in pixels for non-zero values (Recharts'
+   * `minPointSize`). Off by default: a zero value paints nothing and a
+   * sub-pixel value rounds to nothing; both stay hoverable.
+   */
+  minBarHeight?: number;
 }
 
 export interface PointMarkOptions<T> extends CartesianMarkOptions<T> {
@@ -200,15 +237,24 @@ export interface PointMarkOptions<T> extends CartesianMarkOptions<T> {
   r?: number;
 }
 
-export interface RuleYMarkOptions extends NamedMarkOptions {
+/** Options shared by ruleY and ruleX. */
+export interface RuleMarkOptions extends NamedMarkOptions {
   stroke?: string;
   strokeWidth?: number;
+  /** Dashed (default) or solid rule. */
+  dashed?: boolean;
+  /**
+   * Label text. Defaults to the formatted value, prefixed by `name` when one
+   * is set; `false` draws no label.
+   */
+  label?: string | false;
+  /** Label placement along the rule. Defaults to `"start"` (left for ruleY, top for ruleX). */
+  labelPosition?: RuleLabelPosition;
 }
 
-export interface RuleXMarkOptions extends NamedMarkOptions {
-  stroke?: string;
-  strokeWidth?: number;
-}
+export interface RuleYMarkOptions extends RuleMarkOptions {}
+
+export interface RuleXMarkOptions extends RuleMarkOptions {}
 
 export interface PieMarkOptions<T> extends NamedMarkOptions {
   valueKey: Accessor<T>;

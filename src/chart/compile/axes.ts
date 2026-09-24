@@ -16,7 +16,7 @@
 import type { AnyScale, BandScale, LinearScale } from "../scales";
 import type { SceneAxes, SceneTick } from "../sceneTypes";
 import { ChartCompileError } from "./errors";
-import { MONTHS, formatNum, numericTickLabels, pad2, type AxisFormatters } from "./format";
+import { MONTHS, numericTickLabels, pad2, type AxisFormatters } from "./format";
 import { isBuiltinMark, type AreaChartMark, type BarChartMark, type ChartMark, type LineChartMark } from "./marks";
 import { asNumber, isRecord, readChannel } from "./shared";
 import type { AxisLabelOptions, ChartSpec, Margin, PlotRect, XScaleKind } from "./types";
@@ -514,7 +514,7 @@ export function layoutAxes(input: AxisLayoutInput): AxisLayout {
     bottom: Math.max(input.margin.bottom, height * CAP),
     left: Math.max(input.margin.left, width * CAP),
   };
-  const chipTexts = lastValueTexts(spec.marks);
+  const chipTexts = lastValueTexts(spec.marks, input.formatters.formatY);
 
   let margin: Margin = { ...input.margin };
   for (let pass = 0; ; pass++) {
@@ -602,12 +602,12 @@ function hasChip(mark: ChartMark): mark is LineChartMark | AreaChartMark | BarCh
 }
 
 /**
- * Text of every last-value chip: each chip mark's last finite value, as the
- * mark compilers print it today (formatNum). Chips are measured from their
- * own text so computed series (1.08523, -0.366479) never spill into the plot.
- * TODO(W1B-02): measure formatY(value) instead once chips format through it.
+ * Text of every last-value chip: each chip mark's last finite value, printed
+ * through the Y value formatter exactly as the mark compilers print the chip.
+ * Chips are measured from their own text so computed series (1.08523,
+ * -0.366479) never spill into the plot.
  */
-function lastValueTexts(marks: readonly ChartMark[]): string[] {
+function lastValueTexts(marks: readonly ChartMark[], formatY: AxisFormatters["formatY"]): string[] {
   const texts: string[] = [];
   for (const mark of marks) {
     if (!hasChip(mark)) continue;
@@ -615,7 +615,7 @@ function lastValueTexts(marks: readonly ChartMark[]): string[] {
     for (let index = rows.length; index--;) {
       const value = asNumber(readChannel(rows[index] as never, mark.y as never));
       if (Number.isFinite(value)) {
-        texts.push(formatNum(value));
+        texts.push(formatY(value));
         break;
       }
     }
