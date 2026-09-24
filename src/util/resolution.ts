@@ -174,11 +174,14 @@ export function floorToBar(timeMs: number, res: string, options: FloorToBarOptio
   // Day, week and month bars start at their first local midnight, even where
   // midnight itself repeats (Atlantic/Azores falls back 01:00 -> 00:00).
   const subDay = parsed.kind === "seconds" || parsed.kind === "minutes" || parsed.kind === "hours";
-  if (zone === null || !subDay || !Number.isFinite(start)) return start;
-  // In a repeated wall hour (DST fall-back) the calendar floor resolves the
-  // wall start to its first occurrence; a sub-day bar that opened at the
-  // second occurrence starts one offset change later and still contains `timeMs`.
+  if (zone === null || !Number.isFinite(start)) return start;
   const tz = getTimeZone(zone);
+  // floorToCalendar resolves a repeated wall time to the occurrence that
+  // contains `timeMs`. Multi-day bars (stepped in wall hours) must still start
+  // at the first occurrence of their local midnight.
+  if (!subDay) return tz.fromWall(tz.toWall(start), "earlier");
+  // A sub-day bar that opened at the second occurrence of a repeated wall hour
+  // starts one offset change later and still contains `timeMs`.
   const later = tz.fromWall(tz.toWall(start), "later");
   return later > start && later <= timeMs ? later : start;
 }
