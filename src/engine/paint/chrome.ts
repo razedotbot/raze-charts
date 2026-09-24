@@ -72,32 +72,81 @@ function nowOf(context: ChartContext): number {
   return typeof context.now === "function" ? context.now() : Date.now();
 }
 
+/** Widest caption the time-axis row gives up for it when the corner cell is taken. */
+const ROW_CAPTION_MAX_PX = 120;
+/** Gap between the caption and the nearest time-axis label in the row. */
+const ROW_CAPTION_GAP = 6;
+
 /**
- * Paint the timezone caption inside `v.axisChromeRect`, the reserved corner
- * cell under the price axis, so it can never overprint a time-axis tick. Long
- * zone names abbreviate to their UTC offset; nothing leaves the cell.
+ * Whether DOM chrome (the `scale_bar` price-scale toggles, mounted on the
+ * primary chart only) fills the corner cell. The caption then moves to the
+ * right end of the time-axis row, just left of the corner, instead of hiding
+ * under them.
  */
-export function drawTimezoneCaption(ctx: CanvasRenderingContext2D, v: FinanceView): Rect | null {
+export function scaleBarInCorner(context: ChartContext): boolean {
+  return context.axisCornerTaken === true;
+}
+
+interface CaptionLayout {
+  readonly label: string;
+  readonly font: string;
+  readonly size: number;
+  readonly width: number;
+  /** Right edge of the text. */
+  readonly right: number;
+  readonly midY: number;
+}
+
+/** Where and how the caption paints, or null when it is off or cannot fit. */
+function captionLayout(ctx: CanvasRenderingContext2D, v: FinanceView): CaptionLayout | null {
   if (!v.context.features.has("timezone_display")) return null;
   const cell = v.axisChromeRect;
-  const maxWidth = cell.w - CAPTION_INSET * 2;
+  const inRow = scaleBarInCorner(v.context);
+  const maxWidth = inRow ? Math.min(ROW_CAPTION_MAX_PX, v.plotW / 4) : cell.w - CAPTION_INSET * 2;
   if (maxWidth <= 0 || cell.h <= 0) return null;
   ctx.save();
   let size = CAPTION_FONT_PX;
-  ctx.font = `${size}px ${v.fontFamily}`;
+  let font = `${size}px ${v.fontFamily}`;
+  ctx.font = font;
   const label = timezoneCaption(displayTimezone(v.context), nowOf(v.context), maxWidth, (s) => ctx.measureText(s).width);
   let width = ctx.measureText(label).width;
   while (width > maxWidth && size > CAPTION_MIN_FONT_PX) {
     size -= 1;
-    ctx.font = `${size}px ${v.fontFamily}`;
+    font = `${size}px ${v.fontFamily}`;
+    ctx.font = font;
     width = ctx.measureText(label).width;
   }
-  if (width > maxWidth) {
-    ctx.restore();
-    return null;
-  }
-  const right = cell.x + cell.w - CAPTION_INSET;
-  const midY = cell.y + cell.h / 2;
+  ctx.restore();
+  if (width > maxWidth) return null;
+  const right = inRow ? cell.x - CAPTION_INSET : cell.x + cell.w - CAPTION_INSET;
+  return { label, font, size, width, right, midY: cell.y + cell.h / 2 };
+}
+
+/**
+ * Right bound for time-axis labels: the corner cell's left edge, or, while
+ * the caption sits in the time-axis row, the caption's left edge minus a gap,
+ * so a tick label never overprints it.
+ */
+export function timeAxisLabelRight(ctx: CanvasRenderingContext2D, v: FinanceView): number {
+  const corner = Math.min(v.plotL + v.plotW, v.axisChromeRect?.x ?? Infinity);
+  if (!v.axisChromeRect || !scaleBarInCorner(v.context)) return corner;
+  const caption = captionLayout(ctx, v);
+  return caption ? Math.min(corner, caption.right - caption.width - ROW_CAPTION_GAP) : corner;
+}
+
+/**
+ * Paint the timezone caption inside `v.axisChromeRect`, the reserved corner
+ * cell under the price axis, so it can never overprint a time-axis tick. When
+ * the price-scale toggles fill that cell, the caption sits at the right end
+ * of the time-axis row instead and the tick labels keep clear of it (see
+ * timeAxisLabelRight). Long zone names abbreviate to their UTC offset.
+ */
+export function drawTimezoneCaption(ctx: CanvasRenderingContext2D, v: FinanceView): Rect | null {
+  const layout = captionLayout(ctx, v);
+  if (!layout) return null;
+  const { label, font, size, width, right, midY } = layout;
+  ctx.save();
+  ctx.font = font;
   ctx.fillStyle = v.context.theme.scaleText;
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";

@@ -5,6 +5,7 @@ import { resolveLocale } from "../../util/intl";
 import { UTC_ZONE_ID, type TickFormatInput, type TickUnit } from "../../util/time";
 import { FinancialTimeAxis, resolveDisplayTimeZone, type TimeAxisResolutionKind, type TimeAxisTick } from "../timeAxis";
 import type { ChartContext } from "../../core/context";
+import { timeAxisLabelRight } from "./chrome";
 import { timeAxisTopOf } from "./primitives";
 import type { FinanceView } from "./view";
 
@@ -318,9 +319,9 @@ export function drawTimeAxis(
   const regular = `11px ${v.fontFamily}`;
   const bold = `600 11px ${v.fontFamily}`;
   // Labels stay inside the plot's span, so none reaches the corner cell
-  // (axisChromeRect) reserved for the timezone and countdown.
+  // (axisChromeRect) or the timezone caption beside it.
   const left = v.plotL + 2;
-  const right = Math.min(v.plotL + v.plotW, v.axisChromeRect?.x ?? Infinity) - 2;
+  const right = timeAxisLabelRight(ctx, v) - 2;
   for (const tk of ticks) {
     const x = xForIndex(v, tk.index);
     const label = tk.label;

@@ -257,6 +257,21 @@ function series(count, { start, step, base, drift = 0.002 }) {
   const captionWidth = caption.text.length * 10 * 0.6;
   assert(caption.textAlign === "right" && caption.x <= cell.x + cell.w && caption.x - captionWidth >= cell.x, "the caption stays inside the reserved corner cell");
   assert(caption.y > cell.y && caption.y < cell.y + cell.h, "the caption is vertically centred in the time-axis row");
+
+  // The price-scale toggles (W1B-22's ScaleBar) take the corner cell: the
+  // caption moves beside it in the time-axis row and the tick labels stop short of it.
+  const taken = makeContext({ bars, resolution: "1D", now });
+  taken.axisCornerTaken = true;
+  const takenView = makeView(taken);
+  const takenCalls = recordingContext();
+  m.drawAxisChrome(takenCalls.ctx, takenView);
+  const moved = takenCalls.calls.find((c) => c.op === "fillText" && c.text === "Etc/UTC");
+  assert(
+    moved && moved.x <= takenView.axisChromeRect.x - 6 && moved.y > cell.y && moved.y < cell.y + cell.h,
+    "with the corner cell taken the caption sits in the time-axis row, left of the corner",
+  );
+  assert(m.timeAxisLabelRight(takenCalls.ctx, takenView) <= moved.x - captionWidth, "time-axis labels keep clear of the moved caption");
+  assert(m.timeAxisLabelRight(recordingContext().ctx, view) === Math.min(view.plotL + view.plotW, cell.x), "with a free corner the labels only avoid the corner cell");
   const countdown = texts.find((c) => c.text === "22:55:25");
   assert(countdown, "the 1D countdown reads 22:55:25 through the context clock");
   assert(countdown.x > view.plotW && countdown.x <= view.plotW + view.priceAxisW, "the countdown sits on the price axis, not in the time axis");

@@ -266,6 +266,12 @@ export interface ChartContextState {
    */
   drawingsHidden?: boolean;
   /**
+   * True while DOM chrome (the `scale_bar` price-scale toggles) covers the
+   * price-axis x time-axis corner cell; the timezone caption then paints in
+   * the time-axis row beside it instead.
+   */
+  axisCornerTaken?: boolean;
+  /**
    * Compare overlays. `resolution` is a seam for W1B-19: the resolution the
    * bars were loaded at, so a stale series can be detected and reloaded.
    */

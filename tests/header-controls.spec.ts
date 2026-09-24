@@ -146,9 +146,8 @@ test.describe("header controls", () => {
   });
 
   test("load() restores the pressed scale state", async ({ page }) => {
-    // load() writes the scale through setScaleMode("load") once W1B-13's
-    // routing lands; before that the legacy direct write fires no event.
-    test.fixme(true, "enable on the merged wave-1B tree (W1B-13 routes load() through setScaleMode)");
+    // load() writes the scale through setScaleMode("load") (W1B-13), so the
+    // pressed state follows the scaleChanged event.
     await openHarness(page);
     const saved = await page.evaluate(() => new Promise((resolve) => {
       (window as unknown as { __w: { save(cb: (s: unknown) => void): void } }).__w.save(resolve);

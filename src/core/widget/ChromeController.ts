@@ -150,6 +150,7 @@ export class ChromeController implements WidgetController {
         context.requestPaint();
       });
       primary.appendChild(this.scaleBar.el);
+      context.axisCornerTaken = true;
     }
     this.loading = new LoadingScreen(options.loading_screen, context.theme.paneBackground);
     primary.appendChild(this.loading.el);
@@ -393,6 +394,7 @@ export class ChromeController implements WidgetController {
     this.indicatorsMenu?.destroy();
     this.leftSidebar?.destroy();
     this.scaleBar?.destroy();
+    if (this.scaleBar) this.host.context.axisCornerTaken = false;
     this.toolbar?.destroy();
     this.loading?.destroy();
     this.root.remove();
