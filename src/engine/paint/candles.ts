@@ -5,7 +5,9 @@
 // wick's parity, so every body sits symmetrically around its wick at any DPR.
 // All main-series painters clip to the price pane; a wick that autoscale trims
 // shows a small arrowhead at the pane edge instead of bleeding into the volume
-// pane or sub-panes.
+// pane or sub-panes. Wick, border, body and arrowhead never overlap, so each
+// candle pixel is painted once and translucent colours blend only with what is
+// behind the candle.
 
 import { CANDLE_MAX_WIDTH } from "../layout";
 import { barSpacing, xForIndex, yForPrice } from "../plotScale";
@@ -131,11 +133,19 @@ function drawClipMarkers(
   const extend = Math.min(step * (CLIP_MARKER_ROWS - 1), maxExtend);
   if (extend <= 0) return;
   const ctx = s.ctx;
+  // The wick already fills its own column and the body its rows: paint only
+  // the arrowhead's sides, so a translucent wick colour never doubles up.
+  const side = (y: number, e: number): void => {
+    ctx.rect(wickL - e, y, e, rowH);
+    ctx.rect(wickL + wickW, y, e, rowH);
+  };
   ctx.beginPath();
-  for (let k = 0; k < CLIP_MARKER_ROWS; k++) {
+  for (let k = 1; k < CLIP_MARKER_ROWS; k++) {
     const e = Math.min(extend, k * step);
-    if (rows.high < clip.y) ctx.rect(wickL - e, clip.y + k * rowH, wickW + 2 * e, rowH);
-    if (rows.low > clip.y + clip.h) ctx.rect(wickL - e, clip.y + clip.h - (k + 1) * rowH, wickW + 2 * e, rowH);
+    const top = clip.y + k * rowH;
+    const bottom = clip.y + clip.h - (k + 1) * rowH;
+    if (rows.high < clip.y && top + rowH <= rows.top) side(top, e);
+    if (rows.low > clip.y + clip.h && bottom >= rows.bottom) side(bottom, e);
   }
   ctx.fill();
 }
@@ -185,21 +195,22 @@ export function drawCandles(
 
       ctx.fillStyle = up ? t.wickUp : t.wickDown;
       if (thin) {
-        ctx.fillRect(wl, rows.high, wickW, Math.max(bh, rows.low - rows.high));
-        // A thin body is a hairline in the body colour over the wick; a doji
-        // becomes a small horizontal tick so it does not vanish into the wick.
+        // A thin body is a hairline in the body colour in line with the wick;
+        // a doji becomes a small horizontal tick so it does not vanish into
+        // the wick. The wick stops at the body, as for full candles.
+        const doji = rows.bottom - rows.top < bh;
+        const e = doji && dojiFits ? dojiExtend : 0;
+        const top = doji ? lineStart(s.y((yForPrice(v, b.open) + yForPrice(v, b.close)) / 2), bh) : rows.top;
+        const bottom = doji ? top + bh : rows.bottom;
+        if (top > rows.high) ctx.fillRect(wl, rows.high, wickW, top - rows.high);
+        if (rows.low > bottom) ctx.fillRect(wl, bottom, wickW, rows.low - bottom);
         ctx.fillStyle = up ? t.candleUp : t.candleDown;
-        if (rows.bottom - rows.top < bh) {
-          const e = dojiFits ? dojiExtend : 0;
-          const row = lineStart(s.y((yForPrice(v, b.open) + yForPrice(v, b.close)) / 2), bh);
-          ctx.fillRect(wl - e, row, wickW + 2 * e, bh);
-        } else {
-          ctx.fillRect(wl, rows.top, wickW, rows.bottom - rows.top);
-        }
+        ctx.fillRect(wl - e, top, wickW + 2 * e, bottom - top);
         continue;
       }
 
-      // Wicks stop at the body, so hollow and translucent bodies stay clean.
+      // Neither the wick nor the border is painted under the body fill, so a
+      // translucent body blends only with what is behind the candle.
       if (rows.top > rows.high) ctx.fillRect(wl, rows.high, wickW, rows.top - rows.high);
       if (rows.low > rows.bottom) ctx.fillRect(wl, rows.bottom, wickW, rows.low - rows.bottom);
       if (markClipped) drawClipMarkers(s, clip, rows, wl, wickW, (bodyW - wickW) / 2);
@@ -213,8 +224,10 @@ export function drawCandles(
       }
       const fill = up ? t.candleUp : t.candleDown;
       if (withBorder && border !== fill) {
+        // Frame and fill tile the body without overlapping. A body too short
+        // for an interior is all border (fillRectBorder fills it whole).
         ctx.fillStyle = border;
-        ctx.fillRect(body.x, body.y, body.w, body.h);
+        fillRectBorder(s, body, bw, bh);
         if (body.w > 2 * bw && body.h > 2 * bh) {
           ctx.fillStyle = fill;
           ctx.fillRect(body.x + bw, body.y + bh, body.w - 2 * bw, body.h - 2 * bh);

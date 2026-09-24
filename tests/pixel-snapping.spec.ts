@@ -7,7 +7,12 @@
 //    so "crisp" means every pixel is one of the palette colours.
 // 2. Widget level: a real widget (tests/fixtures/pixel-widget.html) at
 //    fractional deviceScaleFactor, read back through getImageData, plus goldens
-//    at DPR 1.5.
+//    at DPR 1.5 stored at device resolution.
+//
+// Browser coverage: playwright.config.ts has a single Desktop Chrome project,
+// so these run in Chromium only. Nothing here is Chromium-specific (plain
+// canvas reads and browser.newContext({ deviceScaleFactor })), so the file runs
+// unchanged under a WebKit project once one is configured.
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import { build } from "esbuild";
@@ -19,7 +24,8 @@ const DPRS = [1, 1.25, 1.5, 1.75, 2, 3] as const;
 
 let painterBundle = "";
 
-test.beforeAll(async () => {
+async function buildPainterBundle(): Promise<void> {
+  if (painterBundle) return;
   const result = await build({
     stdin: {
       contents: [
@@ -40,7 +46,7 @@ test.beforeAll(async () => {
     write: false,
   });
   painterBundle = result.outputFiles[0]!.text;
-});
+}
 
 // ── colours (opaque, channel-separated) ─────────────────────────────────────
 type RGB = [number, number, number];
@@ -72,6 +78,8 @@ interface SceneSpec {
   volumeMode?: string;
   autoScale?: boolean;
   overrides?: Record<string, unknown>;
+  /** Theme colours to replace (e.g. translucent bodies). */
+  theme?: Record<string, string>;
 }
 
 interface SceneResult {
@@ -107,6 +115,7 @@ async function paintScene(page: Page, spec: SceneSpec): Promise<SceneResult> {
       lineColor: colors.up,
       showPriceScaleCrosshairLabel: true,
       showTimeScaleCrosshairLabel: true,
+      ...spec.theme,
     };
     const priceAxisW = 60;
     const view = {
@@ -269,6 +278,8 @@ function rowOf(spec: { min: number; max: number; plotH: number; dpr: number }, p
 }
 
 test.describe("pixel.ts painters (real canvas)", () => {
+  test.beforeAll(buildPainterBundle);
+
   for (const dpr of DPRS) {
     test(`grid and separators are full-intensity integer hairlines at DPR ${dpr}`, async ({ browser }) => {
       const { page, close } = await openPainterPage(browser, dpr);
@@ -378,6 +389,98 @@ test.describe("pixel.ts painters (real canvas)", () => {
           expect(tickRuns.length, "one open tick left of the stem").toBe(1);
           const tickH = tickRuns[0]![1] - tickRuns[0]![0];
           expect(tickH).toBe(thinBars ? hairline(dpr) : Math.max(hairline(dpr), stemW));
+        }
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  for (const dpr of [1, 1.5, 2]) {
+    test(`translucent bodies blend only with the background, never with their border or wick at DPR ${dpr}`, async ({ browser }) => {
+      // TradingView-style transparent bodies with solid borders. Distinct wick
+      // colours make any overlap visible: fill over border or wick produces a
+      // colour outside this palette.
+      const WICK_UP: RGB = [255, 255, 255];
+      const WICK_DOWN: RGB = [0, 255, 255];
+      const BORDER: RGB = [0, 0, 255];
+      const FILL_UP: RGB = [51, 0, 0]; // rgba(255, 0, 0, 0.2) over black
+      const FILL_DOWN: RGB = [0, 51, 0]; // rgba(0, 255, 0, 0.2) over black
+      const theme = {
+        candleUp: "rgba(255, 0, 0, 0.2)", candleDown: "rgba(0, 255, 0, 0.2)",
+        borderUp: hex(BORDER), borderDown: hex(BORDER), wickUp: hex(WICK_UP), wickDown: hex(WICK_DOWN),
+      };
+      const near = (c: RGB) => (p: RGB): boolean => p.every((v, i) => Math.abs(v - c[i]!) <= 1);
+      const palette = [BG, WICK_UP, WICK_DOWN, BORDER, FILL_UP, FILL_DOWN].map(near);
+      const { page, close } = await openPainterPage(browser, dpr);
+      try {
+        // 9.21 px: bordered bodies; 3 px: thin (wick-only) candles at DPR 1.
+        for (const spacing of [9.21, 3]) {
+          const span = 580 / spacing;
+          // Every fifth bar is a doji (open === close).
+          const bars = uniformBars(Math.ceil(span) + 4).map((b, i) => (i % 5 === 4 ? { ...b, open: 105, close: 105 } : b));
+          const spec: SceneSpec = {
+            dpr, w: 640, h: 360, bars, range: { from: 0.29, to: 0.29 + span }, min: 80, max: 130, paint: ["candles"], theme,
+          };
+          const img = pixels(await paintScene(page, spec));
+          const plotRight = Math.round(580 * dpr);
+          const plotBottom = Math.round(338 * dpr);
+          const overlaps: { x: number; y: number; rgb: RGB }[] = [];
+          for (let y = 0; y < plotBottom && overlaps.length < 8; y++) {
+            for (let x = 0; x < plotRight && overlaps.length < 8; x++) {
+              const p = img.at(x, y);
+              if (!palette.some((match) => match(p))) overlaps.push({ x, y, rgb: p });
+            }
+          }
+          expect(overlaps, `spacing ${spacing}: no body pixel blends over its border or wick`).toEqual([]);
+
+          // Inside a (non-doji) up body the wick column shows the fill over the
+          // background: the wick stops at the body. Doji bodies are a few rows
+          // around 105, so this row crosses their wick instead.
+          const bodyRow = rowOf({ ...spec, plotH: 338 }, 107.5);
+          const wickRow = rowOf({ ...spec, plotH: 338 }, 116);
+          const upWicks = img.rowRuns(wickRow, same(WICK_UP), 0, plotRight);
+          expect(upWicks.length, `spacing ${spacing}: up wicks found`).toBeGreaterThan(5);
+          const filledWickColumns = upWicks.filter(([wl]) => near(FILL_UP)(img.at(wl, bodyRow))).length;
+          expect(filledWickColumns, `spacing ${spacing}: up bodies are filled at their wick column`).toBeGreaterThan(upWicks.length / 2);
+          if (spacing > 5) {
+            const borderRuns = img.rowRuns(bodyRow, same(BORDER), 0, plotRight);
+            expect(borderRuns.length, `spacing ${spacing}: bodies have borders`).toBeGreaterThan(20);
+          }
+        }
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  for (const dpr of DPRS) {
+    test(`line and area strokes are floor(2 × dpr) full-intensity rows at DPR ${dpr}`, async ({ browser }) => {
+      const { page, close } = await openPainterPage(browser, dpr);
+      try {
+        // Flat closes make the stroke axis-aligned, so it must be crisp.
+        const bars = uniformBars(40).map((b) => ({ ...b, open: 105, close: 105 }));
+        const spec: SceneSpec = { dpr, w: 640, h: 360, bars, range: { from: 0.37, to: 30.37 }, min: 80, max: 130, paint: [] };
+        const lw = Math.max(1, Math.floor(2 * dpr));
+        const AREA_FILL: RGB = [46, 0, 0]; // 18 % of UP over black
+        const nearFill = (p: RGB): boolean => p.every((v, i) => Math.abs(v - AREA_FILL[i]!) <= 1);
+        for (const style of ["line", "area"]) {
+          const img = pixels(await paintScene(page, { ...spec, paint: [style] }));
+          const plotBottom = Math.round(338 * dpr);
+          for (const cssX of [100, 257.3, 500]) {
+            const x = Math.round(cssX * dpr);
+            const runs = img.colRuns(x, same(UP), 0, plotBottom);
+            expect(runs, `${style}: one stroke at x ${x}`).toHaveLength(1);
+            const [top, bottom] = runs[0]!;
+            expect(bottom - top, `${style}: stroke thickness at DPR ${dpr}`).toBe(lw);
+            expect(img.at(x, top - 1), `${style}: nothing partial above the stroke`).toEqual(BG);
+            if (style === "line") {
+              expect(img.at(x, bottom), `${style}: nothing partial below the stroke`).toEqual(BG);
+            } else {
+              expect(nearFill(img.at(x, bottom)), `${style}: the fill starts right under the stroke`).toBe(true);
+              expect(nearFill(img.at(x, plotBottom - 1)), `${style}: the fill reaches the pane bottom`).toBe(true);
+            }
+          }
         }
       } finally {
         await close();
@@ -526,6 +629,16 @@ test.describe("pixel.ts painters (real canvas)", () => {
 
 // ── widget level ────────────────────────────────────────────────────────────
 
+/**
+ * DPR 1.5 goldens are stored at device resolution. The default CSS scale
+ * downsamples the 1.5x bitmap, which smears a crisp hairline and a blurred one
+ * into much the same pixels and hides the regressions these goldens exist for.
+ * The config's 4 % budget is also too loose here: the pre-pixel.ts painters
+ * differ by 1.1 % (dark widget) and 2.7 % (spike, 1.1 % from the grid alone),
+ * while a rerun reproduces both images exactly.
+ */
+const DEVICE_GOLDEN = { scale: "device", maxDiffPixelRatio: 0.005 } as const;
+
 async function openWidget(browser: Browser, dpr: number, testCase: "grid" | "spike") {
   const context = await browser.newContext({ deviceScaleFactor: dpr, viewport: { width: 800, height: 480 } });
   await context.addInitScript({ content: ENCODE_PIXELS });
@@ -628,7 +741,7 @@ test.describe("pixel.ts in the widget", () => {
         expect(leak.slice(0, 5), `${label}: no candle pixels inside the volume pane`).toEqual([]);
       };
       await check("autoscale");
-      await expect(page.locator(".raze-chart-root")).toHaveScreenshot("pixel-spike-volume-pane-dpr1.5.png");
+      await expect(page.locator(".raze-chart-root")).toHaveScreenshot("pixel-spike-volume-pane-dpr1.5.png", DEVICE_GOLDEN);
 
       // Drag the price axis up to zoom in: candles overflow the pane edges.
       const canvas = page.locator("canvas.raze-chart-canvas");
@@ -659,6 +772,6 @@ test.describe("DPR 1.5 goldens", () => {
     });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(400);
-    await expect(page.locator(".raze-chart-root")).toHaveScreenshot("widget-dark-dpr1.5.png");
+    await expect(page.locator(".raze-chart-root")).toHaveScreenshot("widget-dark-dpr1.5.png", DEVICE_GOLDEN);
   });
 });

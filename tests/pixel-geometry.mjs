@@ -37,13 +37,25 @@ const bundled = await build({
 });
 const P = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString("base64")}`);
 
-/** A 2D context double that records drawing calls and tracks a transform. */
+/**
+ * A 2D context double that records drawing calls and tracks a transform.
+ * `paints` counts, per integer pixel, how many fills covered it (fillRect and
+ * rect paths only; painters in bitmap space draw whole-pixel rectangles).
+ */
 function recordingContext({ transform = [1, 0, 0, 1, 0, 0], withGetTransform = true } = {}) {
   const ops = [];
   const stack = [];
+  const paints = new Map();
+  let pathRects = [];
+  const paint = (x, y, w, h) => {
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) paints.set(`${px},${py}`, (paints.get(`${px},${py}`) ?? 0) + 1);
+    }
+  };
   const state = { transform: [...transform], fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1 };
   const ctx = {
     ops,
+    paints,
     get fillStyle() { return state.fillStyle; },
     set fillStyle(v) { state.fillStyle = v; },
     get strokeStyle() { return state.strokeStyle; },
@@ -60,11 +72,11 @@ function recordingContext({ transform = [1, 0, 0, 1, 0, 0], withGetTransform = t
     save() { stack.push({ ...state, transform: [...state.transform] }); ops.push(["save"]); },
     restore() { const s = stack.pop(); if (s) Object.assign(state, s); ops.push(["restore"]); },
     setTransform(...m) { state.transform = m; ops.push(["setTransform", ...m]); },
-    fillRect(...a) { ops.push(["fillRect", state.fillStyle, ...a]); },
-    rect(...a) { ops.push(["rect", ...a]); },
-    beginPath() { ops.push(["beginPath"]); },
-    fill() { ops.push(["fill", state.fillStyle]); },
-    stroke() { ops.push(["stroke", state.strokeStyle]); },
+    fillRect(...a) { ops.push(["fillRect", state.fillStyle, ...a]); paint(...a); },
+    rect(...a) { ops.push(["rect", ...a]); pathRects.push(a); },
+    beginPath() { ops.push(["beginPath"]); pathRects = []; },
+    fill() { ops.push(["fill", state.fillStyle]); for (const r of pathRects) paint(...r); },
+    stroke() { ops.push(["stroke", state.strokeStyle, state.lineWidth]); },
     clip() { ops.push(["clip"]); },
     moveTo(...a) { ops.push(["moveTo", ...a]); },
     lineTo(...a) { ops.push(["lineTo", ...a]); },
@@ -252,6 +264,56 @@ const fillRects = (ctx, color) => ctx.ops.filter(([op, style]) => op === "fillRe
   };
   equal(widths(9.21), [P.candleColumns(9.21, 1).bodyW], "volume columns match the candle body width");
   equal(widths(3.5), [2], "thin candles get volume columns that fill the slot minus a hairline gap");
+}
+{
+  // Translucent colours (for example transparent bodies with solid borders)
+  // need every candle pixel painted exactly once: no border or wick under the
+  // body fill and no clip marker over the wick.
+  const bordered = { ...theme, borderUp: "bup", borderDown: "bdown" };
+  for (const dpr of [1, 1.5, 2]) {
+    for (const spacing of [2.5, 3, 5.3, 9.21, 22]) {
+      const count = Math.ceil(580 / spacing) + 2;
+      const bars = Array.from({ length: count }, (_, i) => {
+        if (i % 7 === 3) return { time: i, open: 105, close: 105, high: 106, low: 104 }; // doji
+        if (i % 11 === 5) return { time: i, open: 100, close: 110, high: 400, low: -300 }; // trimmed spike
+        const up = i % 2 === 0;
+        return { time: i, open: up ? 100 : 110, close: up ? 110 : 100, high: 120, low: 90 };
+      });
+      for (const [label, paint] of [
+        ["candles", (ctx, v) => P.drawCandles(ctx, v, bars)],
+        ["hollow candles", (ctx, v) => P.drawCandles(ctx, v, bars, true)],
+        ["bars", (ctx, v) => P.drawOhlcBars(ctx, v, bars)],
+      ]) {
+        const ctx = recordingContext({ transform: [dpr, 0, 0, dpr, 0, 0] });
+        const v = view(bars, { dpr, visibleRange: { from: 0.3, to: 0.3 + 580 / spacing } });
+        v.context.theme = bordered;
+        paint(ctx, v);
+        assert(ctx.paints.size > 0, `${label} paint something at spacing ${spacing}, DPR ${dpr}`);
+        const twice = [...ctx.paints].filter(([, n]) => n > 1).slice(0, 3);
+        equal(twice, [], `${label} paint each pixel at most once at spacing ${spacing}, DPR ${dpr}`);
+      }
+    }
+  }
+  {
+    // A bordered body is a frame plus an interior, not a border-filled rect.
+    const bars = [{ time: 0, open: 100, close: 110, high: 120, low: 90 }];
+    const ctx = recordingContext();
+    const v = view(bars, { visibleRange: { from: -10, to: 20 } });
+    v.context.theme = bordered;
+    P.drawCandles(ctx, v, bars);
+    const border = ctx.ops.findIndex(([op, style]) => op === "fill" && style === "bup");
+    assert(border >= 0, "the border is painted as a frame path");
+    assert(!fillRects(ctx, "bup").length, "the border never fills the whole body");
+    equal(fillRects(ctx, "up").length, 1, "the fill paints the interior once");
+  }
+}
+for (const [dpr, lw] of [[1, 2], [1.25, 2], [1.5, 3], [1.75, 3], [2, 4], [3, 6]]) {
+  // Line/area/baseline strokes: 2 CSS px (TradingView's default), floored to device pixels.
+  const bars = [{ time: 0, open: 100, close: 105, high: 106, low: 99 }, { time: 1, open: 105, close: 110, high: 111, low: 104 }];
+  const ctx = recordingContext({ transform: [dpr, 0, 0, dpr, 0, 0] });
+  P.drawLineArea(ctx, view(bars, { dpr }), false);
+  const strokes = ctx.ops.filter(([op]) => op === "stroke").map(([, , width]) => width);
+  equal(strokes, [lw], `the series line is ${lw} device px at DPR ${dpr}`);
 }
 {
   // thinBars override: a non-boolean warns once per overrides object.
