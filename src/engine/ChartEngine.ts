@@ -1,10 +1,19 @@
 // Canvas render engine. Device-pixel-ratio-aware and invalidation driven: one
 // requestAnimationFrame is queued only when something actually needs painting.
+//
+// Seams installed on the context (W1A-06, see docs/seams.md): requestPaint,
+// requestOverlayPaint and the DOM overlay host stacked above the canvas.
 
 import type { ChartContext } from "../core/context";
 
 export class ChartEngine {
   readonly canvas: HTMLCanvasElement;
+  /**
+   * DOM layer above the canvas for accessible chart-space UI (DOM legend,
+   * inline text editor, mark tooltips). It ignores pointer events so the
+   * canvas keeps every gesture; interactive children set pointer-events:auto.
+   */
+  readonly overlayHost: HTMLDivElement;
   readonly accessibilityDescriptionId: string;
   private ctx2d: CanvasRenderingContext2D;
   private ro: ResizeObserver | null = null;
@@ -16,6 +25,7 @@ export class ChartEngine {
   private statusEl: HTMLDivElement;
   private onWinResize: () => void;
   private readonly requestPaint = (): void => this.markDirty();
+  private readonly requestOverlayPaint = (): void => this.markOverlayDirty();
   cssWidth = 0;
   cssHeight = 0;
   dpr = 1;
@@ -34,6 +44,12 @@ export class ChartEngine {
     if (!c2d) throw new Error("[raze-charts] 2D canvas context unavailable");
     this.ctx2d = c2d;
 
+    this.overlayHost = document.createElement("div");
+    this.overlayHost.className = "raze-chart-overlay-host";
+    this.overlayHost.style.cssText =
+      "position:absolute;inset:0;overflow:hidden;pointer-events:none;";
+    host.appendChild(this.overlayHost);
+
     const accessibilityId = ++chartAccessibilitySequence;
     this.accessibilityDescriptionId = `raze-chart-description-${accessibilityId}`;
     this.descriptionEl = createVisuallyHiddenElement();
@@ -49,6 +65,8 @@ export class ChartEngine {
     this.syncAccessibility();
 
     this.context.requestPaint = this.requestPaint;
+    this.context.requestOverlayPaint = this.requestOverlayPaint;
+    this.context.overlayHost = this.overlayHost;
     this.onWinResize = () => this.resize();
     if (typeof ResizeObserver !== "undefined") {
       this.ro = new ResizeObserver(() => this.resize());
@@ -66,6 +84,15 @@ export class ChartEngine {
     if (this.destroyed) return;
     this.dirty = true;
     this.schedule();
+  }
+
+  /**
+   * Invalidate only the overlay layer (crosshair, hover, draft, countdown).
+   * The engine paints a single layer until W1B-07 splits main and overlay
+   * canvases, so this currently schedules the same full frame as markDirty().
+   */
+  markOverlayDirty(): void {
+    this.markDirty();
   }
 
   /** Refreshes the accessible name after an imperative symbol change. */
@@ -173,6 +200,14 @@ export class ChartEngine {
     if (this.context.requestPaint === this.requestPaint) {
       this.context.requestPaint = () => {};
     }
+    if (this.context.requestOverlayPaint === this.requestOverlayPaint) {
+      const context = this.context;
+      context.requestOverlayPaint = () => context.requestPaint();
+    }
+    if (this.context.overlayHost === this.overlayHost) {
+      this.context.overlayHost = null;
+    }
+    this.overlayHost.remove();
     this.descriptionEl.remove();
     this.statusEl.remove();
     this.canvas.remove();

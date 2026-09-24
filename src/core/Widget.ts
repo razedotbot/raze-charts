@@ -14,7 +14,7 @@ import type {
   IChartWidgetApi,
   ResolutionString,
 } from "../types/charting_library";
-import { buildFeatureSet, type ChartContext, type IndexRange } from "./context";
+import { buildFeatureSet, createChartContext, type ChartContext, type IndexRange } from "./context";
 import { buildTheme, isLightColor } from "./theme";
 import { createPriceFormatter } from "../util/format";
 import { Delegate } from "../util/delegate";
@@ -105,7 +105,7 @@ export class Widget implements IChartingLibraryWidget {
     const showLeftToolbar = features.has("left_toolbar");
 
     const initialRange: IndexRange = { from: 0, to: 1 };
-    this.context = {
+    this.context = createChartContext({
       options,
       datafeed: options.datafeed,
       locale: options.locale ?? "en",
@@ -140,7 +140,7 @@ export class Widget implements IChartingLibraryWidget {
       viewportChanged: new Delegate(),
       crosshairMoved: new Delegate(),
       requestPaint: () => {},
-    };
+    });
 
     ensureBaseStyles();
     this.root = document.createElement("div");

@@ -2,7 +2,7 @@
 // Draw code lives in paint/*; interaction in GestureController; paint order
 // in scene.ts. Visual constants must stay frozen (see layout.ts).
 
-import type { Bar, Mark } from "../types/charting_library";
+import type { Bar, Mark, TimescaleMark } from "../types/charting_library";
 import type { ChartContext, DrawingTool } from "../core/context";
 import type { ChartEngine } from "./ChartEngine";
 import type { ShapeStore } from "../core/ShapeStore";
@@ -12,7 +12,9 @@ import type { StudyStore } from "../studies/StudyStore";
 import { heikinAshi } from "../util/heikinAshi";
 import {
   PRICE_AXIS_W_DEFAULT,
+  TIME_AXIS_H,
   computePlotLayout,
+  timeAxisTop,
   type SubPaneGeom,
 } from "./layout";
 import {
@@ -23,7 +25,15 @@ import {
   toDisplay,
 } from "./plotScale";
 import { adjustPriceAxisWidth } from "./paint/axes";
-import type { Crosshair, DraftShape, FinanceView, MarkHit, ShapeHit, TradingHit } from "./paint/view";
+import type {
+  Crosshair,
+  DraftShape,
+  FinanceView,
+  MarkHit,
+  ShapeHit,
+  TimescaleMarkHit,
+  TradingHit,
+} from "./paint/view";
 import { paintFinanceScene } from "./scene";
 import { GestureController, type GestureHost } from "./gestures";
 
@@ -43,12 +53,16 @@ export class ChartRenderer implements GestureHost {
   hoverTradingLineId: string | null = null;
   hoverTradingHit: "body" | "cancel" | null = null;
   hoverMark: Mark | null = null;
+  /** Seam: hovered timescale-mark badge (set by interaction in W1B-10). */
+  hoverTimescaleMark: TimescaleMark | null = null;
   lastPointerType = "mouse";
   onToolDone: ((tool: DrawingTool) => void) | null = null;
   draft: DraftShape | null = null;
   markScreen: MarkHit[] = [];
   shapeScreen: ShapeHit[] = [];
   tradingScreen: TradingHit[] = [];
+  /** Seam: timescale-mark badge hit targets (filled by the badge painter in W1B-09). */
+  timescaleMarkScreen: TimescaleMarkHit[] = [];
 
   private pctBase = 1;
   private seriesBars: Bar[] = [];
@@ -152,11 +166,13 @@ export class ChartRenderer implements GestureHost {
 
   financeView(): FinanceView {
     const s = this.plotScale();
+    const axisTop = timeAxisTop(this.plotT, this.plotH, this.subPanes, this.volumePane);
     return {
       ...s,
       context: this.context,
       cssWidth: this.engine.cssWidth,
       cssHeight: this.engine.cssHeight,
+      dpr: this.engine.dpr,
       priceAxisW: this.priceAxisW,
       subPanes: this.subPanes,
       volumePane: this.volumePane,
@@ -167,12 +183,22 @@ export class ChartRenderer implements GestureHost {
       markScreen: this.markScreen,
       shapeScreen: this.shapeScreen,
       tradingScreen: this.tradingScreen,
+      timescaleMarkScreen: this.timescaleMarkScreen,
       crosshair: this.crosshair,
       hoverMark: this.hoverMark,
+      hoverTimescaleMark: this.hoverTimescaleMark,
+      hoverShapeId: this.hoverShapeId,
       draft: this.draft,
       selectedShapeId: this.context.selectedShapeId,
       selectedTradingLineId: this.context.selectedTradingLineId,
       fontFamily: this.context.fontFamily,
+      axisTags: [],
+      axisChromeRect: {
+        x: this.plotL + this.plotW,
+        y: axisTop,
+        w: this.priceAxisW,
+        h: TIME_AXIS_H,
+      },
     };
   }
 

@@ -352,7 +352,8 @@ The root also exports `DataManager`, `TimeIndex`, `ChartEngine`,
 resolution helpers, `defineDataSource` / `createDatafeed`, and the default UI
 chrome. These pieces are useful for a custom financial shell, but currently
 share the widget's mutable `ChartContext`; they are not separate package
-subpaths.
+subpaths. Build that context with `createChartContext()`, and change the
+viewport, price scale and series style through its reason-tagged setters.
 
 ## React
 
