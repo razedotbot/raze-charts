@@ -65,8 +65,8 @@ npm run check:size
 
 | Entrypoint | Measurement | Contents | Gzip budget |
 | --- | --- | --- | ---: |
-| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 55 KiB |
-| | Scenario: Widget only | `import { widget }` | 49 KiB |
+| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
+| | Scenario: Widget only | `import { widget }` | 63 KiB |
 | Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 44 KiB |
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 23 KiB |
@@ -94,6 +94,16 @@ The native artifact allowance grew from 42 to 44 KiB when the compiler and
 renderers were split into `src/chart/compile/*` and `src/chart/render/*`: the
 unminified artifact keeps every function and property name, so the module
 boundaries added about 2.2 KiB with byte-identical output.
+
+The root artifact budget was raised from 55 KiB to the 72 KiB hard cap set by
+architecture decision AD-01, and the "Widget only" scenario from 49 KiB to
+63 KiB, when wave 1A merged. Measured at that merge, the artifact is 62.7 KiB
+and the scenario 54.3 KiB. The growth comes from the bottom-sheet menus, the
+scoped stylesheet, the safe HTML sink and `t()` that the widget chrome now
+uses (about 5.2 KiB), the context seams and id allocator (about 2.4 KiB), and
+the controller and interaction-handler split of the widget (about 2.1 KiB).
+72 KiB is a ceiling, not a target: AD-01 requires a later wave to win back at
+least 10 KiB of headroom.
 
 ## Dense native charts
 

@@ -1,7 +1,7 @@
 {
   "entry": "root",
-  "artifact": { "gzipBytes": 56320 },
+  "artifact": { "gzipBytes": 73728 },
   "scenarios": [
-    { "name": "Widget only", "imports": ["widget"], "gzipBytes": 50176 }
+    { "name": "Widget only", "imports": ["widget"], "gzipBytes": 64512 }
   ]
 }
