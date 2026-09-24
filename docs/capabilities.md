@@ -64,6 +64,10 @@ registry created there is standalone; pass definitions to a widget through
 | Encapsulated runtime surface | **Yes** | `widget` and `activeChart()` objects expose only the documented `IChartingLibraryWidget` / `IChartWidgetApi` methods. Internal state is `#private` or module-private and cannot be reached or mutated at runtime. |
 | Full TradingView study/drawing catalog | **No** | Compatibility is a documented subset, not feature parity. |
 | WebGL, LOD, or worker renderer | **No** | Canvas 2D is the current financial renderer. |
+| Price-axis ticks and precision | **Yes** | Ticks are multiples of the symbol's `minmov / pricescale`. With the built-in formatter every label on the axis (ticks, crosshair, last-price and order tags) uses one fixed precision and rounds to the min tick. If fewer than two tradable prices are visible, for example because the `pricescale` is coarser than the prices, the ticks use plain 1/2/5 steps and the precision rises so the labels stay distinct. `priceFormatterFactory` and `raze.format_price` receive the raw price and set their own digits. |
+| Logarithmic price scale | **Yes** | Ticks are round, decade-aware prices, such as 86,000 / 88,000 / 90,000 or 1 / 2 / 5 / 10, at least 40px apart. When the visible data or the manual price range reaches zero or below, the axis maps linearly and logs one console warning. Log mapping returns once the visible data is positive again. |
+| Negative and zero prices | **Subset** | Autoscale, ticks, labels, percent mode and Heikin-Ashi accept any finite price, including zero and negative values such as spreads, P&L, rates and WTI at -37. A bar whose `close` is not a finite number is whitespace. Candle wicks, line, area and baseline painting of values ≤ 0 is still being fixed. |
+| Number locale | **Yes** | `locale` sets digit grouping and the decimal separator of built-in price labels (axis, crosshair, legend, tags). TradingView tags such as `pt_BR` are accepted. An invalid tag warns once and falls back to `en-US`. Without `locale` the output matches `en-US`. |
 
 ## Native dashboard charts
 

@@ -65,6 +65,8 @@ export class ChartRenderer implements GestureHost {
   timescaleMarkScreen: TimescaleMarkHit[] = [];
 
   private pctBase = 1;
+  /** Log scale requested but the visible data reaches <= 0 (see autoFitPriceRange). */
+  private logFallback = false;
   private seriesBars: Bar[] = [];
   private heikinAshiSource: Bar[] | null = null;
   private heikinAshiBars: Bar[] | null = null;
@@ -161,6 +163,7 @@ export class ChartRenderer implements GestureHost {
       visibleRange: this.context.visibleRange,
       percentScale: this.context.percentScale,
       logScale: this.context.logScale,
+      logFallback: this.logFallback,
     };
   }
 
@@ -268,6 +271,7 @@ export class ChartRenderer implements GestureHost {
       this.context.priceRange,
     );
     this.pctBase = fitted.pctBase;
+    this.logFallback = fitted.logFallback;
     this.priceMin = fitted.priceMin;
     this.priceMax = fitted.priceMax;
     if (this.context.autoScalePrice) {
