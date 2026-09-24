@@ -5,6 +5,7 @@
 import type { AnyScale } from "../scales";
 import type { ChartThemeInput, DashboardTheme } from "../theme";
 import type { ChartMark } from "./marks";
+import type { CompiledSceneV2Fields } from "../sceneTypes";
 
 export type Accessor<T> = keyof T & string | ((row: T) => unknown);
 
@@ -84,12 +85,33 @@ export interface Margin {
   left: number;
 }
 
+/**
+ * Tick-label layout. By default the compiler measures labels and picks, in
+ * order: every label, every nth label, labels rotated -45° (reserving bottom
+ * margin), then an ellipsis at `maxWidth`.
+ */
+export interface AxisLabelOptions {
+  /**
+   * X axis only. `"auto"` (default) rotates category labels -45° when that
+   * keeps all of up to 12 categories, or when horizontal labels would show
+   * fewer than every other category and under half as many as rotated ones;
+   * `true` always rotates -45°;
+   * `false` or `0` never rotates; a number is a fixed angle from -90 to 0.
+   */
+  rotate?: "auto" | boolean | number;
+  /** Longest label, in CSS pixels, before it is cut with an ellipsis. */
+  maxWidth?: number;
+  /** Label every nth tick (1 labels all of them). `"auto"` (default) thins by measured width. */
+  interval?: number | "auto";
+}
+
 export interface LinearScaleSpec {
   type: "linear";
   nice?: boolean;
   padding?: never;
   domain?: readonly [number, number];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export interface AutoLinearScaleSpec {
@@ -98,6 +120,7 @@ export interface AutoLinearScaleSpec {
   padding?: never;
   domain?: readonly [number, number];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export interface LogScaleSpec {
@@ -106,6 +129,7 @@ export interface LogScaleSpec {
   padding?: never;
   domain?: readonly [number, number];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export interface TimeScaleSpec {
@@ -114,6 +138,7 @@ export interface TimeScaleSpec {
   padding?: never;
   domain?: readonly [number | Date, number | Date];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export interface BandScaleSpec {
@@ -122,6 +147,7 @@ export interface BandScaleSpec {
   padding?: number;
   domain?: readonly (string | number)[];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export type XScaleSpec = LinearScaleSpec | LogScaleSpec | TimeScaleSpec | BandScaleSpec;
@@ -247,7 +273,7 @@ export interface AxisTick {
   label: string;
 }
 
-export interface CompiledChart {
+export interface CompiledChart extends CompiledSceneV2Fields {
   width: number;
   height: number;
   margin: Margin;

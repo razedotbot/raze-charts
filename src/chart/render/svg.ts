@@ -165,9 +165,16 @@ function xAxisSvg(c: CompiledChart): string {
     `<rect x="0" y="${plot.y + plot.h}" width="${width}" height="${Math.max(0, height - plot.y - plot.h)}" fill="${esc(theme.background)}" />`,
     `<line x1="${c.heatmap ? plot.x : 0}" y1="${hair(plot.y + plot.h)}" x2="${c.heatmap ? plot.x + plot.w : width}" y2="${hair(plot.y + plot.h)}" stroke="${esc(theme.axis)}" />`,
     `<g data-role="x-labels">`,
-    ...c.xTicks.map((t) =>
-      `<text x="${t.px}" y="${plot.y + plot.h + 14}" text-anchor="middle" font-size="9" fill="${esc(theme.muted)}">${esc(t.label)}</text>`,
-    ),
+    // Scene v2 ticks carry the compiler's measured anchor and rotation.
+    ...(c.axes?.x.ticks ?? c.xTicks).map((t) => {
+      const rotation = "rotation" in t ? t.rotation : 0;
+      if (rotation) {
+        const top = plot.y + plot.h + 8;
+        return `<text x="${t.px}" y="${top}" text-anchor="end" dominant-baseline="middle" transform="rotate(${rotation} ${t.px} ${top})" font-size="9" fill="${esc(theme.muted)}">${esc(t.label)}</text>`;
+      }
+      const anchor = "anchor" in t ? t.anchor : "middle";
+      return `<text x="${t.px}" y="${plot.y + plot.h + 14}" text-anchor="${anchor}" font-size="9" fill="${esc(theme.muted)}">${esc(t.label)}</text>`;
+    }),
     `</g>`,
   ].join("");
 }

@@ -239,3 +239,24 @@ const svg = renderChartSvg(definition, { width: 720, height: 320 });
 
 The React `<Chart definition={definition}>` component accepts the same native
 definition when the application still wants React to own the lifecycle.
+
+### Native axis and value formatting changes
+
+Native charts now size and format their axes from the data, so a few labels
+read differently after upgrading:
+
+- Heatmaps no longer add a `+` sign and `%` to every value. Add
+  `valueFormat: "signed-percent"` to a heatmap mark that shows returns (values
+  in percentage points), or `"percent"`, `"signed"` or a function for other
+  data.
+- Values from a million up use compact notation (`1.2T` instead of
+  `1,200,000,000,000`) in ticks, chips and tooltips. Pass
+  `scales.y.tickFormat` to keep full digits.
+- Tick labels take their decimals from the tick step (`1.0850` rather than
+  `1.1`), and time axes label calendar boundaries (`2025`, `Feb`, `14 Feb`,
+  `09:30`) instead of `D Mon` at fixed day steps.
+- A numeric viewport on a Date axis keeps the time scale; numbers are no
+  longer guessed to be timestamps from their magnitude.
+- The value axis widens to fit long labels and chips, and crowded category
+  labels rotate; set `margin.right` / `margin.bottom` or `scales.x.labels` to
+  pin the previous layout.

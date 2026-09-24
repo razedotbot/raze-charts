@@ -116,6 +116,14 @@ on source-derived path samples (minimum `1`; area closure vertices are extra).
 The compiler still scans source rows, so this bounds render complexity without
 pretending input processing is free.
 
+Axes are measured at compile time: tick decimals follow the tick step,
+large values switch to compact notation (1.2T), the value axis widens to fit
+its labels and last-value chips, category labels thin or rotate instead of
+overlapping (`scales.x.labels: { rotate, maxWidth, interval }`), and time
+scales tick on calendar boundaries from seconds to decades. Heatmap values are
+plain numbers unless the mark sets `valueFormat` (`"percent"`, `"signed"`,
+`"signed-percent"`, or a function).
+
 Product-specific layers can use the typed `defineMarkPlugin` + `customMark`
 extension point without forking the compiler. Plugins receive isolated,
 read-only scale/theme snapshots and must return validated, discriminated scene

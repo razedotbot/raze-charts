@@ -97,9 +97,13 @@ const heatCell = hc.nodes.find((n) => n.type === "rect");
 assert(heatCell && Math.abs((heatCell.w ?? 0) - (heatCell.h ?? 0)) <= 1, "heatmap cells are square");
 const heatSvg = renderChartSvg(heatDef, { width: 400, height: 200 });
 assert(heatSvg.includes("<rect"), "heatmap svg has cells");
-assert(heatSvg.includes("+2.4"), "heatmap labels are signed");
+assert(heatSvg.includes(">2.4<") && !heatSvg.includes("+2.4"), "heatmap labels default to plain numbers");
 const heatHit = hc.nodes.find((n) => n.type === "rect" && n.tip);
-assert(heatHit && heatHit.tip.includes("%"), "heatmap tooltip includes percent");
+assert(heatHit && !heatHit.tip.includes("%"), "heatmap tooltips add no percent unless asked");
+const signedHeat = compileChart(defineChart({
+  marks: [heatmap(heatRows, { x: "x", y: "y", valueKey: "value", valueFormat: "signed-percent" })],
+}), { width: 400, height: 200 });
+assert(signedHeat.nodes.some((n) => n.type === "rect" && n.tip?.endsWith("+2.4%")), "heatmap valueFormat opts into signed percent");
 
 const fitDef = defineChart({
   marks: [line([{ x: 0, y: 1 }, { x: 2, y: 3 }], { x: "x", y: "y", dashed: true, lastValue: false, name: "Fit" })],

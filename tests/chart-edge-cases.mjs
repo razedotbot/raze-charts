@@ -192,7 +192,7 @@ const largeMetrics = compile([line([
   { x: 1, y: 1_200_000_000_000 },
 ], { x: "x", y: "y" })]);
 assert.ok(largeMetrics.yTicks.every((tick) => !/[A-Z][a-z]{2}/.test(tick.label)), "large numeric metrics are never guessed to be dates");
-assert.equal(largeMetrics.lastValues[0].label, "1,200,000,000,000", "large last values retain numeric formatting");
+assert.equal(largeMetrics.lastValues[0].label, "1.2T", "large last values use compact numeric formatting");
 
 const epochTime = compile([line([
   { x: 0, y: 1 },

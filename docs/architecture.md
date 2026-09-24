@@ -318,8 +318,10 @@ src/chart/compile/
   validate.ts   runtime ChartSpec, scale, mark, and composition validation
   legend.ts     series names/colours, hidden series, legend rows and placement
   domain.ts     viewport windowing, X-type inference, domain checks, X/Y scales
-  axes.ts       margins, plot rectangle, time/band/linear ticks
-  format.ts     number, date, and signed formatting; axis formatters
+  axes.ts       label measurement, measured margins, calendar/band/linear ticks,
+                thinning, rotation and ellipsis
+  format.ts     step- and data-precision numbers, compact notation, dates,
+                heatmap value formats; cached Intl formatters
   cartesian.ts  line/area, point, ruleY/ruleX, grouped and stacked bars
   decimate.ts   extrema decimation and per-series budget allocation
   polar.ts      pie and radar

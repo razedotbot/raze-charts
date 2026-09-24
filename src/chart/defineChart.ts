@@ -9,6 +9,7 @@ export { asNumber, readChannel } from "./compile/shared";
 export type {
   Accessor,
   AutoLinearScaleSpec,
+  AxisLabelOptions,
   BandScaleSpec,
   ChartCurve,
   ChartDefinition,
@@ -51,6 +52,7 @@ export type {
   ChartMarkBase,
   HeatmapChartMark,
   HeatmapMarkOptions,
+  HeatmapValueFormat,
   LineChartMark,
   LineMarkOptions,
   PieChartMark,

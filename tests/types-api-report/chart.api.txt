@@ -17,10 +17,15 @@ interface AreaMarkOptions<T> extends CartesianMarkOptions<T>
   y0?: Accessor<T> | undefined
 interface AutoLinearScaleSpec
   domain?: readonly [number, number] | undefined
+  labels?: AxisLabelOptions | undefined
   nice?: boolean | undefined
   padding?: undefined
   tickFormat?: ((value: unknown) => string) | undefined
   type?: undefined
+interface AxisLabelOptions
+  interval?: 'auto' | number | undefined
+  maxWidth?: number | undefined
+  rotate?: 'auto' | boolean | number | undefined
 interface BandScale<T extends number | string = string>
   bandwidth(): number
   copy(): BandScale<T>
@@ -32,6 +37,7 @@ interface BandScale<T extends number | string = string>
   start(value: T): number
 interface BandScaleSpec
   domain?: readonly (number | string)[] | undefined
+  labels?: AxisLabelOptions | undefined
   nice?: undefined
   padding?: number | undefined
   tickFormat?: ((value: unknown) => string) | undefined
@@ -160,16 +166,21 @@ interface ChartViewport
   x?: ChartViewportX | undefined
   y?: readonly [number, number] | undefined
 type ChartViewportX = readonly (number | string)[] | readonly [Date | number, Date | number]
-interface CompiledChart
+interface CompiledChart extends CompiledSceneV2Fields
   ariaDescription: string
   ariaLabel: string
+  readonly axes?: SceneAxes | undefined
   colorBar: null | { min: number; max: number; }
+  readonly contractVersion?: 2 | undefined
   diagnostics: ChartDiagnostics
+  readonly formatters?: SceneFormatters | undefined
   grid: boolean
   heatmap: boolean
   height: number
+  readonly hoverSamples?: readonly SceneHoverSample[] | undefined
   lastValues: LastValue[]
   legend: { name: string; color: string; detail?: string | undefined; }[]
+  readonly legendLayout?: SceneLegendLayout | undefined
   legendPlacement: 'hidden' | 'right' | 'top'
   margin: Margin
   nodes: SceneNode[]
@@ -201,12 +212,14 @@ interface DashboardTheme
   muted: string
   sky: string
   text: string
-type HeatmapChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'heatmap'; valueKey: Accessor<never>; } & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+type HeatmapChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'heatmap'; valueKey: Accessor<never>; valueFormat?: HeatmapValueFormat | undefined; } & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
 interface HeatmapMarkOptions<T> extends NamedMarkOptions
   name?: string | undefined
+  valueFormat?: HeatmapValueFormat | undefined
   valueKey: Accessor<T>
   x: Accessor<T>
   y: Accessor<T>
+type HeatmapValueFormat = 'number' | 'percent' | 'signed' | 'signed-percent' | ((value: number) => string)
 type HeatmapYScaleSpec = BandScaleSpec
 interface HoverSample
   color: string
@@ -242,12 +255,14 @@ interface LinearScale
   ticks(count?: number | undefined): number[]
 interface LinearScaleSpec
   domain?: readonly [number, number] | undefined
+  labels?: AxisLabelOptions | undefined
   nice?: boolean | undefined
   padding?: undefined
   tickFormat?: ((value: unknown) => string) | undefined
   type: 'linear'
 interface LogScaleSpec
   domain?: readonly [number, number] | undefined
+  labels?: AxisLabelOptions | undefined
   nice?: undefined
   padding?: undefined
   tickFormat?: ((value: unknown) => string) | undefined
@@ -367,6 +382,7 @@ interface SvgRenderOptions
   idPrefix?: string | undefined
 interface TimeScaleSpec
   domain?: readonly [Date | number, Date | number] | undefined
+  labels?: AxisLabelOptions | undefined
   nice?: undefined
   padding?: undefined
   tickFormat?: ((value: unknown) => string) | undefined
@@ -422,9 +438,63 @@ function viewportFromPreset(preset: '1D' | '1M' | '1W' | '3M' | 'ALL' | 'YTD', e
 # referenced, not exported
 type BuiltinBase = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { plugin?: undefined; pluginOptions?: undefined; }
 type BuiltinCartesian = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+interface CompiledSceneV2Fields
+  readonly axes?: SceneAxes | undefined
+  readonly contractVersion?: 2 | undefined
+  readonly formatters?: SceneFormatters | undefined
+  readonly hoverSamples?: readonly SceneHoverSample[] | undefined
+  readonly legendLayout?: SceneLegendLayout | undefined
 type ErasedMarkPlugin = ChartMarkPlugin<unknown, unknown>
 interface NamedMarkOptions
   name?: string | undefined
 type PolarOrHeatmapMark = HeatmapChartMark | PieChartMark | RadarChartMark
+const SCENE_CONTRACT_VERSION: 2
 type ScalesForMarks<TMarks extends readonly ChartMark[]> = number extends TMarks['length'] ? { x?: XScaleSpec | undefined; y?: BandScaleSpec | YScaleSpec | undefined; } : TMarks extends readonly [HeatmapChartMark] ? { x?: BandScaleSpec | undefined; y?: BandScaleSpec | undefined; } : TMarks extends readonly [PieChartMark] | readonly [RadarChartMark, ...RadarChartMark[]] ? never : { x?: XScaleSpec | undefined; y?: YScaleSpec | undefined; }
+interface SceneAxes
+  readonly x: SceneAxis
+  readonly y: SceneAxis
+interface SceneAxis
+  readonly labelExtent: number
+  readonly position: 'bottom' | 'left' | 'right' | 'top'
+  readonly size: number
+  readonly ticks: readonly SceneTick[]
+  readonly title?: string | undefined
+interface SceneFormatters
+  readonly color?: SceneValueFormatter | undefined
+  readonly x: SceneValueFormatter
+  readonly y: SceneValueFormatter
+interface SceneHoverSample extends HoverSample
+  color: string
+  readonly datum: unknown
+  readonly index: number
+  kind: 'line' | 'point' | 'radar'
+  readonly markIndex: number
+  series: string
+  readonly seriesId: string
+  tip: string
+  x: number
+  readonly xValue: unknown
+  y: number
+  readonly yValue: null | number
+interface SceneLegendLayout
+  readonly overflow: number
+  readonly placement: 'bottom' | 'hidden' | 'right' | 'top'
+  readonly rows: readonly SceneLegendRow[]
+  readonly size: number
+interface SceneLegendRow
+  readonly color: string
+  readonly detail?: string | undefined
+  readonly hidden: boolean
+  readonly id: string
+  readonly markIndex: number
+  readonly name: string
+  readonly symbol: 'area' | 'circle' | 'line' | 'rect'
+interface SceneTick
+  readonly anchor: 'end' | 'middle' | 'start'
+  readonly label: string
+  readonly px: number
+  readonly rotation: number
+  readonly value: unknown
+  readonly weight?: number | undefined
+type SceneValueFormatter = (value: unknown) => string
 type ValidMarkComposition<TMarks extends readonly ChartMark[]> = number extends TMarks['length'] ? TMarks : TMarks extends readonly [HeatmapChartMark] | readonly [PieChartMark] | readonly [RadarChartMark, ...RadarChartMark[]] ? TMarks : Extract<TMarks[number], PolarOrHeatmapMark> extends never ? TMarks : never

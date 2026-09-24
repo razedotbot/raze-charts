@@ -2,7 +2,7 @@
   "entry": "react",
   "artifact": { "gzipBytes": 10240 },
   "scenarios": [
-    { "name": "React LineChart", "imports": ["LineChart", "Line", "XAxis", "YAxis", "Tooltip"], "gzipBytes": 37888 },
+    { "name": "React LineChart", "imports": ["LineChart", "Line", "XAxis", "YAxis", "Tooltip"], "gzipBytes": 48128 },
     { "name": "Grammar only", "imports": ["defineChart"], "gzipBytes": 2048 }
   ]
 }

@@ -3,7 +3,7 @@
 
 import { extent, scaleBand, scaleLinear, scaleLog, scaleTime, type AnyScale } from "../scales";
 import { ChartCompileError } from "./errors";
-import { isBuiltinKind, isPluginMark, type BarChartMark, type CartesianChartMark, type ChartMark } from "./marks";
+import { isBuiltinKind, isBuiltinMark, isPluginMark, type BarChartMark, type CartesianChartMark, type ChartMark } from "./marks";
 import type { BarPlan } from "./cartesian";
 import { asNumber, finiteBounds, isBandCategory, readChannel, stackKey, unique } from "./shared";
 import type {
@@ -58,6 +58,25 @@ function windowMarkData(mark: ChartMark, viewport: ChartViewport | undefined): r
   });
 }
 
+function isDateViewport(x: readonly [number | Date, number | Date]): boolean {
+  return x[0] instanceof Date || x[1] instanceof Date;
+}
+
+/** True when every Cartesian x value of the marks is a Date (the rule inferXType applies to the full data). */
+function marksHaveDateX(marks: readonly ChartMark[]): boolean {
+  let seen = false;
+  for (const mark of marks) {
+    if (!isBuiltinMark(mark) || !(mark.kind === "line" || mark.kind === "area" || mark.kind === "bar" || mark.kind === "point")) continue;
+    for (const row of mark.data) {
+      const x = rowXValue(mark, row);
+      // Gaps (null, objects) do not vote, exactly as in collectDomainValues.
+      if (x instanceof Date) seen = true;
+      else if (isBandCategory(x)) return false;
+    }
+  }
+  return seen;
+}
+
 /**
  * Apply the viewport to already legend-filtered marks: rows outside the X
  * window are dropped before geometry, and the window becomes the scale domain.
@@ -67,16 +86,20 @@ export function windowChartSpec(spec: ChartSpec, visibleMarks: readonly ChartMar
   let marks = visibleMarks;
   const viewport = spec.viewport;
   if (!viewport?.x && !viewport?.y && marks === spec.marks) return spec;
+  // The scale type comes from the whole data set, before windowing: a window
+  // must never turn a Date axis into a linear one (or guess from magnitude).
+  const windowXType = viewport?.x && isQuantitativeViewportX(viewport.x)
+    ? spec.scales?.x?.type ?? (isDateViewport(viewport.x) || marksHaveDateX(marks) ? "time" : undefined)
+    : undefined;
   marks = marks.map((mark) => ({ ...mark, data: windowMarkData(mark, viewport) }));
   const scales = { ...spec.scales };
   if (viewport?.x) {
     if (isQuantitativeViewportX(viewport.x)) {
       const lo = Math.min(asNumber(viewport.x[0]), asNumber(viewport.x[1]));
       const hi = Math.max(asNumber(viewport.x[0]), asNumber(viewport.x[1]));
-      const type = spec.scales?.x?.type ?? (lo > 1e11 ? "time" : "linear");
       scales.x = {
         ...scales.x,
-        type,
+        ...(windowXType ? { type: windowXType } : {}),
         domain: [lo, hi],
       } as XScaleSpec;
     } else {

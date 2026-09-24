@@ -132,12 +132,12 @@ export function crosshairValueLabel(c: CompiledChart, target: CrosshairTarget): 
     const bits = hit.tip.split("\n")[1]?.trim().split(/\s{2,}/) ?? [];
     return bits[1] ?? bits[0] ?? "";
   }
-  if ((isLine || isPoint) && sample) {
-    const yVal = (c.yScale as LinearScale).invert(sample.y);
-    return Number.isInteger(yVal) ? String(yVal) : yVal.toFixed(Math.abs(yVal) < 1 ? 2 : 1);
-  }
-  const yVal = (c.yScale as LinearScale).invert(y);
-  return Number.isInteger(yVal) ? String(yVal) : yVal.toFixed(Math.abs(yVal) < 1 ? 2 : 1);
+  // Scene v2 value formatter: data precision (or scales.y.tickFormat).
+  const format = c.formatters?.y ?? ((value: number): string => (
+    Number.isInteger(value) ? String(value) : value.toFixed(Math.abs(value) < 1 ? 2 : 1)
+  ));
+  if ((isLine || isPoint) && sample) return format((c.yScale as LinearScale).invert(sample.y));
+  return format((c.yScale as LinearScale).invert(y));
 }
 
 /** Category/time-axis crosshair chip text. */
