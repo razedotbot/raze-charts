@@ -1,8 +1,8 @@
 {
   "entry": "chart",
-  "artifact": { "gzipBytes": 45056 },
+  "artifact": { "gzipBytes": 54272 },
   "scenarios": [
-    { "name": "Line-only mount", "imports": ["defineChart", "line", "mountChart"], "gzipBytes": 33792 },
-    { "name": "Static line SVG", "imports": ["defineChart", "line", "renderChartSvg"], "gzipBytes": 23552 }
+    { "name": "Line-only mount", "imports": ["defineChart", "line", "mountChart"], "gzipBytes": 39936 },
+    { "name": "Static line SVG", "imports": ["defineChart", "line", "renderChartSvg"], "gzipBytes": 24576 }
   ]
 }

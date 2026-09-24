@@ -127,7 +127,7 @@ export function compileLineArea(ctx: MarkCompileContext, m: LineChartMark | Area
       const xv = readChannel(row as never, m.x as never);
       const yv = asNumber(readChannel(row as never, m.y as never));
       const tip = `${name}\n${formatX(xv)}   ${formatNum(yv)}`;
-      samples.push({ x: pts[i]!.x, y: pts[i]!.y, series: name, color, tip, kind: "line" });
+      samples.push({ x: pts[i]!.x, y: pts[i]!.y, series: name, color, tip, kind: "line", datum: row, xValue: xv, yValue: yv });
     }
   }
 
@@ -193,7 +193,7 @@ export function compilePoint(ctx: MarkCompileContext, m: PointChartMark, name: s
       tip,
       role: "point",
     });
-    samples.push({ x, y, series: name, color: fill, tip, kind: "point" });
+    samples.push({ x, y, series: name, color: fill, tip, kind: "point", datum: row, xValue: rawX, yValue: yv });
   }
 }
 
@@ -406,6 +406,8 @@ export function compileBar(ctx: MarkCompileContext, m: BarChartMark, name: strin
       corner: stacked ? "all" : (yv >= 0 ? "top" : "bottom"),
       valueY: y2,
       datum: row,
+      xValue: rawX,
+      yValue: yv,
       series: name,
       tip,
       role: "bar",

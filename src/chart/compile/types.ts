@@ -205,6 +205,10 @@ export interface SceneNodeBase {
   /** Plot-space endpoint representing the datum value (for example a negative bar bottom). */
   valueY?: number;
   curve?: ChartCurve;
+  /** Data-space x of the datum (a category on band scales). Set on bars. */
+  xValue?: unknown;
+  /** Data-space y of the datum (the segment value for stacked bars). Set on bars. */
+  yValue?: number;
 }
 
 /** Renderer-neutral geometry with required fields encoded by primitive kind. */
@@ -224,6 +228,18 @@ export interface HoverSample {
   color: string;
   tip: string;
   kind: "line" | "point" | "radar";
+  /** Stable series id: the mark's explicit `id`, otherwise `mark-<index>`. */
+  seriesId?: string;
+  /** Index of the producing mark in `ChartSpec.marks`. */
+  markIndex?: number;
+  /** Row index within the producing mark's `data`. */
+  index?: number;
+  /** Source row the sample was compiled from. */
+  datum?: unknown;
+  /** Data-space x (a category on band scales). */
+  xValue?: unknown;
+  /** Data-space y, or null when the row has no numeric value. */
+  yValue?: number | null;
 }
 
 export interface LastValue {

@@ -226,6 +226,6 @@ export function compileRadar(
       tip,
       role: "vertex",
     });
-    samples.push({ x: p.x, y: p.y, series: name, color, tip, kind: "radar" });
+    samples.push({ x: p.x, y: p.y, series: name, color, tip, kind: "radar", datum: row, xValue: axis, yValue: Number.isFinite(yv) ? yv : null });
   });
 }

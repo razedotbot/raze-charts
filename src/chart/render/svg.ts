@@ -5,6 +5,7 @@ import type { ChartDefinition, CompiledChart, SceneNode } from "../compile/types
 import { heatFill, type DashboardTheme } from "../theme";
 import { lastValuesSvg, valueAxisWidth } from "./chips";
 import { legendSvg } from "./legend";
+import { X_TICK_FONT_SIZE, placeXTickLabels } from "./ticks";
 import {
   AREA_GRADIENT_STOPS,
   arcPath,
@@ -165,9 +166,10 @@ function xAxisSvg(c: CompiledChart): string {
     `<rect x="0" y="${plot.y + plot.h}" width="${width}" height="${Math.max(0, height - plot.y - plot.h)}" fill="${esc(theme.background)}" />`,
     `<line x1="${c.heatmap ? plot.x : 0}" y1="${hair(plot.y + plot.h)}" x2="${c.heatmap ? plot.x + plot.w : width}" y2="${hair(plot.y + plot.h)}" stroke="${esc(theme.axis)}" />`,
     `<g data-role="x-labels">`,
-    ...c.xTicks.map((t) =>
-      `<text x="${t.px}" y="${plot.y + plot.h + 14}" text-anchor="middle" font-size="9" fill="${esc(theme.muted)}">${esc(t.label)}</text>`,
-    ),
+    ...placeXTickLabels(c).map((t) => {
+      const rotate = t.rotation ? ` transform="rotate(${t.rotation} ${t.x} ${t.y})"` : "";
+      return `<text x="${t.x}" y="${t.y}" text-anchor="${t.anchor}"${rotate} font-size="${X_TICK_FONT_SIZE}" fill="${esc(theme.muted)}">${esc(t.label)}</text>`;
+    }),
     `</g>`,
   ].join("");
 }

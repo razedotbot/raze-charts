@@ -24,6 +24,14 @@ provided. Mounted Canvas output uses the same image semantics and a visually
 hidden bounded summary derived from the description, series names, and values.
 This keeps renderer choice from dropping the chart's high-level meaning.
 
+Mounted charts put a native toggle button over each series legend entry on
+both renderers. The buttons sit in a labelled "Series" group, are named by the
+series, expose visibility through `aria-pressed`, and toggle with Enter or
+Space. Pie legends list slices rather than series, so they stay static and show
+no pointer cursor. Range presets are a labelled group of pressed-state buttons
+whose active indicator keeps at least 3:1 contrast against the pane in light
+and dark themes.
+
 Pointer tooltips are not a screen-reader data browser. When exact values or
 point-by-point comparison are necessary, render an adjacent HTML table or
 textual summary from the same source data. Keep that representation available

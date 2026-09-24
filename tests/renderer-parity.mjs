@@ -346,6 +346,8 @@ panWrap.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, cl
 assert.equal(panSelections.length, 1, "a sub-threshold pointer gesture selects with default pan enabled");
 assert.equal(panMount.getViewport(), null, "a sub-threshold pointer gesture does not create a pan viewport");
 assert.equal(panViewportChanges.length, 0, "a sub-threshold pointer gesture does not emit a viewport change");
+// Pans stay inside the data by default, so start from a zoomed-in window.
+panMount.setViewport({ x: [0, 12 * 86_400_000] });
 panWrap.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, clientX: 220, clientY: 80 }));
 panWrap.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientX: 160, clientY: 80 }));
 const panPlot = panWrap.querySelector("[data-role='plot']");

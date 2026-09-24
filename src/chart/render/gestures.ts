@@ -1,14 +1,23 @@
-// Mount gestures: legend toggles, click-to-select, wheel zoom, drag pan with
-// a live SVG preview, and Shift-drag brush selection.
+// Mount gestures: legend toggles, click-to-select, wheel zoom and horizontal
+// wheel pan (coalesced to one paint per frame), drag pan with a live SVG
+// preview, and Shift-drag brush selection. Zoom, pan, and brush windows obey
+// the mount's zoom limits and data bounds.
 
 import type { ChartViewport, CompiledChart } from "../compile/types";
-import { hitTestCompiled, nearestSample } from "./hit";
+import type { LinearScale } from "../scales";
+import { clampXWindow, isQuantitativeViewportX, quantitativeRange, zoomXWindow, type XWindowLimits } from "../viewport";
+import { clientToScene } from "./frame";
+import { layoutLegend, legendEntryAt } from "./legend";
+import { pointerEventFor, resolvePointer } from "./pointer";
+import type { HoverController } from "./overlay";
 import type { MountRuntime } from "./types";
+import { axisTransform } from "./zoom";
 
 type PanDrag = {
   kind: "pan";
-  startX: number;
-  startY: number;
+  /** Client-space pointer at the start of the current preview segment. */
+  startClientX: number;
+  startClientY: number;
   from: number;
   to: number;
   y?: [number, number];
@@ -16,129 +25,248 @@ type PanDrag = {
   viewportBeforeDrag: ChartViewport | null;
 };
 
+type BrushDrag = { kind: "brush"; startClientX: number };
+
 const panActivationDistance = 4;
+/** Zoom per wheel pixel: a classic 100px notch zooms by 1.12x. */
+const ZOOM_PER_PIXEL = Math.log(1.12) / 100;
+/** Bounds on one wheel event's zoom factor, so a huge delta cannot jump. */
+const MAX_EVENT_FACTOR = 2;
+const LINE_PIXELS = 16;
+
+export interface GestureController {
+  /** Remove every listener and cancel pending frames. */
+  detach(): void;
+  /** Paint a pending wheel window now (before a gesture reads the scene). */
+  flushWheel(): void;
+  /** Drop a pending wheel window (an external viewport took over). */
+  cancelWheel(): void;
+}
+
+/** Wheel delta in CSS pixels, whatever the event's delta mode. */
+function wheelPixels(delta: number, mode: number, pagePixels: number): number {
+  if (mode === 1) return delta * LINE_PIXELS;
+  if (mode === 2) return delta * pagePixels;
+  return delta;
+}
+
+/** Zoom factor for one wheel event (>1 zooms out); in and out are exact inverses. */
+export function wheelZoomFactor(deltaPixels: number): number {
+  const factor = Math.exp(deltaPixels * ZOOM_PER_PIXEL);
+  return Math.min(MAX_EVENT_FACTOR, Math.max(1 / MAX_EVENT_FACTOR, factor));
+}
+
+/** Current X window of a linear scene. */
+function sceneWindow(scene: CompiledChart): [number, number] {
+  const domain = (scene.xScale as LinearScale).domain;
+  return domain[0] <= domain[1] ? [domain[0], domain[1]] : [domain[1], domain[0]];
+}
 
 /**
  * Wire pointer, wheel, and selection handling onto the mount wrapper.
- * Returns a detach function that also cancels a pending pan repaint.
+ * Returns the controller whose detach also cancels pending repaints.
  */
-export function attachGestures(rt: MountRuntime, onHover: (ev: PointerEvent) => void): () => void {
+export function attachGestures(rt: MountRuntime, hover: HoverController): GestureController {
   const { state, dom } = rt;
-  const { wrap, stage, brushRect } = dom;
-  let drag: null | PanDrag | { kind: "brush"; startX: number } = null;
+  const { wrap, stage, brushRect, legend } = dom;
+  let drag: null | PanDrag | BrushDrag = null;
   let panRaf = 0;
-  let lastPanCssX = 0;
+  let lastPanClientX = 0;
+  let wheelRaf = 0;
+  let pendingWheel: [number, number] | null = null;
 
-  const plotXToDomain = (compiled: CompiledChart, cssX: number, box: DOMRect): number | null => {
-    if (compiled.xScale.kind !== "linear") return null;
-    const scaleX = (box.width || compiled.width) / compiled.width;
-    const x = cssX / scaleX;
-    return compiled.xScale.invert(x);
+  const setDrag = (next: typeof drag): void => {
+    drag = next;
+    state.dragging = next !== null;
   };
 
   const capturePointer = (ev: PointerEvent): void => {
     try { wrap.setPointerCapture(ev.pointerId); } catch { /* jsdom / detached */ }
   };
 
+  const schedule = (callback: () => void): number => {
+    if (typeof requestAnimationFrame === "function") return requestAnimationFrame(callback);
+    callback();
+    return 0;
+  };
+
+  const cancelFrame = (id: number): void => {
+    if (id && typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
+  };
+
+  /** Zoom `range` by `factor` around `anchor`, in the axis' linear space. */
+  const zoomWindow = (
+    scene: CompiledChart,
+    range: [number, number],
+    anchor: number,
+    factor: number,
+    limits: XWindowLimits,
+  ): [number, number] => {
+    const transform = axisTransform(scene.xScale as LinearScale);
+    if (transform.linear) return zoomXWindow(range, anchor, factor, limits);
+    const { to } = transform;
+    const zoomed = zoomXWindow([to(range[0]), to(range[1])], to(anchor), factor, {
+      extent: [to(limits.extent[0]), to(limits.extent[1])],
+      minSpan: 0,
+      maxSpan: Infinity,
+      bounded: limits.bounded,
+    });
+    return clampXWindow([transform.from(zoomed[0]), transform.from(zoomed[1])], limits);
+  };
+
+  /** Shift `range` by a fraction of its width, in the axis' linear space. */
+  const shiftWindow = (scene: CompiledChart, range: [number, number], fraction: number, limits: XWindowLimits | null): [number, number] => {
+    const transform = axisTransform(scene.xScale as LinearScale);
+    const t0 = transform.to(range[0]);
+    const t1 = transform.to(range[1]);
+    const delta = fraction * (t1 - t0);
+    const shifted: [number, number] = [transform.from(t0 + delta), transform.from(t1 + delta)];
+    return limits ? clampXWindow(shifted, limits) : shifted;
+  };
+
   const applyPanPreview = (userDx: number): void => {
     const svg = stage.querySelector("svg");
     if (!svg) return;
     const t = userDx ? `translate(${userDx})` : "";
-    const plot = svg.querySelector("[data-role='plot']");
-    const labels = svg.querySelector("[data-role='x-labels']");
-    if (plot) {
-      if (t) plot.setAttribute("transform", t);
-      else plot.removeAttribute("transform");
-    }
-    if (labels) {
-      if (t) labels.setAttribute("transform", t);
-      else labels.removeAttribute("transform");
+    for (const selector of ["[data-role='plot']", "[data-role='x-labels']"]) {
+      const layer = svg.querySelector(selector);
+      if (!layer) continue;
+      if (t) layer.setAttribute("transform", t);
+      else layer.removeAttribute("transform");
     }
   };
 
-  const panShift = (
-    compiled: CompiledChart,
-    pan: PanDrag,
-    cssX: number,
-    box: DOMRect,
-  ): { viewport: ChartViewport; userDx: number } => {
-    const scaleX = (box.width || compiled.width) / compiled.width;
-    const userDx = (cssX - pan.startX) / scaleX;
-    const delta = -(userDx / (compiled.plot.w || 1)) * (pan.to - pan.from);
-    const viewport: ChartViewport = { x: [pan.from + delta, pan.to + delta] };
+  /** Pan window for the pointer at `clientX`, and the scene-space preview offset it implies. */
+  const panShift = (compiled: CompiledChart, pan: PanDrag, clientX: number): { viewport: ChartViewport; userDx: number } => {
+    const frame = rt.frame();
+    const scale = frame?.scale ?? 1;
+    const requestedDx = (clientX - pan.startClientX) / scale;
+    const plotW = compiled.plot.w || 1;
+    const range = shiftWindow(compiled, [pan.from, pan.to], -requestedDx / plotW, rt.windowLimits());
+    const transform = axisTransform(compiled.xScale as LinearScale);
+    const span = transform.to(pan.to) - transform.to(pan.from) || 1;
+    const userDx = -((transform.to(range[0]) - transform.to(pan.from)) / span) * plotW;
+    const viewport: ChartViewport = { x: range };
     if (pan.y) viewport.y = pan.y;
     return { viewport, userDx };
   };
 
   const cancelPanRaf = (): void => {
-    if (!panRaf) return;
-    cancelAnimationFrame(panRaf);
+    cancelFrame(panRaf);
     panRaf = 0;
   };
 
   const schedulePanCommit = (): void => {
     if (panRaf) return;
-    const tick = (): void => {
+    panRaf = schedule(() => {
       panRaf = 0;
       if (state.destroyed || drag?.kind !== "pan") return;
       if ((state.options.renderer ?? "svg") !== "canvas") return;
       rt.paint();
       if (drag?.kind !== "pan" || state.scene?.xScale.kind !== "linear") return;
-      drag.startX = lastPanCssX;
-      drag.from = state.scene.xScale.domain[0];
-      drag.to = state.scene.xScale.domain[1];
+      drag.startClientX = lastPanClientX;
+      [drag.from, drag.to] = sceneWindow(state.scene);
       applyPanPreview(0);
-    };
-    if (typeof requestAnimationFrame === "function") panRaf = requestAnimationFrame(tick);
-    else tick();
+    });
+  };
+
+  const cancelWheel = (): void => {
+    cancelFrame(wheelRaf);
+    wheelRaf = 0;
+    pendingWheel = null;
+  };
+
+  const flushWheel = (): void => {
+    const next = pendingWheel;
+    cancelWheel();
+    if (!next || state.destroyed) return;
+    rt.emitViewport({ x: next });
+  };
+
+  /** Window the next wheel event builds on: the pending one, else the painted one. */
+  const wheelBase = (scene: CompiledChart): [number, number] => {
+    if (pendingWheel) return pendingWheel;
+    const x = state.viewport?.x;
+    return x && isQuantitativeViewportX(x) ? quantitativeRange(x) : sceneWindow(scene);
   };
 
   const onWheel = (ev: WheelEvent): void => {
     if (rt.isChromeEvent(ev)) return;
     const compiled = state.scene;
     const interact = rt.flags();
-    if (!interact.zoom || !compiled || compiled.polar || compiled.heatmap || compiled.xScale.kind !== "linear") return;
+    if (!compiled || compiled.polar || compiled.heatmap || compiled.xScale.kind !== "linear") return;
+    const frame = rt.frame();
+    const limits = rt.windowLimits();
+    if (!frame || !limits) return;
+    const pagePixels = compiled.plot.w * frame.scale;
+    const dx = wheelPixels(ev.deltaX, ev.deltaMode, pagePixels);
+    const dy = wheelPixels(ev.deltaY, ev.deltaMode, pagePixels);
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    // Horizontal swipes pan when panning is on; otherwise the page keeps them.
+    if (horizontal ? !interact.pan : !interact.zoom || dy === 0) return;
     ev.preventDefault();
-    const box = wrap.getBoundingClientRect();
-    const domain = compiled.xScale.domain;
-    const [lo, hi] = domain[0] <= domain[1] ? domain : [domain[1], domain[0]];
-    const factor = ev.deltaY > 0 ? 1.12 : 0.88;
-    const anchor = plotXToDomain(compiled, ev.clientX - box.left, box) ?? (lo + hi) / 2;
-    const nextLo = anchor - (anchor - lo) * factor;
-    const nextHi = anchor + (hi - anchor) * factor;
-    rt.emitViewport({ x: [nextLo, nextHi] });
+    const base = wheelBase(compiled);
+    if (horizontal) {
+      pendingWheel = shiftWindow(compiled, base, dx / Math.max(1, pagePixels), limits);
+    } else {
+      const { x } = clientToScene(frame, ev.clientX, ev.clientY);
+      const transform = axisTransform(compiled.xScale as LinearScale);
+      const fraction = Math.min(1, Math.max(0, (x - compiled.plot.x) / (compiled.plot.w || 1)));
+      const t0 = transform.to(base[0]);
+      const anchor = transform.from(t0 + fraction * (transform.to(base[1]) - t0));
+      pendingWheel = zoomWindow(compiled, base, anchor, wheelZoomFactor(dy), limits);
+    }
+    if (!wheelRaf) {
+      wheelRaf = schedule(() => {
+        wheelRaf = 0;
+        flushWheel();
+      });
+    }
+  };
+
+  const toggleFromEvent = (ev: PointerEvent, compiled: CompiledChart): boolean => {
+    const target = ev.target as Element | null;
+    const marked = target?.closest?.("[data-series]");
+    if (marked && stage.contains(marked)) {
+      const key = marked.getAttribute("data-series");
+      if (key && layoutLegend(compiled).toggleable) {
+        rt.toggleSeries(key);
+        return true;
+      }
+    }
+    const frame = rt.frame();
+    if (!frame) return false;
+    const { x, y } = clientToScene(frame, ev.clientX, ev.clientY);
+    const entry = legendEntryAt(compiled, x, y);
+    if (!entry) return false;
+    rt.toggleSeries(entry.key);
+    return true;
   };
 
   const onPointerDown = (ev: PointerEvent): void => {
     if (rt.isChromeEvent(ev)) return;
+    flushWheel();
     const compiled = state.scene;
     const interact = rt.flags();
-    if (!compiled || compiled.polar || compiled.heatmap) return;
-    const target = ev.target as Element | null;
-    const series = target?.closest?.("[data-series]")?.getAttribute("data-series");
-    if (series) {
-      if (state.hidden.has(series)) state.hidden.delete(series);
-      else state.hidden.add(series);
-      rt.paint();
-      return;
-    }
-    const box = wrap.getBoundingClientRect();
-    const cssX = ev.clientX - box.left;
-    const cssY = ev.clientY - box.top;
-    if (ev.shiftKey && interact.brush) {
-      drag = { kind: "brush", startX: cssX };
-      brushRect.style.display = "block";
+    if (!compiled) return;
+    if (toggleFromEvent(ev, compiled)) return;
+    if (compiled.polar || compiled.heatmap) return;
+    const frame = rt.frame();
+    if (!frame) return;
+    if (ev.shiftKey && interact.brush && compiled.xScale.kind === "linear") {
+      setDrag({ kind: "brush", startClientX: ev.clientX });
+      rt.hideOverlay();
       ev.preventDefault();
       window.getSelection?.()?.removeAllRanges();
       capturePointer(ev);
       return;
     }
     if (interact.pan && compiled.xScale.kind === "linear") {
-      const [from, to] = compiled.xScale.domain;
-      drag = {
+      const [from, to] = sceneWindow(compiled);
+      setDrag({
         kind: "pan",
-        startX: cssX,
-        startY: cssY,
+        startClientX: ev.clientX,
+        startClientY: ev.clientY,
         from,
         to,
         y: compiled.yScale.kind === "linear"
@@ -146,12 +274,23 @@ export function attachGestures(rt: MountRuntime, onHover: (ev: PointerEvent) => 
           : undefined,
         moved: false,
         viewportBeforeDrag: state.viewport,
-      };
-      lastPanCssX = cssX;
+      });
+      lastPanClientX = ev.clientX;
       ev.preventDefault();
       window.getSelection?.()?.removeAllRanges();
       capturePointer(ev);
     }
+  };
+
+  /** Brush x range in scene space, clamped to the plot. */
+  const brushSpan = (compiled: CompiledChart, brush: BrushDrag, clientX: number): [number, number] | null => {
+    const frame = rt.frame();
+    if (!frame) return null;
+    const { plot } = compiled;
+    const clampX = (value: number): number => Math.max(plot.x, Math.min(plot.x + plot.w, value));
+    const a = clampX(clientToScene(frame, brush.startClientX, 0).x);
+    const b = clampX(clientToScene(frame, clientX, 0).x);
+    return a <= b ? [a, b] : [b, a];
   };
 
   const onPointerDrag = (ev: PointerEvent): void => {
@@ -159,26 +298,25 @@ export function attachGestures(rt: MountRuntime, onHover: (ev: PointerEvent) => 
     ev.preventDefault();
     const compiled = state.scene;
     if (!compiled) return;
-    const box = wrap.getBoundingClientRect();
-    const cssX = ev.clientX - box.left;
-    const cssY = ev.clientY - box.top;
     if (drag.kind === "brush") {
-      const left = Math.min(drag.startX, cssX);
-      brushRect.style.left = `${left}px`;
-      brushRect.style.top = `${compiled.plot.y}px`;
-      brushRect.style.width = `${Math.abs(cssX - drag.startX)}px`;
-      brushRect.style.height = `${compiled.plot.h}px`;
+      const frame = rt.frame();
+      const span = brushSpan(compiled, drag, ev.clientX);
+      if (!frame || !span) return;
+      brushRect.style.left = `${frame.left + span[0] * frame.scale}px`;
+      brushRect.style.top = `${frame.top + compiled.plot.y * frame.scale}px`;
+      brushRect.style.width = `${(span[1] - span[0]) * frame.scale}px`;
+      brushRect.style.height = `${compiled.plot.h * frame.scale}px`;
       brushRect.style.display = "block";
       return;
     }
     if (!drag.moved) {
-      if (Math.hypot(cssX - drag.startX, cssY - drag.startY) < panActivationDistance) return;
+      if (Math.hypot(ev.clientX - drag.startClientX, ev.clientY - drag.startClientY) < panActivationDistance) return;
       drag.moved = true;
       rt.hideOverlay();
       wrap.style.cursor = "grabbing";
     }
-    lastPanCssX = cssX;
-    const { viewport, userDx } = panShift(compiled, drag, cssX, box);
+    lastPanClientX = ev.clientX;
+    const { viewport, userDx } = panShift(compiled, drag, ev.clientX);
     state.viewport = viewport;
     applyPanPreview(userDx);
     schedulePanCommit();
@@ -187,44 +325,34 @@ export function attachGestures(rt: MountRuntime, onHover: (ev: PointerEvent) => 
   const onPointerUp = (ev: PointerEvent): void => {
     if (!drag && rt.isChromeEvent(ev)) return;
     const compiled = state.scene;
-    const box = wrap.getBoundingClientRect();
-    const cssX = ev.clientX - box.left;
+    const finished = drag;
+    setDrag(null);
     cancelPanRaf();
     wrap.style.cursor = "";
-    if (drag?.kind === "brush" && compiled && compiled.xScale.kind === "linear") {
-      const a = plotXToDomain(compiled, drag.startX, box);
-      const b = plotXToDomain(compiled, cssX, box);
-      brushRect.style.display = "none";
-      if (a != null && b != null && Math.abs(a - b) > 0) {
-        rt.emitViewport({ x: a < b ? [a, b] : [b, a] });
+    brushRect.style.display = "none";
+    if (finished?.kind === "brush" && compiled && compiled.xScale.kind === "linear") {
+      const span = brushSpan(compiled, finished, ev.clientX);
+      const scale = compiled.xScale;
+      if (span && span[1] - span[0] > 0) {
+        const limits = rt.windowLimits();
+        const range: [number, number] = [scale.invert(span[0]), scale.invert(span[1])];
+        rt.emitViewport({ x: limits ? clampXWindow(range, limits) : range });
       }
-    } else if (drag?.kind === "pan" && drag.moved && compiled && compiled.xScale.kind === "linear") {
-      const { viewport } = panShift(compiled, drag, cssX, box);
+    } else if (finished?.kind === "pan" && finished.moved && compiled && compiled.xScale.kind === "linear") {
+      const { viewport } = panShift(compiled, finished, ev.clientX);
       applyPanPreview(0);
       rt.emitViewport({ x: viewport.x });
-    } else if ((!drag || (drag.kind === "pan" && !drag.moved)) && compiled) {
-      const scaleX = (box.width || compiled.width) / compiled.width;
-      const scaleY = (box.height || compiled.height) / compiled.height;
-      const x = (ev.clientX - box.left) / scaleX;
-      const y = (ev.clientY - box.top) / scaleY;
-      const sample = nearestSample(compiled, x, y);
-      const node = hitTestCompiled(compiled, x, y);
-      state.options.onSelect?.({
-        x: compiled.xScale.kind === "linear" ? compiled.xScale.invert(x) : x,
-        y: compiled.yScale.kind === "linear" ? compiled.yScale.invert(y) : undefined,
-        series: sample?.series ?? node?.series,
-        datum: node?.datum,
-        node,
-        sample,
-      });
+    } else if ((!finished || (finished.kind === "pan" && !finished.moved)) && compiled) {
+      const frame = rt.frame();
+      if (!frame) return;
+      const { x, y } = clientToScene(frame, ev.clientX, ev.clientY);
+      state.options.onSelect?.(pointerEventFor(resolvePointer(compiled, x, y)));
     }
-    drag = null;
-    brushRect.style.display = "none";
   };
 
   const onPointerCancel = (): void => {
     const cancelled = drag;
-    drag = null;
+    setDrag(null);
     cancelPanRaf();
     wrap.style.cursor = "";
     brushRect.style.display = "none";
@@ -241,25 +369,49 @@ export function attachGestures(rt: MountRuntime, onHover: (ev: PointerEvent) => 
   };
 
   const onPointerMoveAll = (ev: PointerEvent): void => {
-    onPointerDrag(ev);
-    if (!drag) onHover(ev);
+    if (drag) {
+      state.pointer = { clientX: ev.clientX, clientY: ev.clientY };
+      onPointerDrag(ev);
+      return;
+    }
+    hover.move(ev);
+  };
+
+  const onPointerLeave = (): void => {
+    hover.leave();
+  };
+
+  const onLegendClick = (ev: MouseEvent): void => {
+    const button = (ev.target as Element | null)?.closest?.("button[data-series]");
+    const key = button?.getAttribute("data-series");
+    if (!key) return;
+    ev.stopPropagation();
+    rt.toggleSeries(key);
   };
 
   wrap.addEventListener("pointermove", onPointerMoveAll);
-  wrap.addEventListener("pointerleave", rt.hideOverlay);
+  wrap.addEventListener("pointerleave", onPointerLeave);
   wrap.addEventListener("pointerdown", onPointerDown);
   wrap.addEventListener("pointerup", onPointerUp);
   wrap.addEventListener("pointercancel", onPointerCancel);
   wrap.addEventListener("selectstart", onSelectStart);
   wrap.addEventListener("wheel", onWheel, { passive: false });
-  return () => {
-    cancelPanRaf();
-    wrap.removeEventListener("pointermove", onPointerMoveAll);
-    wrap.removeEventListener("pointerleave", rt.hideOverlay);
-    wrap.removeEventListener("pointerdown", onPointerDown);
-    wrap.removeEventListener("pointerup", onPointerUp);
-    wrap.removeEventListener("pointercancel", onPointerCancel);
-    wrap.removeEventListener("selectstart", onSelectStart);
-    wrap.removeEventListener("wheel", onWheel);
+  legend.addEventListener("click", onLegendClick);
+  return {
+    detach() {
+      cancelPanRaf();
+      cancelWheel();
+      setDrag(null);
+      wrap.removeEventListener("pointermove", onPointerMoveAll);
+      wrap.removeEventListener("pointerleave", onPointerLeave);
+      wrap.removeEventListener("pointerdown", onPointerDown);
+      wrap.removeEventListener("pointerup", onPointerUp);
+      wrap.removeEventListener("pointercancel", onPointerCancel);
+      wrap.removeEventListener("selectstart", onSelectStart);
+      wrap.removeEventListener("wheel", onWheel);
+      legend.removeEventListener("click", onLegendClick);
+    },
+    flushWheel,
+    cancelWheel,
   };
 }

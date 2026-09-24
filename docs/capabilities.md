@@ -75,8 +75,8 @@ registry created there is standalone; pass definitions to a widget through
 | Radar | **Yes** | Multiple layers may overlay when their category axes match; Cartesian scales and non-radar marks are rejected. |
 | Heatmap | **Yes** | Standalone composition with configured band-domain layout, a diverging color scale, square cells, and labels where space permits. |
 | Reference rules | **Yes** | `ruleY` / `ruleX`; React `ReferenceLine` accepts exactly one of `y` or `x`. |
-| Tooltip and crosshair | **Yes** | Pointer interaction in `mountChart`; native default is enabled unless set to `false`. Structured tooltip payloads are exposed through `onTooltip`. |
-| Legend | **Yes** | Built from series metadata; click hides a series on a mount. |
+| Tooltip and crosshair | **Yes** | Pointer interaction in `mountChart`; native default is enabled unless set to `false`. `onTooltip`/`onSelect` payloads are data-space: `x` is a number on quantitative axes and the category on band axes, and samples carry `datum`, `index`, `markIndex`, and `seriesId`. Crosshair chips show the hovered datum, not the nearest tick. The tooltip stays under a stationary pointer across `update()`, resizes, and viewport changes. Overlays map through the plotted stage, so presets, the navigator, and CSS scaling do not offset them. |
+| Legend | **Yes** | Built from series metadata; click, or keyboard on the legend's toggle buttons (`aria-pressed`), hides a series on SVG and Canvas mounts alike. Pie legends list slices and do not toggle. |
 | Responsive mount | **Yes** | `ResizeObserver` when an explicit width is not supplied. |
 | Custom mark plugin | **Yes** | Typed domain contribution and scene compilation through `defineMarkPlugin`; contexts are isolated and returned domains/scene geometry are validated. |
 | Runtime definition validation | **Yes** | `ChartCompileError` carries stable codes for malformed specs, composition, scales, sizes, mark-specific options, channels, and plugins. |
@@ -84,7 +84,7 @@ registry created there is standalone; pass definitions to a widget through
 | Renderer-neutral scene inspection | **Yes** | `compileChart` and `MountHandle.getScene()`. |
 | Multiple coordinated panes | **Subset** | `createViewportGroup()` syncs X windows across mounts; the compiler does not layout multi-plot chrome. |
 | Animation/transitions | **No** | Updates repaint immediately. |
-| Viewport brush or controlled zoom | **Yes** | `ChartSpec.viewport` windows rows before map/decimate; `mountChart` brush/zoom/pan; optional range presets and navigator. |
+| Viewport brush or controlled zoom | **Yes** | `ChartSpec.viewport` windows rows before map/decimate; `mountChart` brush/zoom/pan; optional range presets and navigator. Zoom is bounded by `interaction.zoom.minSpan` (default three data points) and `maxSpan` (default the full extent); `interaction.panBounds` (`"data"` by default, or `"none"`) keeps pan, brush, and navigator windows inside the data. Wheel, trackpad, and resize repaints are coalesced to one per animation frame; horizontal wheel pans. Invalid limits throw. |
 | Automatic dense line/area decimation | **Yes** | Pixel-aware extrema envelope; defaults to two rendered points per plot pixel. Input scanning remains O(n). |
 | Decimation diagnostics and opt-out | **Yes** | `CompiledChart.diagnostics`; tune `maxRenderedPoints` or set `decimation: "none"`. |
 | Retained scene diffing | **No** | `update()` preserves the mount, then recompiles and repaints the scene. |

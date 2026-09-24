@@ -67,11 +67,11 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
 | | Scenario: Widget only | `import { widget }` | 63 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 44 KiB |
-| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33 KiB |
-| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 23 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 53 KiB |
+| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 39 KiB |
+| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 24 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
-| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 37 KiB |
+| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 42 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
 | Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 5 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
@@ -94,6 +94,19 @@ The native artifact allowance grew from 42 to 44 KiB when the compiler and
 renderers were split into `src/chart/compile/*` and `src/chart/render/*`: the
 unminified artifact keeps every function and property name, so the module
 boundaries added about 2.2 KiB with byte-identical output.
+The native renderer and mount correctness package (W1B-03) raised the native
+artifact from 44 to 53 KiB, "Line-only mount" from 33 to 39 KiB, "Static line
+SVG" from 23 to 24 KiB, and "React LineChart" from 37 to 42 KiB. Measured on
+its branch, the consumer mount scenario grew by about 5.7 KiB gzip (14.5 KiB
+minified): zoom limits, option validation, and the data-spacing default
+(about 2.3 KiB minified), structured pointer targets shared by hover, chips,
+and `onTooltip`/`onSelect` (about 2.1 KiB), the shared legend layout with
+hit-testing, hidden rows, scene v2 wrapping, and keyboard toggle buttons
+(about 2.6 KiB), rAF-coalesced wheel and resize with the cached full-data
+scene (about 3 KiB across mount and gestures), the stage frame and edge tick
+placement (about 1.1 KiB), and `t()` for the new accessible labels (about
+0.9 KiB). The static SVG path only pays for the legend layout, bounded chip
+stacking, and edge-anchored ticks.
 
 The root artifact budget was raised from 55 KiB to the 72 KiB hard cap set by
 architecture decision AD-01, and the "Widget only" scenario from 49 KiB to

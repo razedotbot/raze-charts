@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Native mount fixture</title>
+  <style>
+    body { margin: 0; background: #181615; }
+    #host { width: 560px; height: 340px; margin: 24px; }
+  </style>
+</head>
+<body>
+  <div id="host"></div>
+  <script type="module">
+    // Real-browser fixture for tests/native-mount.spec.ts: the spec mounts
+    // charts through window.__chart so each test controls its own options.
+    import * as chart from "../../dist/chart.esm.js";
+    window.__chart = chart;
+    window.__ready = true;
+  </script>
+</body>
+</html>

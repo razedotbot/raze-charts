@@ -1,20 +1,54 @@
 // Range chrome for Cartesian mounts: the preset button group and the
 // navigator strip with its sparkline.
 
+import { t } from "../../i18n";
 import { asNumber } from "../compile/shared";
 import type { CompiledChart } from "../compile/types";
-import { RANGE_PRESETS, presetZoomsIn, viewportFromPreset, type RangePreset } from "../viewport";
+import { chartColorWithOpacity, parseChartColor, type DashboardTheme, type ParsedChartColor } from "../theme";
+import { RANGE_PRESETS, clampXWindow, presetZoomsIn, viewportFromPreset, type RangePreset } from "../viewport";
 import type { MountRuntime } from "./types";
 
 export interface RangeChrome {
   /** Show or hide the preset bar and navigator for the scene family. */
   prepare(polar: boolean, heatmap: boolean): void;
-  /** Reflect the live viewport in preset visibility and pressed state. */
-  syncPresets(): void;
+  /** Reflect the live viewport in preset visibility, pressed state, and theme. */
+  syncPresets(theme: DashboardTheme): void;
   /** Redraw the navigator sparkline from the full-data scene. */
   paintNavigator(compiled: CompiledChart, fullScene: CompiledChart | null): void;
   /** Wire preset/navigator pointer handling; returns the detach function. */
   attach(): () => void;
+}
+
+function relativeLuminance(color: ParsedChartColor, surface: ParsedChartColor): number {
+  // Composite translucent colours over the surface before measuring.
+  const alpha = color.a;
+  const channel = (value: number, base: number): number => {
+    const mixed = (value * alpha + base * (1 - alpha)) / 255;
+    return mixed <= 0.04045 ? mixed / 12.92 : Math.pow((mixed + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(color.r, surface.r) + 0.7152 * channel(color.g, surface.g) + 0.0722 * channel(color.b, surface.b);
+}
+
+/** WCAG contrast ratio of `color` against `background` (both theme colour strings). */
+export function colorContrast(color: string, background: string): number {
+  const bg = parseChartColor(background) ?? { r: 255, g: 255, b: 255, a: 1 };
+  const surface = { ...bg, a: 1 };
+  const fg = parseChartColor(color);
+  if (!fg) return 1;
+  const a = relativeLuminance(fg, surface);
+  const b = relativeLuminance(surface, surface);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+/** Minimum contrast of the active-preset indicator against the pane (WCAG 1.4.11). */
+export const PRESET_INDICATOR_CONTRAST = 3;
+
+/**
+ * Colour that marks the active range preset: the theme accent when it reaches
+ * 3:1 against the pane, otherwise the text colour (which always does).
+ */
+export function presetIndicatorColor(theme: DashboardTheme): string {
+  return colorContrast(theme.accent, theme.background) >= PRESET_INDICATOR_CONTRAST ? theme.accent : theme.text;
 }
 
 /** Current X domain of a linear scene. */
@@ -32,7 +66,8 @@ export function createRangeChrome(rt: MountRuntime): RangeChrome {
     state.fullXExtent ?? linearExtent(state.scene)
   );
 
-  const syncPresets = (): void => {
+  const syncPresets = (theme: DashboardTheme): void => {
+    const indicator = presetIndicatorColor(theme);
     const extent = resolvedExtent();
     const vp = state.viewport?.x;
     for (const btn of presetsBar.querySelectorAll("button")) {
@@ -50,30 +85,25 @@ export function createRangeChrome(rt: MountRuntime): RangeChrome {
       }
       btn.setAttribute("aria-pressed", String(on));
       btn.style.fontWeight = on ? "600" : "400";
-      btn.style.background = on
-        ? "var(--tv-color-toolbar-button-background-active, rgba(255,255,255,0.1))"
-        : "transparent";
+      btn.style.color = on ? theme.text : theme.muted;
+      btn.style.background = on ? chartColorWithOpacity(indicator, 0.16) : "transparent";
+      btn.style.boxShadow = on ? `inset 0 -2px 0 ${indicator}` : "none";
+      btn.style.outlineColor = indicator;
     }
   };
 
   const ensurePresetButtons = (): void => {
     if (presetsBar.childElementCount) return;
     presetsBar.setAttribute("role", "group");
-    presetsBar.setAttribute("aria-label", "Visible time range");
+    presetsBar.setAttribute("aria-label", t("chart.rangePresets.label", "Visible time range"));
     for (const preset of RANGE_PRESETS) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = preset;
-      btn.setAttribute("aria-label", `Range ${preset}`);
-      btn.style.cssText = "border:0;background:transparent;color:inherit;font:inherit;font-size:11px;padding:2px 6px;border-radius:3px;cursor:pointer;touch-action:manipulation;";
-      btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
-      btn.addEventListener("pointerup", (ev) => ev.stopPropagation());
-      btn.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        const extent = resolvedExtent();
-        if (!extent) return;
-        rt.emitViewport(viewportFromPreset(preset, extent));
-      });
+      btn.setAttribute("aria-label", t("chart.rangePresets.preset", "Range {preset}", { preset }));
+      // A fixed box keeps the bar height independent of the font that arrives with the theme.
+      btn.style.cssText = "box-sizing:border-box;height:20px;border:0;background:transparent;color:inherit;font:inherit;font-size:11px;line-height:16px;padding:2px 6px;border-radius:3px 3px 0 0;cursor:pointer;touch-action:manipulation;";
+      btn.dataset.preset = preset;
       presetsBar.appendChild(btn);
     }
   };
@@ -97,7 +127,9 @@ export function createRangeChrome(rt: MountRuntime): RangeChrome {
     const span = (viewport?.x && viewport.x.length === 2)
       ? Math.abs(asNumber(viewport.x[1]) - asNumber(viewport.x[0]))
       : (extent[1] - extent[0]) * 0.25;
-    rt.emitViewport({ x: [mid - span / 2, mid + span / 2] });
+    const limits = rt.windowLimits();
+    const centred: [number, number] = [mid - span / 2, mid + span / 2];
+    rt.emitViewport({ x: limits ? clampXWindow(centred, limits) : centred });
   };
 
   const paintNavigator = (compiled: CompiledChart, fullScene: CompiledChart | null): void => {
@@ -143,10 +175,22 @@ export function createRangeChrome(rt: MountRuntime): RangeChrome {
     ev.stopPropagation();
   };
 
+  /** One delegated listener serves every preset button, so detach releases them all. */
+  const onPresetClick = (ev: MouseEvent): void => {
+    const button = (ev.target as Element | null)?.closest?.("button[data-preset]");
+    const preset = button?.getAttribute("data-preset") as RangePreset | null | undefined;
+    if (!preset || !RANGE_PRESETS.includes(preset)) return;
+    ev.stopPropagation();
+    const extent = resolvedExtent();
+    if (!extent) return;
+    rt.emitViewport(viewportFromPreset(preset, extent));
+  };
+
   const attach = (): (() => void) => {
     presetsBar.addEventListener("pointerdown", stopChromePointer);
     presetsBar.addEventListener("pointerup", stopChromePointer);
     presetsBar.addEventListener("wheel", stopChromePointer);
+    presetsBar.addEventListener("click", onPresetClick);
     nav.addEventListener("pointerdown", onNavPointerDown);
     nav.addEventListener("pointerup", stopChromePointer);
     nav.addEventListener("wheel", stopChromePointer);
@@ -154,6 +198,7 @@ export function createRangeChrome(rt: MountRuntime): RangeChrome {
       presetsBar.removeEventListener("pointerdown", stopChromePointer);
       presetsBar.removeEventListener("pointerup", stopChromePointer);
       presetsBar.removeEventListener("wheel", stopChromePointer);
+      presetsBar.removeEventListener("click", onPresetClick);
       nav.removeEventListener("pointerdown", onNavPointerDown);
       nav.removeEventListener("pointerup", stopChromePointer);
       nav.removeEventListener("wheel", stopChromePointer);

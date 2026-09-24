@@ -1,23 +1,69 @@
 // Mount contracts: the public options/handle/event types and the internal
 // runtime shared by the mount, overlay, range-chrome, and gesture modules.
 
-import type { ChartDefinition, ChartViewport, CompiledChart, HoverSample, SceneNode } from "../compile/types";
+import type { ChartDefinition, ChartSpec, ChartViewport, CompiledChart, HoverSample, SceneNode } from "../compile/types";
+import type { XWindowLimits } from "../viewport";
+import type { StageFrame } from "./frame";
 
+/**
+ * Pointer payload for `onTooltip` and `onSelect`. Values are structured and
+ * data-space: nothing here is parsed from tooltip text or left as a pixel.
+ */
 export interface ChartPointerEvent {
+  /**
+   * Data-space x: a number on quantitative axes (epoch milliseconds on time
+   * axes), the category on band axes, the axis or slice label on polar charts.
+   */
   x: unknown;
+  /**
+   * Data-space y on quantitative axes: the datum value for samples and bars,
+   * otherwise the value under the pointer. Undefined on band and pie axes.
+   */
   y?: number;
+  /** Series name of the hovered sample or mark. */
   series?: string;
+  /** Stable series id (the mark's `id`, otherwise `mark-<index>`). */
+  seriesId?: string;
+  /** Source row of the hovered sample or mark. */
   datum?: unknown;
+  /** Row index of `datum` within its mark's `data`. */
+  index?: number;
+  /** Index of the producing mark in `ChartSpec.marks`. */
+  markIndex?: number;
   node: SceneNode | null;
   sample: HoverSample | null;
 }
 
 export interface MountInteraction {
   brush?: boolean;
-  zoom?: boolean;
+  /**
+   * Wheel and pinch zoom. Pass an object to bound it, in X data units
+   * (milliseconds on time axes):
+   * - `minSpan`: narrowest window. Default: three data points, or two plot
+   *   pixels of the full extent when the data spacing is unknown.
+   * - `maxSpan`: widest window. Default: the full data extent.
+   */
+  zoom?: boolean | { minSpan?: number; maxSpan?: number };
   pan?: boolean;
+  /**
+   * `"data"` (default) keeps pan, zoom, brush, and navigator windows inside the
+   * data extent. `"none"` lets the window leave it (zoom limits still apply).
+   */
+  panBounds?: "data" | "none";
   navigator?: boolean;
   rangePresets?: boolean;
+}
+
+/** Interaction flags after defaults and validation. */
+export interface ResolvedInteraction {
+  brush: boolean;
+  zoom: boolean;
+  pan: boolean;
+  navigator: boolean;
+  rangePresets: boolean;
+  panBounds: "data" | "none";
+  minSpan?: number;
+  maxSpan?: number;
 }
 
 export interface MountChartOptions {
@@ -54,10 +100,16 @@ export interface MountState {
   viewport: ChartViewport | null;
   /** Series toggled off through the legend or options.hiddenSeries. */
   hidden: Set<string>;
-  /** Full-data X extent used by presets and the navigator. */
+  /** Full-data X extent used by presets, the navigator, and zoom limits. */
   fullXExtent: [number, number] | null;
+  /** Spec behind the full-data scene; zoom defaults read its data spacing. */
+  fullSpec: ChartSpec | null;
   lastInputWidth: number;
   lastInputHeight: number;
+  /** Last pointer position over the mount, kept so repaints can re-run hover. */
+  pointer: { clientX: number; clientY: number } | null;
+  /** True while a pan or brush drag owns the pointer. */
+  dragging: boolean;
   destroyed: boolean;
 }
 
@@ -73,6 +125,8 @@ export interface MountDom {
   dot: HTMLDivElement;
   tip: HTMLDivElement;
   a11y: HTMLDivElement;
+  /** Transparent, keyboard-reachable toggle buttons over the legend entries. */
+  legend: HTMLDivElement;
   presetsBar: HTMLDivElement;
   nav: HTMLDivElement;
   brushRect: HTMLDivElement;
@@ -82,14 +136,20 @@ export interface MountDom {
 export interface MountRuntime {
   state: MountState;
   dom: MountDom;
-  /** Resolved interaction flags for the current options. */
-  flags(): MountInteraction;
-  /** True for events inside the preset bar or navigator. */
+  /** Resolved interaction flags for the current options; throws on invalid options. */
+  flags(): ResolvedInteraction;
+  /** True for events inside the preset bar, navigator, or legend toggles. */
   isChromeEvent(ev: Event): boolean;
+  /** Where the painted scene sits in the viewport, for pointer mapping. */
+  frame(): StageFrame | null;
+  /** Zoom and pan limits for the live scene, or null when the X axis is not quantitative. */
+  windowLimits(): XWindowLimits | null;
   /** Recompile and repaint; throws after destroy(). */
   paint(): void;
   /** Commit a viewport, notify onViewportChange, and repaint. */
   emitViewport(next: ChartViewport): void;
+  /** Show or hide a series by legend key and repaint. */
+  toggleSeries(key: string): void;
   /** Hide the crosshair, chips, tooltip, and slice emphasis. */
   hideOverlay(): void;
 }

@@ -135,9 +135,12 @@ interface ChartPerformanceOptions
   maxRenderedPoints?: number | undefined
 interface ChartPointerEvent
   datum?: unknown
+  index?: number | undefined
+  markIndex?: number | undefined
   node: SceneNode | null
   sample: HoverSample | null
   series?: string | undefined
+  seriesId?: string | undefined
   x: unknown
   y?: number | undefined
 interface ChartSpec
@@ -210,11 +213,17 @@ interface HeatmapMarkOptions<T> extends NamedMarkOptions
 type HeatmapYScaleSpec = BandScaleSpec
 interface HoverSample
   color: string
+  datum?: unknown
+  index?: number | undefined
   kind: 'line' | 'point' | 'radar'
+  markIndex?: number | undefined
   series: string
+  seriesId?: string | undefined
   tip: string
   x: number
+  xValue?: unknown
   y: number
+  yValue?: null | number | undefined
 const LIGHT_CHART_PALETTE: readonly string[]
 const LIGHT_CHART_THEME: Readonly<DashboardTheme>
 interface LastValue
@@ -283,8 +292,9 @@ interface MountInteraction
   brush?: boolean | undefined
   navigator?: boolean | undefined
   pan?: boolean | undefined
+  panBounds?: 'data' | 'none' | undefined
   rangePresets?: boolean | undefined
-  zoom?: boolean | undefined
+  zoom?: boolean | undefined | { minSpan?: number | undefined; maxSpan?: number | undefined; }
 interface ParsedChartColor
   readonly a: number
   readonly b: number
@@ -358,8 +368,10 @@ interface SceneNodeBase
   w?: number | undefined
   x?: number | undefined
   x2?: number | undefined
+  xValue?: unknown
   y?: number | undefined
   y2?: number | undefined
+  yValue?: number | undefined
 interface ScenePoint
   x: number
   y: number

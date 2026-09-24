@@ -6,6 +6,7 @@
 //   -> axes (ticks) -> cartesian/polar/heatmap/plugin marks -> legend rows
 
 import type { AnyScale } from "../scales";
+import type { CompiledSceneV2Fields } from "../sceneTypes";
 import { resolveChartTheme, type DashboardTheme } from "../theme";
 import { buildTicks, plotArea, resolveMargin } from "./axes";
 import { compileBar, compileLineArea, compilePoint, compileRuleX, compileRuleY, createBarState, planBars } from "./cartesian";
@@ -30,11 +31,11 @@ import {
   resolveLegendPlacement,
   seriesColor,
 } from "./legend";
-import { isBuiltinKind, isBuiltinMark, isPluginMark, type CartesianChartMark } from "./marks";
+import { isBuiltinKind, isBuiltinMark, isPluginMark, type CartesianChartMark, type ChartMark } from "./marks";
 import { compilePluginMark, resolvePluginDomains } from "./plugin";
 import { compilePie, compileRadar, createRadarState } from "./polar";
 import { isRecord, isRuntimeArray } from "./shared";
-import type { ChartDefinition, CompiledChart } from "./types";
+import type { ChartDefinition, CompiledChart, HoverSample } from "./types";
 import { validateChartSpec } from "./validate";
 
 export function compileChart(definition: ChartDefinition, size: { width: number; height: number }): CompiledChart {
@@ -57,7 +58,8 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     throw new ChartCompileError("E_CHART_SPEC", "viewport is supported on Cartesian charts only.");
   }
   const sourceRows = inputSpec.marks.reduce((total, mark) => total + mark.data.length, 0);
-  const spec = windowChartSpec(inputSpec, filterHiddenSeries(inputSpec));
+  const visibleMarks = filterHiddenSeries(inputSpec);
+  const spec = windowChartSpec(inputSpec, visibleMarks);
   const visibleRows = spec.marks.reduce((total, mark) => total + mark.data.length, 0);
   // Every compiled scene owns its theme. Exported presets are immutable
   // inputs, never shared mutable runtime state.
@@ -104,14 +106,17 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
   const barState = createBarState(ctx, bars);
   const radarState = createRadarState(spec.marks);
   let colorI = 0;
+  const sourceIndex = new Map(inputSpec.marks.map((mark, index) => [mark, index] as const));
 
-  for (const m of spec.marks) {
+  for (let k = 0; k < spec.marks.length; k++) {
+    const m = spec.marks[k]!;
     const color = seriesColor(m, colorI++, theme);
     const name = markSeriesName(m);
     if (isPluginMark(m)) {
       compilePluginMark(ctx, m, name, color);
       continue;
     }
+    const firstSample = ctx.samples.length;
     pushSeriesLegend(ctx, m, name, color);
     if (m.kind === "line" || m.kind === "area") compileLineArea(ctx, m, name, color);
     else if (m.kind === "point") compilePoint(ctx, m, name);
@@ -121,10 +126,12 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     else if (m.kind === "heatmap") compileHeatmap(ctx, m);
     else if (m.kind === "pie") compilePie(ctx, m, name);
     else if (m.kind === "radar") compileRadar(ctx, m, name, color, radarState);
+    const source = visibleMarks[k] ?? m;
+    stampSampleIdentity(ctx.samples, firstSample, source, sourceIndex.get(source) ?? k);
   }
 
   const { nodes, samples } = ctx;
-  return {
+  const scene: CompiledChart & CompiledSceneV2Fields = {
     width, height, margin, plot,
     xScale, yScale, xTicks, yTicks,
     grid: heatmap ? spec.grid === true : spec.grid !== false,
@@ -148,5 +155,35 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       hoverSamples: samples.length,
       decimatedPoints: ctx.decimatedPoints,
     },
+    formatters: { x: formatters.formatX, y: formatters.formatY },
   };
+  return scene;
+}
+
+/**
+ * Give a mark's hover samples their series identity and source row index.
+ * Samples are emitted in row order and the viewport window keeps row order,
+ * so one forward identity walk over the source rows resolves every index.
+ */
+function stampSampleIdentity(samples: HoverSample[], from: number, source: ChartMark, markIndex: number): void {
+  if (from >= samples.length) return;
+  const explicitId = (source as { id?: unknown }).id;
+  const seriesId = typeof explicitId === "string" && explicitId ? explicitId : `mark-${markIndex}`;
+  const rows = source.data;
+  let cursor = 0;
+  let resolvable = true;
+  for (let i = from; i < samples.length; i++) {
+    const sample = samples[i]!;
+    sample.seriesId = seriesId;
+    sample.markIndex = markIndex;
+    if (!resolvable || !("datum" in sample)) continue;
+    let at = cursor;
+    while (at < rows.length && rows[at] !== sample.datum) at++;
+    if (at === rows.length) {
+      resolvable = false;
+      continue;
+    }
+    sample.index = at;
+    cursor = at;
+  }
 }
