@@ -27,6 +27,7 @@ try {
         'export * from "./src/chart/compile/format.ts";',
         'export { measureText, ellipsize, TIME_TICK_SPACING } from "./src/chart/compile/axes.ts";',
         'export { crosshairCategoryLabel, crosshairValueLabel } from "./src/chart/render/chips.ts";',
+        'export { calendarTicks, TickWeight, tickLevel } from "./src/util/time/calendarTicks.ts";',
       ].join("\n"),
       resolveDir: root,
       loader: "ts",
@@ -43,8 +44,9 @@ try {
   process.on("exit", () => rmSync(workdir, { recursive: true, force: true }));
 }
 const {
-  decimalsOf, formatNum, heatmapValueFormatter, numericTickLabels, timeValueFormatter, valueFormatter,
+  decimalsOf, formatFixed, formatNum, heatmapValueFormatter, numericTickLabels, timeValueFormatter, valueFormatter,
   measureText, ellipsize, TIME_TICK_SPACING, crosshairCategoryLabel, crosshairValueLabel,
+  calendarTicks, TickWeight, tickLevel,
 } = internals;
 
 let passed = 0;
@@ -590,6 +592,137 @@ check("a 10k-point line compiles quickly", () => {
   times.sort((a, b) => a - b);
   // Loose in Node (shared CI machines); the Chromium budget lives in tests/native-axes.spec.ts.
   assert.ok(times[4] < 40, `median ${times[4].toFixed(2)} ms`);
+});
+
+check("formatFixed prints the en-US Intl digits without calling Intl per value", () => {
+  const cases = [
+    [1234.5, 1, "1,234.5"],
+    [-1234567.891, 2, "-1,234,567.89"],
+    [999.96, 1, "1,000.0"],
+    [-999.5, 0, "-1,000"],
+    [12, 3, "12.000"],
+    [-0.004, 2, "0.00"],
+    [-0, 1, "0.0"],
+    [0.1 + 0.2, 2, "0.30"],
+    [123456789012.25, 6, "123,456,789,012.250000"],
+    [1e21, 0, "1,000,000,000,000,000,000,000"],
+    [-1.5e25, 2, "-15,000,000,000,000,000,000,000,000.00"],
+  ];
+  for (const [value, digits, expected] of cases) assert.equal(formatFixed(value, digits), expected, `${value} with ${digits} decimals`);
+  const intl = [];
+  const reference = (value, digits) => (intl[digits] ??= new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })).format(value);
+  const toFixed = (value, digits) => `${value < 0 && Math.abs(value) >= 0.5 / 10 ** digits ? "-" : ""}${Math.abs(value).toFixed(digits)}`;
+  for (let trial = 0; trial < 20_000; trial++) {
+    const digits = Math.floor(rnd() * 9);
+    let value = rnd() * 10 ** Math.floor(rnd() * 11 - 4);
+    const shape = rnd();
+    // Decimal ties (1.005), exact binary ties (0.125) and values already at `digits` decimals.
+    if (shape < 0.25) value = Math.round(value * 10 ** (digits + 1)) / 10 ** (digits + 1);
+    else if (shape < 0.35) value = (Math.floor(value * 10 ** digits) + 0.5) / 10 ** digits;
+    else if (shape < 0.45) value = Math.round(value * 10 ** digits) / 10 ** digits;
+    if (rnd() < 0.5) value = -value;
+    const label = formatFixed(value, digits);
+    // The fast paths round exactly like toFixed(), ties included.
+    if (!Number.isInteger(value)) assert.equal(label.replace(/,/g, ""), toFixed(value, digits), `${value} with ${digits} decimals rounds like toFixed`);
+    // And group like en-US Intl, which rounds decimal ties of the shortest form (those are skipped).
+    const fraction = String(Math.abs(value)).split(".")[1] ?? "";
+    const tie = fraction.length === digits + 1 && fraction.endsWith("5");
+    const safe = value < 0 && Math.abs(value) < 0.5 / 10 ** digits ? 0 : value;
+    if (!tie && Math.abs(value) >= 999) assert.equal(label, reference(safe, digits), `${value} with ${digits} decimals groups like Intl`);
+  }
+});
+
+check("thinning thousands of categories stays near-linear", () => {
+  const size = { width: 800, height: 400 };
+  const bars = (count, key = (i) => `Item ${i}`) => defineChart({ marks: [bar(Array.from({ length: count }, (_, i) => ({ k: key(i), v: i % 17 })), { x: "k", y: "v" })] });
+  const fastest = (definition) => {
+    compileChart(definition, size);
+    let best = Infinity;
+    for (let run = 0; run < 5; run++) {
+      const start = performance.now();
+      compileChart(definition, size);
+      best = Math.min(best, performance.now() - start);
+    }
+    return best;
+  };
+  const small = bars(1000);
+  const large = bars(20_000);
+  // 20x the categories take about 20x as long, as they did before measured
+  // labels (raze-100x: 22x). Trying every n from 1 over all labels took 56x.
+  let ratio = Infinity;
+  for (let attempt = 0; attempt < 3 && ratio >= 36; attempt++) ratio = Math.min(ratio, fastest(large) / fastest(small));
+  assert.ok(ratio < 36, `20,000 categories took ${ratio.toFixed(1)}x as long as 1,000`);
+  assertCategoryLayout(compileChart(large, size), "20,000 categories");
+  // String-date categories, as a daily bar chart read from a CSV has them.
+  const daily = compileChart(bars(2000, (i) => new Date(Date.UTC(2020, 0, 1) + i * DAY).toISOString().slice(0, 10)), size);
+  assert.ok(daily.xTicks.length >= 5, `${daily.xTicks.length} date labels`);
+  assertCategoryLayout(daily, "2,000 date categories");
+  for (const width of [300, 700, 1200]) {
+    assertCategoryLayout(compileChart(bars(3000), { width, height: 320 }), `3,000 categories @ ${width}px`);
+    const flat = compileChart(defineChart({
+      marks: [bar(Array.from({ length: 3000 }, (_, i) => ({ k: `Long category ${i}`, v: 1 })), { x: "k", y: "v" })],
+      scales: { x: { type: "band", labels: { rotate: false } } },
+    }), { width, height: 320 });
+    assertNoHorizontalOverlap(flat, `3,000 flat categories @ ${width}px`);
+  }
+});
+
+check("a year-by-hour heatmap fits the chart without runaway margins", () => {
+  const cells = [];
+  for (let d = 0; d < 365; d++) for (let h = 0; h < 24; h++) cells.push({ d: `D${d + 1}`, h: `${String(h).padStart(2, "0")}:00`, v: ((d * h) % 11) - 5 });
+  for (const [width, height] of [[800, 400], [500, 300], [1400, 500]]) {
+    const scene = compile([heatmap(cells, { x: "d", y: "h", valueKey: "v" })], {}, { width, height });
+    const name = `365x24 @ ${width}x${height}`;
+    // The defaults are left 46 and right 54; row labels ("23:00") and the colour bar fit them.
+    assert.ok(scene.margin.left <= 46 && scene.margin.right <= 54, `${name}: margins ${JSON.stringify(scene.margin)}`);
+    assert.ok(scene.plot.x >= scene.margin.left - 1 && scene.plot.x + scene.plot.w <= width - scene.margin.right + 1, `${name}: the grid sits between the margins`);
+    const rects = scene.nodes.filter((node) => node.role === "heat");
+    assert.equal(rects.length, 365 * 24);
+    assert.ok(rects.every((node) => node.x >= 0 && node.x + node.w <= width && node.y >= 0 && node.y + node.h <= height), `${name}: every cell is inside the chart`);
+    assert.ok(new Set(rects.filter((node) => node.datum.h === "00:00").map((node) => node.x)).size > 300, `${name}: columns stay distinct`);
+    assertCategoryLayout(scene, name);
+  }
+  // Grids that fit keep whole-pixel cells and 2px gaps.
+  const week = compile([heatmap(cells.filter((cell) => Number(cell.d.slice(1)) <= 7), { x: "d", y: "h", valueKey: "v" })], {}, { width: 600, height: 400 });
+  const row = week.nodes.filter((node) => node.role === "heat" && node.datum.h === "00:00").sort((a, b) => a.x - b.x);
+  assert.ok(Number.isInteger(row[0].w) && row[1].x - (row[0].x + row[0].w) === 2, "a 7-day grid keeps 2px gaps");
+});
+
+check("the local calendar ladder agrees with the shared time core", () => {
+  // TODO(W1B-05): /chart keeps a compact UTC ladder (timeDrafts in axes.ts)
+  // until it can adopt calendarTicks(). Until then its weights must stay the
+  // core's unit weights, and both must name the same unit at a shared tick.
+  const unitWeights = new Set([TickWeight.Year, TickWeight.Month, TickWeight.Day, TickWeight.Hour, TickWeight.Minute, TickWeight.Second, TickWeight.Millisecond]);
+  const spans = [
+    [Date.UTC(2025, 8, 9, 13, 30), 6.5 * 3_600_000],
+    [Date.UTC(2025, 0, 30), 3 * DAY],
+    [Date.UTC(2025, 0, 20), 60 * DAY],
+    [Date.UTC(2023, 10, 18), 730 * DAY],
+    [Date.UTC(2015, 4, 27), 3650 * DAY],
+    [Date.UTC(2025, 0, 1, 9, 59, 30), 90_000],
+    [Date.UTC(2025, 0, 1, 9, 59, 59, 900), 400],
+    [Date.UTC(1965, 2, 1), 400 * DAY],
+    [Date.UTC(1200, 0, 1), 600 * 365 * DAY],
+  ];
+  let shared = 0;
+  for (const [from, span] of spans) {
+    const rows = Array.from({ length: 200 }, (_, i) => ({ t: new Date(from + (i * span) / 199), v: i }));
+    const scene = compile([line(rows, { x: "t", y: "v" })]);
+    const name = `${new Date(from).toISOString()} + ${span} ms`;
+    assert.ok(scene.xTicks.length >= 2, `${name}: ticks`);
+    const [lo, hi] = scene.xScale.domain;
+    const core = new Map(calendarTicks({ from: lo, to: hi, width: scene.plot.w, minSpacing: TIME_TICK_SPACING }).map((tick) => [tick.time, tick]));
+    for (const tick of scene.xTicks) {
+      assert.ok(unitWeights.has(tick.weight), `${name}: "${tick.label}" weighs ${tick.weight}, a core unit weight`);
+      const match = core.get(tick.value);
+      if (!match) continue;
+      shared++;
+      // The core marks Monday midnights as weeks; the local ladder names them as days.
+      const unit = match.unit === "week" ? "day" : match.unit;
+      assert.equal(tickLevel(tick.weight).unit, unit, `${name}: "${tick.label}" is a ${unit} boundary in both`);
+    }
+  }
+  assert.ok(shared >= 30, `${shared} ticks shared with the core`);
 });
 
 console.log(`[raze-charts] native compile axes: ${passed} checks passed`);

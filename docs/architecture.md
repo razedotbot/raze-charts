@@ -326,8 +326,8 @@ src/chart/compile/
   domain.ts     viewport windowing, X-type inference, domain checks, X/Y scales
   axes.ts       label measurement, measured margins, calendar/band/linear ticks,
                 thinning, rotation and ellipsis
-  format.ts     step- and data-precision numbers, compact notation, dates,
-                heatmap value formats; cached Intl formatters
+  format.ts     step- and data-precision numbers, compact notation, en-US
+                grouping without per-value Intl, dates, heatmap value formats
   cartesian.ts  line/area, point, ruleY/ruleX, grouped and stacked bars
   decimate.ts   extrema decimation and per-series budget allocation
   polar.ts      pie and radar

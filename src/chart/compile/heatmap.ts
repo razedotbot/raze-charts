@@ -40,11 +40,16 @@ export function heatmapLayout(spec: ChartSpec, hm: HeatmapChartMark, margin: Mar
   }
   const nX = Math.max(1, xs.length);
   const nY = Math.max(1, ys.length);
-  const gap = 2;
-  const cell = Math.max(1, Math.min(
-    Math.floor((plot.w - (nX - 1) * gap) / nX),
-    Math.floor((plot.h - (nY - 1) * gap) / nY),
-  ));
+  const fit = (gap: number): number => Math.min((plot.w - (nX - 1) * gap) / nX, (plot.h - (nY - 1) * gap) / nY);
+  let gap = 2;
+  let cell = Math.floor(fit(gap));
+  if (cell < 1) {
+    // More cells than whole pixels with gaps (a year of days by hours): drop
+    // the gaps and let cells go fractional, so the grid still fits its plot
+    // instead of spilling past the chart.
+    gap = 0;
+    cell = fit(0);
+  }
   const gridW = nX * (cell + gap);
   const gridH = nY * (cell + gap);
   const grid: PlotRect = {

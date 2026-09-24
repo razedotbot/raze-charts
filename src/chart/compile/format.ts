@@ -13,11 +13,15 @@
 // so axis gutters and chips stay narrow; value labels keep up to six
 // significant digits there (25.0004M), so they never hide the data.
 //
-// Every Intl formatter comes from the shared cache in src/util/intl.ts and is
-// held per decimal count here, so a label costs a cached `format()` call,
-// never a `toLocaleString` construction.
+// Numbers print in the library's default locale (en-US, DEFAULT_LOCALE in
+// src/util/intl.ts) without Intl: digits round exactly as toFixed() rounds
+// (integers, the common case for x indices, counts and volumes, go through
+// String(); other values use integer arithmetic away from rounding ties) and
+// thousands are grouped by hand. That prints what the en-US
+// Intl.NumberFormat prints at a fraction of its cost, which matters because
+// formatting runs once per hover sample. A locale option for /chart would
+// take its cached formatter from src/util/intl.ts.
 
-import { numberFormat } from "../../util/intl";
 import type { HeatmapValueFormat } from "./marks";
 import type { ChartSpec, XScaleKind } from "./types";
 
@@ -34,38 +38,65 @@ const SIGNIFICANT_DIGITS = 6;
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const COMPACT_UNITS: readonly (readonly [number, string])[] = [[1e12, "T"], [1e9, "B"], [1e6, "M"]];
 
+const POWERS = Array.from({ length: 22 }, (_, exponent) => 10 ** exponent);
+const pow10 = (exponent: number): number => POWERS[exponent] ?? 10 ** exponent;
+
 /**
  * Fraction digits needed to write `value` exactly, ignoring binary floating
  * point noise (0.1 + 0.2 needs 1), capped at `cap`.
  */
 export function decimalsOf(value: number, cap = MAX_VALUE_DECIMALS): number {
-  if (!Number.isFinite(value)) return 0;
+  if (Number.isInteger(value) || !Number.isFinite(value)) return 0;
   const magnitude = Math.abs(value);
   for (let decimals = 0; decimals < cap; decimals++) {
-    const scaled = magnitude * 10 ** decimals;
+    const scaled = magnitude * pow10(decimals);
     if (Math.abs(scaled - Math.round(scaled)) <= Math.max(1e-7, scaled * 1e-14)) return decimals;
   }
   return cap;
 }
 
-// Grouped (en-US "1,234.50") formatters indexed by fraction digits.
-const groupedFormats: Intl.NumberFormat[] = [];
-
-function groupedFormat(decimals: number): Intl.NumberFormat {
-  let format = groupedFormats[decimals];
-  if (!format) {
-    format = numberFormat(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-    groupedFormats[decimals] = format;
-  }
-  return format;
+/** en-US digit grouping of an unsigned decimal string: "1234567.50" becomes "1,234,567.50". */
+function group(digits: string): string {
+  const dot = digits.indexOf(".");
+  const end = dot < 0 ? digits.length : dot;
+  let out = digits.slice(0, end % 3 || 3);
+  for (let index = out.length; index < end; index += 3) out += `,${digits.slice(index, index + 3)}`;
+  return out + digits.slice(end);
 }
 
-/** `value` with exactly `decimals` fraction digits, grouped from 1,000 on. Never prints "-0.00". */
+/**
+ * `value` with exactly `decimals` fraction digits, grouped from 1,000 on,
+ * as the en-US Intl.NumberFormat prints it. Never prints "-0.00".
+ */
 export function formatFixed(value: number, decimals: number): string {
   if (!Number.isFinite(value)) return "";
   const magnitude = Math.abs(value);
-  const safe = value < 0 && magnitude < 0.5 / 10 ** decimals ? 0 : value;
-  return magnitude >= 1000 ? groupedFormat(decimals).format(safe) : safe.toFixed(decimals);
+  const scaled = magnitude * pow10(decimals);
+  let digits = "";
+  if (Number.isInteger(magnitude) || scaled >= 1e15) {
+    // Integers, and values whose digits reach past a double's precision,
+    // print their shortest round-trip digits padded with zeros, like Intl
+    // (toFixed() would spell out binary noise, and costs far more).
+    digits = String(magnitude);
+    const exponent = digits.indexOf("e+");
+    if (exponent >= 0) digits = digits.slice(0, exponent).replace(".", "").padEnd(Number(digits.slice(exponent + 2)) + 1, "0");
+    const dot = digits.indexOf(".");
+    const places = dot < 0 ? 0 : digits.length - dot - 1;
+    if (places > decimals) digits = "";
+    else if (places < decimals) digits += `${dot < 0 ? "." : ""}${"0".repeat(decimals - places)}`;
+  } else if (scaled < 1e9) {
+    // Below 1e9 the product is off by under 1.2e-7, so away from a rounding
+    // tie it rounds exactly as toFixed() does, at a fraction of the cost.
+    const floor = Math.floor(scaled);
+    if (Math.abs(scaled - floor - 0.5) > 1e-6) {
+      const units = String(scaled - floor > 0.5 ? floor + 1 : floor).padStart(decimals + 1, "0");
+      digits = decimals ? `${units.slice(0, -decimals)}.${units.slice(-decimals)}` : units;
+    }
+  }
+  digits ||= magnitude.toFixed(decimals);
+  const sign = value < 0 && magnitude >= 0.5 / pow10(decimals) ? "-" : "";
+  // 999.5 and up can round to four integer digits ("1,000").
+  return sign + (magnitude < 999 ? digits : group(digits));
 }
 
 function compactUnit(magnitude: number): readonly [number, string] {
@@ -105,6 +136,11 @@ export function formatNum(value: number): string {
   return formatFixed(value, Math.min(MAX_VALUE_DECIMALS, Math.max(0, SIGNIFICANT_DIGITS - integerDigits)));
 }
 
+/** A number, or a Date's instant; NaN for anything else. */
+function toNumber(value: unknown): number {
+  return value instanceof Date ? value.getTime() : typeof value === "number" ? value : NaN;
+}
+
 /** Formats numbers for display; `(value: number) => string`. */
 export type NumberFormatter = (value: number) => string;
 
@@ -121,16 +157,18 @@ const CONTINUOUS_DIGITS = 2;
  * precision of its own, so it prints at 1/100 of the data span instead of
  * showing binary noise (100.61 for a 99-101 series), never above the cap.
  * Precision is measured lazily on the first call, so an unused formatter
- * costs nothing.
+ * costs nothing. `values` may be raw channel values: Dates count by their
+ * instant and other non-numbers are skipped, so callers need not copy them.
  */
-export function valueFormatter(values: readonly number[], cap = MAX_VALUE_DECIMALS): NumberFormatter {
+export function valueFormatter(values: readonly unknown[], cap = MAX_VALUE_DECIMALS): NumberFormatter {
   let decimals = -1;
   const measure = (): number => {
     let most = 0;
     let lo = Infinity;
     let hi = -Infinity;
     let continuous = false;
-    for (const value of values) {
+    for (const raw of values) {
+      const value = toNumber(raw);
       if (!Number.isFinite(value)) continue;
       if (value < lo) lo = value;
       if (value > hi) hi = value;
@@ -148,7 +186,7 @@ export function valueFormatter(values: readonly number[], cap = MAX_VALUE_DECIMA
     const magnitude = Math.abs(value);
     if (magnitude >= COMPACT_THRESHOLD) return formatCompact(value);
     if (decimals < 0) decimals = measure();
-    if (value !== 0 && magnitude < 0.5 / 10 ** decimals) return formatTiny(value);
+    if (value !== 0 && magnitude < 0.5 / pow10(decimals)) return formatTiny(value);
     return formatFixed(value, decimals);
   };
 }
@@ -298,10 +336,6 @@ export interface AxisFormatterData {
   yBand?: boolean;
 }
 
-function toNumber(value: unknown): number {
-  return value instanceof Date ? value.getTime() : typeof value === "number" ? value : NaN;
-}
-
 /**
  * Value formatters for both axes. A configured `tickFormat` wins; otherwise
  * numbers use data precision, instants use {@link timeValueFormatter}, and
@@ -321,7 +355,7 @@ export function axisFormatters(spec: ChartSpec, xType: XScaleKind, data?: AxisFo
       if (value instanceof Date) return (formatXTime ??= timeValueFormatter(xNumbers()))(value);
       if (typeof value === "number") {
         if (xType === "band") return String(value);
-        return (formatXNumber ??= valueFormatter(xNumbers()))(value);
+        return (formatXNumber ??= valueFormatter(data?.xValues ?? []))(value);
       }
       return String(value ?? "");
     },

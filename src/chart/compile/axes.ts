@@ -102,8 +102,21 @@ function proportional(char: string): number {
 export function measureText(text: string, fontSize = AXIS_FONT_SIZE, font = "monospace"): number {
   const mono = /mono|courier|consolas|menlo|monaco/i.test(font);
   let em = 0;
-  for (const char of text) em += WIDE.test(char) ? (mono ? 1.2 : 1) : mono ? 0.6 : proportional(char);
+  for (const char of text) {
+    // Only characters from U+1100 on can be wide; skip the class test for the rest.
+    em += char.charCodeAt(0) >= 0x1100 && WIDE.test(char) ? (mono ? 1.2 : 1) : mono ? 0.6 : proportional(char);
+  }
   return em * fontSize;
+}
+
+/** measureText for one font, memoised per label for the length of one layout. */
+function measurer(font: string): (text: string) => number {
+  const widths = new Map<string, number>();
+  return (text) => {
+    let width = widths.get(text);
+    if (width === undefined) widths.set(text, (width = measureText(text, AXIS_FONT_SIZE, font)));
+    return width;
+  };
 }
 
 /** `label`, or its longest prefix plus "…" that fits `maxWidth`. */
@@ -167,39 +180,60 @@ interface Draft {
   weight?: number;
 }
 
-interface Placed extends Draft {
-  left: number;
-  right: number;
-  anchor: SceneTick["anchor"];
+/** A draft with its (ellipsized) label's measured width. */
+interface Sized extends Draft {
+  width: number;
 }
 
 function toSceneTick({ value, px, label, weight }: Draft, anchor: SceneTick["anchor"], rotation: number): SceneTick {
   return weight === undefined ? { value, px, label, anchor, rotation } : { value, px, label, anchor, rotation, weight };
 }
 
-/** Horizontal extent of a centred label, anchored start/end when it would cross the chart edges. */
-function placeHorizontal(tick: Draft, width: number, lo: number, hi: number): Placed {
-  const anchor = tick.px - width / 2 < lo ? "start" : tick.px + width / 2 > hi ? "end" : "middle";
-  const left = anchor === "start" ? tick.px : anchor === "end" ? tick.px - width : tick.px - width / 2;
-  return { ...tick, left, right: left + width, anchor };
+/** Anchor of a centred label: start/end where it would cross the chart edges `lo`/`hi`. */
+function anchorOf({ px, width }: Sized, lo: number, hi: number): SceneTick["anchor"] {
+  return px - width / 2 < lo ? "start" : px + width / 2 > hi ? "end" : "middle";
 }
 
-/** Every nth item, plus the last one when it fits after the last kept one. */
-function every<T>(items: readonly T[], n: number, fits: (a: T, b: T) => boolean): T[] {
-  const kept = items.filter((_, index) => index % n === 0);
+/** Left edge of a horizontal label placed with {@link anchorOf}. */
+function leftOf(tick: Sized, lo: number, hi: number): number {
+  const anchor = anchorOf(tick, lo, hi);
+  return anchor === "start" ? tick.px : anchor === "end" ? tick.px - tick.width : tick.px - tick.width / 2;
+}
+
+/** Every nth item, plus the last one when `fits` accepts it after the last kept one. */
+function every<T>(items: readonly T[], n: number, fits?: (a: T, b: T) => boolean): T[] {
+  const kept: T[] = [];
+  for (let index = 0; index < items.length; index += n) kept.push(items[index]!);
   const last = items[items.length - 1];
   const previous = kept[kept.length - 1];
-  if (previous !== last && fits(previous!, last!)) kept.push(last!);
+  if (fits && previous !== last && fits(previous!, last!)) kept.push(last!);
   return kept;
 }
 
-/** The densest every-nth selection whose neighbours all fit; a fixed `interval` is honoured as given. */
-function thin<T>(items: readonly T[], interval: number | "auto", fits: (a: T, b: T) => boolean): [T[], number] {
-  if (interval !== "auto") return [every(items, interval, () => false), interval];
-  for (let n = 1; ; n++) {
-    const kept = every(items, n, fits);
-    if (n >= items.length || kept.every((tick, index) => !index || fits(kept[index - 1]!, tick))) return [kept, n];
+/**
+ * The densest every-nth selection whose neighbours all fit; a fixed
+ * `interval` is honoured as given.
+ *
+ * `reach` is a centre distance no two fitting labels can be closer than.
+ * Every nth item spans at most n of the widest neighbour gaps, so each n that
+ * cannot span `reach` fails at its first pair and is skipped. The search then
+ * starts near the answer and checks each candidate with an early-exit strided
+ * walk, which keeps thinning near-linear on thousands of categories while
+ * returning exactly what trying every n from 1 would.
+ */
+function thin<T extends Draft>(items: readonly T[], interval: number | "auto", fits: (a: T, b: T) => boolean, reach: number): [T[], number] {
+  if (interval !== "auto") return [every(items, interval), interval];
+  let widest = 0;
+  for (let index = 1; index < items.length; index++) widest = Math.max(widest, Math.abs(items[index]!.px - items[index - 1]!.px));
+  // The small epsilon keeps float error from skipping an exact fit.
+  let n = widest > 0 ? Math.max(1, Math.ceil(reach / widest - 1e-9)) : 1;
+  for (; n < items.length; n++) {
+    let ok = true;
+    for (let index = n; ok && index < items.length; index += n) ok = fits(items[index - n]!, items[index]!);
+    if (ok) break;
   }
+  n = Math.max(1, Math.min(n, items.length));
+  return [every(items, n, fits), n];
 }
 
 interface XLayoutInput {
@@ -226,18 +260,32 @@ interface XLayout {
 function layoutHorizontal(input: XLayoutInput, interval: number | "auto"): XLayout {
   const { drafts, policy, measure, width } = input;
   const cap = Math.min(policy.maxWidth, Math.max(24, width / 2 - EDGE));
-  const place = (tick: Draft): Placed => placeHorizontal(tick, measure(tick.label), EDGE, width - EDGE);
-  let [kept, n] = thin(
-    drafts.map((tick) => ({ ...tick, label: ellipsize(tick.label, cap, measure) })),
-    interval,
-    (a, b) => place(b).left - place(a).right >= LABEL_GAP,
-  );
+  const lo = EDGE;
+  const hi = width - EDGE;
+  const size = (tick: Draft, maxWidth: number): Sized => {
+    const label = ellipsize(tick.label, maxWidth, measure);
+    return { ...tick, label, width: measure(label) };
+  };
+  const cut = drafts.map((tick) => size(tick, cap));
+  let narrowest = Infinity;
+  let widest = 0;
+  for (const tick of cut) {
+    narrowest = Math.min(narrowest, tick.width);
+    widest = Math.max(widest, tick.width);
+  }
+  // Two fitting labels are at least half the narrower label plus the gap
+  // apart: at most one of them can be anchored away from the other, and
+  // only both at once (start and end) when a label spans the whole axis.
+  const reach = widest <= hi - lo ? narrowest / 2 + LABEL_GAP : 0;
+  let [kept, n] = thin(cut, interval, (a, b) => leftOf(b, lo, hi) - (leftOf(a, lo, hi) + a.width) >= LABEL_GAP, reach);
   if (interval !== "auto" && kept.length > 1) {
     // A fixed interval is honoured; labels are cut to their share of the axis.
-    const share = Math.max(8, Math.min(...kept.slice(1).map((tick, index) => Math.abs(tick.px - kept[index]!.px))) - LABEL_GAP);
-    kept = kept.map((tick) => ({ ...tick, label: ellipsize(tick.label, share, measure) }));
+    let closest = Infinity;
+    for (let index = 1; index < kept.length; index++) closest = Math.min(closest, Math.abs(kept[index]!.px - kept[index - 1]!.px));
+    const share = Math.max(8, closest - LABEL_GAP);
+    kept = kept.map((tick) => size(tick, share));
   }
-  return { ticks: kept.map((tick) => toSceneTick(tick, place(tick).anchor, 0)), extent: 18, leftOverflow: 0, interval: n };
+  return { ticks: kept.map((tick) => toSceneTick(tick, anchorOf(tick, lo, hi), 0)), extent: 18, leftOverflow: 0, interval: n };
 }
 
 function layoutRotated(input: XLayoutInput, angle: number, interval: number | "auto"): XLayout {
@@ -247,7 +295,7 @@ function layoutRotated(input: XLayoutInput, angle: number, interval: number | "a
   // Vertical room caps the label length; consecutive labels keep a line apart.
   const cap = Math.max(12, Math.min(policy.maxWidth, sin > 0.05 ? (bottomRoom - 8 - LABEL_LINE * cos) / sin : Infinity, 160));
   const pitch = LABEL_LINE / Math.max(sin, 0.2) + 2;
-  const [kept, n] = thin(drafts, interval, (a, b) => Math.abs(b.px - a.px) >= pitch);
+  const [kept, n] = thin(drafts, interval, (a, b) => Math.abs(b.px - a.px) >= pitch, pitch);
   let extent = 0;
   let leftOverflow = 0;
   const ticks = kept.map((tick) => {
@@ -402,8 +450,18 @@ function numericDrafts(scale: LinearScale, count: number, log: boolean, tickForm
   return values.map((value, index) => ({ value, px: scale.map(value), label: labels[index]! }));
 }
 
-function bandDrafts(scale: BandScale<string | number>, tickFormat?: (value: unknown) => string): Draft[] {
-  return scale.domain.map((value) => ({ value, px: scale.map(value), label: tickFormat ? tickFormat(value) : String(value) }));
+/** Band categories and their labels, per domain: read once per layout, not once per pass. */
+type BandLabels = WeakMap<readonly unknown[], { values: (string | number)[]; labels: string[] }>;
+
+function bandDrafts(scale: BandScale<string | number>, cache: BandLabels, tickFormat?: (value: unknown) => string): Draft[] {
+  let entry = cache.get(scale.domain);
+  if (!entry) {
+    const values = Array.from(scale.domain);
+    entry = { values, labels: values.map((value) => (tickFormat ? tickFormat(value) : String(value))) };
+    cache.set(scale.domain, entry);
+  }
+  const { values, labels } = entry;
+  return values.map((value, index) => ({ value, px: scale.map(value), label: labels[index]! }));
 }
 
 // ---------------------------------------------------------------------------
@@ -447,7 +505,9 @@ export function layoutAxes(input: AxisLayoutInput): AxisLayout {
   const fixed = spec.margin ?? {};
   const xPolicy = resolveLabelPolicy("x", spec.scales?.x?.labels);
   const yPolicy = resolveLabelPolicy("y", spec.scales?.y?.labels);
-  const measure = (text: string): number => measureText(text, AXIS_FONT_SIZE, font);
+  // Every pass re-measures the same labels (and ellipsis cuts); measure each once.
+  const measure = measurer(font);
+  const bandLabels: BandLabels = new WeakMap();
   const caps: Margin = {
     top: input.margin.top,
     right: Math.max(input.margin.right, width * CAP),
@@ -467,20 +527,22 @@ export function layoutAxes(input: AxisLayoutInput): AxisLayout {
     const yTickFormat = spec.scales?.y?.tickFormat;
     const [yDrafts] = thin(
       yScale.kind === "band"
-        ? bandDrafts(yScale, yTickFormat)
+        ? bandDrafts(yScale, bandLabels, yTickFormat)
         : numericDrafts(yScale, Math.max(2, Math.min(6, Math.floor(plot.h / 52))), spec.scales?.y?.type === "log", yTickFormat),
       yPolicy.interval,
       (a, b) => Math.abs(b.px - a.px) >= LABEL_LINE + 1,
+      LABEL_LINE + 1,
     );
     const yCap = Math.min(yPolicy.maxWidth, Math.max(8, heatmap ? (fixed.left ?? caps.left) - 8 - EDGE : (fixed.right ?? caps.right) - 13));
     const yTicks = yDrafts.map((tick) => toSceneTick({ ...tick, label: ellipsize(tick.label, yCap, measure) }, "end", 0));
-    const yExtent = Math.max(0, ...yTicks.map((tick) => measure(tick.label)));
+    let yExtent = 0;
+    for (const tick of yTicks) yExtent = Math.max(yExtent, measure(tick.label));
 
     // Category/time axis below the plot.
     const xTickFormat = spec.scales?.x?.tickFormat;
     const x = layoutXLabels({
       drafts: xScale.kind === "band"
-        ? bandDrafts(xScale, xTickFormat)
+        ? bandDrafts(xScale, bandLabels, xTickFormat)
         : input.xType === "time"
           ? timeDrafts(xScale, plot, measure, xTickFormat)
           : numericDrafts(xScale, Math.max(2, Math.min(5, Math.floor(plot.w / 96))), input.xType === "log", xTickFormat),
@@ -500,6 +562,8 @@ export function layoutAxes(input: AxisLayoutInput): AxisLayout {
       const texts = [...chipTexts, ...yScale.domain.map((value) => input.formatters.formatY(value))];
       needRight = Math.max(needRight, 18 + Math.max(...texts.map((text) => measureText(text, 10, font))));
     }
+    // A heatmap grid fits its area (heatmapLayout drops the cell gaps rather
+    // than spill past it), so a wider margin moves the grid's edge too.
     const deficits: Margin = {
       top: 0,
       right: needRight - (width - right),

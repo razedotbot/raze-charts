@@ -1,7 +1,7 @@
 // Domains: viewport windowing, X scale-type inference, data-driven domain
 // validation, and the Cartesian X/Y scales. Heatmap scales live in ./heatmap.
 
-import { extent, scaleBand, scaleLinear, scaleLog, scaleTime, type AnyScale } from "../scales";
+import { extent, scaleBand, scaleLinear, scaleLog, scaleTime, type AnyScale, type BandScale } from "../scales";
 import { ChartCompileError } from "./errors";
 import { isBuiltinKind, isBuiltinMark, isPluginMark, type BarChartMark, type CartesianChartMark, type ChartMark } from "./marks";
 import type { BarPlan } from "./cartesian";
@@ -295,18 +295,30 @@ export interface CartesianXScaleInput {
   hasArea: boolean;
 }
 
+/**
+ * Band X scales by the compile's X values. Every layout pass asks for the
+ * X scale of a new plot, but a band domain does not depend on the plot, and
+ * building one indexes every category: later passes of the same compile
+ * (xValues is collected afresh per compile) move the first scale's range.
+ */
+const bandXScales = new WeakMap<readonly unknown[], BandScale<string | number>>();
+
 /** Band, log, time, or linear X scale. Bars pad the domain by half a slot. */
 export function cartesianXScale(spec: ChartSpec, input: CartesianXScaleInput): AnyScale {
   const { xType, xValues, plot, bars, hasArea } = input;
   const hasBar = bars.marks.length > 0;
   if (xType === "band") {
+    const range: [number, number] = [plot.x, plot.x + plot.w];
+    let scale = bandXScales.get(xValues);
+    if (scale) {
+      scale.range = range;
+      return scale;
+    }
     const domain = (spec.scales?.x?.domain as (string | number)[] | undefined) ?? unique(xValues.map((v) => v as string | number));
     const pad = spec.scales?.x?.padding ?? (bars.groupCount > 1 ? 0.22 : bars.isHist ? 0.14 : 0.26);
-    return scaleBand({
-      domain,
-      range: [plot.x, plot.x + plot.w],
-      padding: pad,
-    });
+    scale = scaleBand({ domain, range, padding: pad });
+    bandXScales.set(xValues, scale);
+    return scale;
   }
   const xs = xValues.map(asNumber).filter(Number.isFinite);
   const configured = spec.scales?.x?.domain as readonly unknown[] | undefined;

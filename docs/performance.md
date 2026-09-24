@@ -110,12 +110,13 @@ mount" scenario from 33 KiB to 38 KiB, "Static line SVG" from 23 KiB to
 27 KiB, and the React "React LineChart" scenario (which ships the same
 runtime) from 37 KiB to 41 KiB, when the native compiler gained measured axes
 (W1B-01). 50 KiB is that package's hard cap. Measured then, the artifact is
-49.3 KiB and the scenarios 37.1, 26.3 and 40.2 KiB. The compact UTC calendar
-ladder costs about 0.9 KiB and the shared Intl cache (`src/util/intl.ts`)
-0.45 KiB; step-derived tick precision, compact notation, label measurement,
-margin fitting, x-label thinning/rotation/ellipsis, heatmap value formats and
-the scene v2 formatters and measured axes account for the rest. The artifact
-is unminified, so consumer bundles are smaller than it.
+49.6 KiB and the scenarios 37.3, 26.5 and 40.5 KiB. The compact UTC calendar
+ladder costs about 0.9 KiB; step-derived tick precision, compact notation,
+en-US digit grouping, label measurement, margin fitting, x-label
+thinning/rotation/ellipsis, heatmap value formats and the scene v2 formatters
+and measured axes account for the rest. Number formatting no longer imports
+the shared Intl cache (see "Native value formatting" below). The artifact is
+unminified, so consumer bundles are smaller than it.
 
 The native time axis does not use the shared `calendarTicks()` selector yet.
 Importing it costs about 7.5 KiB of the artifact (its zone arithmetic and
@@ -175,6 +176,41 @@ inspection. Choose Canvas for denser frequently repainted scenes. Always
 measure the final browser interaction because string generation, rasterization,
 fonts, device pixel ratio, and surrounding layout are outside the compiler
 benchmark.
+
+## Native value formatting
+
+The native compiler formats a tooltip string for every hover sample, so number
+formatting sits on its hottest path. `src/chart/compile/format.ts` prints
+en-US numbers (the library default, `DEFAULT_LOCALE` in `src/util/intl.ts`)
+without Intl: integers go through `String()`, other values are rounded to
+their decimals with integer arithmetic (falling back to `toFixed()` near a
+rounding tie, so the digits always match it), and thousands are grouped by
+hand. `tests/native-compile-axes.mjs` checks the result against both
+`toFixed()` and the en-US `Intl.NumberFormat`.
+
+Measured on the benchmark's 10k-point line (headless Chromium 153, Windows
+x64, AMD Ryzen 9 5900X, median of 21 compiles at 1280x720):
+
+| Data | raze-100x before W1B-01 | W1B-01 |
+| --- | ---: | ---: |
+| y around 100 | 20 ms | 1.8-2.5 ms |
+| y from 1,000 up | 46-78 ms | 3.4-3.7 ms |
+
+A CDP CPU profile of 20 such compiles puts all formatting (`formatX`,
+`formatNum`, `formatFixed`, grouping and the one-time data-precision scan) at
+21-26% of the compile, down from 88% for `toLocaleString` before. What remains
+is the count, not the cost, of calls: two formatted numbers for each of the
+10k hover samples, built eagerly by the mark compilers. The audit target
+(formatting under 10% of the profile) needs those tooltip strings built
+lazily, on hover, from the structured samples; that change belongs to the
+mark compilers (`src/chart/compile/cartesian.ts`, W1B-02) and the renderer
+(W1B-03), and the target stays open until it lands.
+
+Band axes measure every category label once per compile and thin them with a
+search that starts at the smallest interval that could fit, so thousands of
+categories stay near-linear: 5,000 bar categories compile in about 6 ms and
+20,000 in about 26 ms in Node (raze-100x: 4 and 17 ms; before this fix 16 and
+159 ms).
 
 ## React update flow
 
