@@ -452,7 +452,10 @@ export class ChartRenderer implements GestureHost {
       range?.from, range?.to, c.autoScalePrice, price?.min, price?.max, c.logScale, c.percentScale,
       c.chartStyle, c.volumeMode, c.bars, c.bars?.length, c.compare, c.compare?.length, c.theme, c.symbol,
       c.resolution, c.symbolInfo, c.marks, c.timescaleMarks, c.selectedShapeId, c.selectedTradingLineId,
-      this.hoverShapeId, this.hoverTradingLineId, this.hoverTradingHit, this.hoverTimescaleMark,
+      // Drawing handles show for the hovered drawing only while the pointer is
+      // over the chart (W1B-11), so leaving the canvas must repaint the scene.
+      this.crosshair.active ? this.hoverShapeId : null,
+      this.hoverTradingLineId, this.hoverTradingHit, this.hoverTimescaleMark,
     ];
   }
 

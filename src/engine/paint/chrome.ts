@@ -72,8 +72,6 @@ function nowOf(context: ChartContext): number {
   return typeof context.now === "function" ? context.now() : Date.now();
 }
 
-/** Widest caption the time-axis row gives up for it when the corner cell is taken. */
-const ROW_CAPTION_MAX_PX = 120;
 /** Gap between the caption and the nearest time-axis label in the row. */
 const ROW_CAPTION_GAP = 6;
 
@@ -102,7 +100,9 @@ function captionLayout(ctx: CanvasRenderingContext2D, v: FinanceView): CaptionLa
   if (!v.context.features.has("timezone_display")) return null;
   const cell = v.axisChromeRect;
   const inRow = scaleBarInCorner(v.context);
-  const maxWidth = inRow ? Math.min(ROW_CAPTION_MAX_PX, v.plotW / 4) : cell.w - CAPTION_INSET * 2;
+  // The same width either way, so a zone abbreviates identically (UTC-5)
+  // and the row gives up no more space than the corner cell holds.
+  const maxWidth = inRow ? Math.min(cell.w - CAPTION_INSET * 2, v.plotW / 4) : cell.w - CAPTION_INSET * 2;
   if (maxWidth <= 0 || cell.h <= 0) return null;
   ctx.save();
   let size = CAPTION_FONT_PX;

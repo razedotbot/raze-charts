@@ -37,6 +37,21 @@ async function recordCanvasText(page: Page): Promise<void> {
 const drawnSince = async (page: Page, from: number): Promise<string[]> =>
   page.evaluate((start) => ((window as ChartWindow).__drawnText ?? []).slice(start), from);
 
+/**
+ * First value of the DOM legend row whose label matches `label` (W1B-16's
+ * legend renders rows as text: label, then one span per plot value).
+ */
+async function domLegendValue(page: Page, label: RegExp): Promise<string> {
+  return page.evaluate((source) => {
+    const pattern = new RegExp(source);
+    for (const row of document.querySelectorAll(".raze-chart-root .raze-legend-row")) {
+      if (!pattern.test(row.querySelector(".raze-legend-label")?.textContent ?? "")) continue;
+      return row.querySelector(".raze-legend-values > span")?.lastChild?.textContent ?? "";
+    }
+    return "";
+  }, label.source);
+}
+
 /** At least two significant digits after any leading "0.000…". */
 const hasSignificantDigits = (text: string): boolean => /^-?0\.0*[1-9]\d/.test(text) || /^-?[1-9]\d*\.\d{2}$/.test(text);
 
@@ -64,10 +79,7 @@ test.describe("study behaviour in the browser", () => {
     // Canvas legend: the value follows its "MACD 12 26 9"-style label. A DOM
     // legend renders the same pair as text in the chart root.
     const label = texts.findIndex((text) => /^MACD\s?\d/.test(text));
-    const domText = await page.locator(".raze-chart-root").innerText();
-    const legendValue = label >= 0
-      ? texts[label + 1] ?? ""
-      : /MACD[^\n]*?(-?\d+\.\d+)/.exec(domText)?.[1] ?? "";
+    const legendValue = label >= 0 ? texts[label + 1] ?? "" : await domLegendValue(page, /^MACD\s?\d/);
     expect(hasSignificantDigits(legendValue), `legend value "${legendValue}" in ${texts.join(" | ")}`).toBe(true);
     expect(texts).not.toContain("0.0");
     expect(texts).not.toContain("-0.0");
@@ -88,10 +100,7 @@ test.describe("study behaviour in the browser", () => {
     await page.waitForTimeout(250);
     const texts = await drawnSince(page, before);
     const label = texts.findIndex((text) => /^RSI\s?\d/.test(text));
-    const domText = await page.locator(".raze-chart-root").innerText();
-    const legendValue = label >= 0
-      ? texts[label + 1] ?? ""
-      : /RSI[^\n]*?(\d+\.\d+)/.exec(domText)?.[1] ?? "";
+    const legendValue = label >= 0 ? texts[label + 1] ?? "" : await domLegendValue(page, /^RSI\s?\d/);
     expect(legendValue, `RSI legend value in ${texts.join(" | ")}`).toMatch(/^\d{1,3}\.\d$/);
     // The RSI pane's crosshair tag: a 0-100 value with exactly one decimal
     // (legend values, which follow their "RSI14" label on every frame, excluded).

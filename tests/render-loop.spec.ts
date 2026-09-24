@@ -176,7 +176,8 @@ test.describe("render loop", () => {
 
   test("the sidebar Fit button fits every loaded bar", async ({ page }) => {
     await open(page, "bars=5000");
-    await page.getByRole("button", { name: "Fit content (F)" }).click();
+    // W1B-23 renamed the button "Fit content" (the shortcut is in its tooltip); data-raze-item is the stable hook.
+    await page.locator('[data-raze-item="fit"]').click();
     await settle(page);
     const state = await page.evaluate(() => (window as unknown as HarnessWindow).__razeChartState!);
     expect(state.visibleRange.from).toBeLessThanOrEqual(0);

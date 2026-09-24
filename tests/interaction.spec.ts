@@ -23,9 +23,11 @@ interface Geometry {
 const TIME_AXIS_H = 22;
 
 async function openChart(page: Page, testCase = "dark"): Promise<void> {
+  // The scene layer publishes __razeChartState on its own repaints only
+  // (overlay frames never repaint it), so the flag is set before the first one.
+  await page.addInitScript(() => { (window as unknown as { __RAZE_DEBUG: boolean }).__RAZE_DEBUG = true; });
   await page.goto(`/examples/visual.html?case=${testCase}`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => (window as unknown as { __razeReady?: boolean }).__razeReady === true, null, { timeout: 30_000 });
-  await page.evaluate(() => { (window as unknown as { __RAZE_DEBUG: boolean }).__RAZE_DEBUG = true; });
 }
 
 const canvas = (page: Page) => page.locator(".raze-chart-root canvas").first();
@@ -94,10 +96,16 @@ async function createTrend(page: Page, points: Point[], options: Record<string, 
   }, { points, options });
 }
 
-async function pointsOf(page: Page, id: string): Promise<Point[]> {
+/** A drawing's points, or null once it no longer exists (getShapeById throws E_SHAPE_NOT_FOUND). */
+async function pointsOf(page: Page, id: string): Promise<Point[] | null> {
   return page.evaluate((entity) => {
     const chart = (window as unknown as { __razeChart: { activeChart(): { getShapeById(id: string): { getPoints(): Point[] } } } }).__razeChart;
-    return chart.activeChart().getShapeById(entity).getPoints();
+    try {
+      return chart.activeChart().getShapeById(entity).getPoints();
+    } catch (error) {
+      if ((error as { code?: string }).code === "E_SHAPE_NOT_FOUND") return null;
+      throw error;
+    }
   }, id);
 }
 
@@ -116,7 +124,10 @@ async function trendFixture(page: Page, options: Record<string, unknown> = {}) {
   const i1 = Math.round(s.visibleRange.from + span(s) * 0.3);
   const i2 = Math.round(s.visibleRange.from + span(s) * 0.6);
   const price = (s.priceMin + s.priceMax) / 2;
-  const time = (index: number): number => tLast - (s.bars - 1 - index) * 60;
+  // getVisibleRange().to names the bar nearest the right edge, which is the
+  // last bar only while the view reaches it (not after zooming in around the middle).
+  const rightBar = Math.max(0, Math.min(s.bars - 1, Math.round(s.visibleRange.to)));
+  const time = (index: number): number => tLast - (rightBar - index) * 60;
   const points = [{ time: time(i1), price }, { time: time(i2), price }];
   const id = await createTrend(page, points, options);
   await frames(page);
@@ -183,8 +194,8 @@ test.describe("interaction correctness", () => {
     await page.mouse.move(mid.x + 60, mid.y + 60, { steps: 6 });
     await page.mouse.up();
     const moved = await pointsOf(page, id);
-    const dt = moved.map((point, i) => point.time - points[i]!.time);
-    const dp = moved.map((point, i) => point.price - points[i]!.price);
+    const dt = moved!.map((point, i) => point.time - points[i]!.time);
+    const dp = moved!.map((point, i) => point.price - points[i]!.price);
     expect(dt[0]).toBe(dt[1]);
     expect(dt[0]! % 60).toBe(0);
     expect(dt[0]).toBeGreaterThan(0);
@@ -193,7 +204,7 @@ test.describe("interaction correctness", () => {
     await undo(page);
     expect(await pointsOf(page, id)).toEqual(points);
     await undo(page);
-    expect(await pointsOf(page, id)).toEqual([]);
+    expect(await pointsOf(page, id), "undoing the create removes the drawing").toBeNull();
   });
 
   test("dragging an anchor handle moves only that anchor", async ({ page }) => {
@@ -204,8 +215,8 @@ test.describe("interaction correctness", () => {
     await page.mouse.move(map.x(i1) - 40, map.y(price) - 30, { steps: 4 });
     await page.mouse.up();
     const moved = await pointsOf(page, id);
-    expect(moved[0]).not.toEqual(points[0]);
-    expect(moved[1]).toEqual(points[1]);
+    expect(moved![0]).not.toEqual(points[0]);
+    expect(moved![1]).toEqual(points[1]);
   });
 
   test("a click with 1px of jitter is a no-op and adds no undo entry", async ({ page }) => {
@@ -224,7 +235,7 @@ test.describe("interaction correctness", () => {
     expect(await pointsOf(page, id)).toEqual(points);
     await expect.poll(() => events).toEqual(["click"]);
     await undo(page);
-    expect(await pointsOf(page, id)).toEqual([]);
+    expect(await pointsOf(page, id), "undoing the create removes the drawing").toBeNull();
   });
 
   test("overlapping drawings select the one painted on top", async ({ page }) => {
@@ -234,7 +245,7 @@ test.describe("interaction correctness", () => {
     await frames(page);
     await page.mouse.click(bottom.mid.x, bottom.mid.y);
     await page.keyboard.press("Delete");
-    expect(await pointsOf(page, top)).toEqual([]);
+    expect(await pointsOf(page, top), "Delete removed the top drawing").toBeNull();
     expect(await pointsOf(page, bottom.id)).toEqual(bottom.points);
   });
 
@@ -251,7 +262,7 @@ test.describe("interaction correctness", () => {
     await page.mouse.up();
     expect(await pointsOf(page, id)).toEqual(points);
     await undo(page);
-    expect(await pointsOf(page, id)).toEqual([]);
+    expect(await pointsOf(page, id), "undoing the create removes the drawing").toBeNull();
   });
 
   test("double-clicking a drawing keeps the zoom; double-clicking empty plot still fits", async ({ page }) => {
@@ -306,9 +317,10 @@ test.describe("inline text editor", () => {
     expect(await texts()).toEqual(["Hi"]);
     await expect(chartCanvas).toBeFocused();
 
-    // Double-click re-opens the editor with the text (after the label has painted).
+    // Double-click re-opens the editor with the text (after the label has
+    // painted). The label box hangs below-right of its anchor (W1B-11).
     await frame.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    await page.mouse.dblclick(box.x + box.width * 0.4 + 4, box.y + box.height * 0.35 - 6);
+    await page.mouse.dblclick(box.x + box.width * 0.4 + 8, box.y + box.height * 0.35 + 10);
     await expect(editor).toBeFocused();
     await expect(editor).toHaveValue("Hi");
     await page.keyboard.press("End");
@@ -318,7 +330,7 @@ test.describe("inline text editor", () => {
 
     // Escape discards an edit.
     await frame.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    await page.mouse.dblclick(box.x + box.width * 0.4 + 4, box.y + box.height * 0.35 - 6);
+    await page.mouse.dblclick(box.x + box.width * 0.4 + 8, box.y + box.height * 0.35 + 10);
     await expect(editor).toHaveValue("Hi there");
     await page.keyboard.type(" nope");
     await page.keyboard.press("Escape");

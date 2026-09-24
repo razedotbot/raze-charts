@@ -128,10 +128,16 @@ const RECORDER = () => {
     cb(t);
   });
   const proto = CanvasRenderingContext2D.prototype;
-  const current = (): Rec[] => w.__frames[w.__frames.length - 1]!;
+  // Each call records its layer: the scene canvas (raze-chart-layer-main) or
+  // the overlay above it, which repaints on its own (crosshair, countdown).
+  const frame = (): Rec[] => w.__frames[w.__frames.length - 1]!;
+  const current = (): { push(call: Rec): void } => ({ push: (call) => frame().push(call) });
+  const layerOf = (ctx: CanvasRenderingContext2D): string =>
+    (ctx.canvas as HTMLCanvasElement | undefined)?.classList?.contains("raze-chart-layer-main") ? "main" : "overlay";
   const fillText = proto.fillText;
   proto.fillText = function (this: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth?: number) {
     current().push({
+      layer: layerOf(this),
       op: "text", text: String(text), x, y, font: this.font, align: this.textAlign,
       baseline: this.textBaseline, width: this.measureText(String(text)).width,
     });
@@ -152,12 +158,12 @@ const RECORDER = () => {
   }
   const stroke = proto.stroke;
   proto.stroke = function (this: CanvasRenderingContext2D, ...args: [Path2D?]) {
-    current().push({ op: "stroke", color: String(this.strokeStyle), lineWidth: this.lineWidth, points: (paths.get(this) ?? []).slice() });
+    current().push({ layer: layerOf(this), op: "stroke", color: String(this.strokeStyle), lineWidth: this.lineWidth, points: (paths.get(this) ?? []).slice() });
     return (stroke as (...a: unknown[]) => void).apply(this, args);
   };
   const fillRect = proto.fillRect;
   proto.fillRect = function (this: CanvasRenderingContext2D, x: number, y: number, rw: number, rh: number) {
-    current().push({ op: "fillRect", x, y, w: rw, h: rh });
+    current().push({ layer: layerOf(this), op: "fillRect", x, y, w: rw, h: rh });
     return fillRect.call(this, x, y, rw, rh);
   };
 };
@@ -180,16 +186,22 @@ async function openHarness(page: Page, query: Record<string, string | number>, n
 
 /** The newest recorded frame that painted the time axis. */
 async function lastFrame(page: Page): Promise<Call[]> {
-  // The countdown timer repaints once a second; wait for a fresh full frame.
+  // The countdown timer repaints the overlay once a second; wait for a fresh one.
   await page.waitForTimeout(1_200);
+  // What is on screen: the scene layer from the newest frame that painted
+  // the time axis, and the overlay layer from the newest frame that painted
+  // the overlay (the countdown and crosshair repaint it without the scene).
   return page.evaluate(() => {
-    const frames = (window as unknown as { __frames: unknown[][] }).__frames;
-    for (let i = frames.length - 1; i >= 0; i--) {
-      if (frames[i]!.some((c) => (c as { op: string; h?: number }).op === "fillRect" && (c as { h: number }).h === 22)) {
-        return frames[i] as never;
-      }
-    }
-    return [] as never;
+    type Rec = { layer: string; op: string; h?: number };
+    const frames = (window as unknown as { __frames: Rec[][] }).__frames;
+    const newest = (test: (calls: Rec[]) => boolean): Rec[] => {
+      for (let i = frames.length - 1; i >= 0; i--) if (test(frames[i]!)) return frames[i]!;
+      return [];
+    };
+    const scene = newest((calls) => calls.some((c) => c.layer === "main" && c.op === "fillRect" && c.h === 22))
+      .filter((c) => c.layer === "main");
+    const overlay = newest((calls) => calls.some((c) => c.layer === "overlay")).filter((c) => c.layer === "overlay");
+    return [...scene, ...overlay] as never;
   });
 }
 
@@ -229,6 +241,9 @@ for (const width of [390, 480, 1280]) {
       const captionBox = textBox(caption!);
       expect(captionBox.t).toBeGreaterThanOrEqual(top);
       expect(captionBox.b).toBeLessThanOrEqual(top + 22);
+      // The % / L / A toggles fill the corner cell; the caption stays clear of them.
+      const bar = await page.locator(".raze-chart-scale-bar").boundingBox();
+      if (bar) expect(captionBox.r, "the caption ends left of the scale bar").toBeLessThanOrEqual(bar.x);
       const ticks = tickLabels(frame, top, [caption!.text]);
       expect(ticks.length, "tick labels are painted").toBeGreaterThan(0);
       for (const tick of ticks) {
@@ -290,10 +305,13 @@ test("timescale marks are badges above the axis that never overprint ticks", asy
 
 test("ETH compared on a BTC chart stays inside the plot", async ({ page }) => {
   await openHarness(page, { w: 1280, h: 620, compare: "ETH" }, NOW_1M);
+  // createCompare switches the price scale to percent (W1B-19); the toggle
+  // turns it off for the price pass and back on for the percent pass.
+  const percent = page.getByRole("button", { name: "Percent scale" });
+  await expect(percent).toHaveAttribute("aria-pressed", "true");
   for (const mode of ["price", "percent"] as const) {
-    if (mode === "percent") {
-      await page.getByRole("button", { name: "Percent scale" }).click();
-    }
+    await percent.click();
+    await expect(percent).toHaveAttribute("aria-pressed", mode === "percent" ? "true" : "false");
     const frame = await lastFrame(page);
     const top = timeAxisTop(frame);
     const line = frame.find((c): c is StrokeCall => c.op === "stroke" && c.color === "#26a69a" && c.lineWidth === 1.5);
