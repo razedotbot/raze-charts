@@ -4,8 +4,9 @@ import { build } from "esbuild";
 // Real-browser acceptance for the shared popup (src/ui/popup.ts) and the
 // context menu: mouse activation of non-focused rows, fullscreen and shadow
 // roots, viewport-capped scrolling, separators, CSS row states, motion,
-// flip placement and following the anchor, strict-CSP nonces, and the kit
-// dialog adapting its presentation while open.
+// flip placement and following the anchor, strict-CSP nonces, the keyboard
+// model (focus ring, disabled rows, Tab), and the kit dialog adapting its
+// presentation while open.
 
 type RazeWindow = Window & {
   __razeReady?: boolean;
@@ -189,19 +190,36 @@ test.describe("row states", () => {
     await settle(page);
     const lit = (): Promise<number[]> => menu.evaluate((el) => [...el.querySelectorAll("[role^=menuitem]")]
       .flatMap((row, index) => getComputedStyle(row).backgroundColor === "rgba(0, 0, 0, 0)" ? [] : [index]));
+    // Rows drawing a focus ring (keyboard focus only).
+    const ringed = (): Promise<number[]> => menu.evaluate((el) => [...el.querySelectorAll("[role^=menuitem]")]
+      .flatMap((row, index) => getComputedStyle(row).outlineStyle === "none" ? [] : [index]));
+    // Opened with the mouse: the first row is lit but not ringed.
+    expect(await ringed()).toEqual([]);
 
     await page.keyboard.press("ArrowDown");
     await expect(rows.nth(1)).toBeFocused();
     expect(await lit()).toEqual([1]);
+    expect(await ringed()).toEqual([1]);
+    const ring = await rows.nth(1).evaluate((row) => {
+      const style = getComputedStyle(row);
+      return { width: style.outlineWidth, offset: style.outlineOffset, color: style.outlineColor };
+    });
+    expect(ring.width).toBe("2px");
+    expect(ring.offset).toBe("-2px");
+    expect(ring.color).not.toBe("rgba(0, 0, 0, 0)");
     const hover = await rows.nth(1).evaluate((row) => getComputedStyle(row).backgroundColor);
     const box = (await rows.nth(3).boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await expect(rows.nth(3)).toBeFocused();
     expect(await lit()).toEqual([3]);
+    // Focus the pointer moved draws no ring (Chromium still matches
+    // :focus-visible there, because the previous focus came from a key).
+    expect(await ringed()).toEqual([]);
     expect(await rows.nth(3).evaluate((row) => getComputedStyle(row).backgroundColor)).toBe(hover);
     await page.keyboard.press("ArrowUp");
     await expect(rows.nth(2)).toBeFocused();
     expect(await lit()).toEqual([2]);
+    expect(await ringed()).toEqual([2]);
     await page.keyboard.press("Escape");
 
     // Inset: the first row starts 4px inside the border on every menu.
@@ -406,6 +424,59 @@ test.describe("fullscreen", () => {
     await settle(page);
     expect(await hitsItself(indicators.getByRole("menuitemcheckbox").first())).toBe(true);
   });
+
+  for (const [mount, query] of [["light DOM", ""], ["shadow root", "?shadow"]] as const) {
+    test(`a menu open when the chart enters fullscreen moves into it and keeps focus (${mount})`, async ({ page }) => {
+      await openWidget(page, query);
+      await sidebar(page).getByRole("button", { name: "Indicators" }).click();
+      const menu = page.getByRole("menu", { name: "Indicators" });
+      const rows = menu.getByRole("menuitemcheckbox");
+      await expect(rows.first()).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(rows.nth(1)).toBeFocused();
+      // Host-driven fullscreen (a host button, a shortcut) while the menu is
+      // open. Regression: Chromium blurs the focused row, which sat outside
+      // the new fullscreen element, a frame before fullscreenchange, and the
+      // menu closed.
+      await page.evaluate(async () => {
+        const shadow = document.getElementById("host")!.shadowRoot;
+        await (shadow ?? document).querySelector<HTMLElement>(".raze-chart-root")!.requestFullscreen();
+      });
+      await page.waitForFunction(() => !!document.fullscreenElement);
+      await expect.poll(() => menu.evaluate((el) => {
+        const fullscreen = (el.getRootNode() as Document | ShadowRoot).fullscreenElement;
+        return !!fullscreen && fullscreen.classList.contains("raze-chart-root") && fullscreen.contains(el);
+      })).toBe(true);
+      await expect(menu).toBeVisible();
+      await expect(rows.nth(1)).toBeFocused();
+      await settle(page);
+      expect(await hitsItself(rows.first())).toBe(true);
+      await menu.getByRole("menuitemcheckbox", { name: "MACD" }).click();
+      await expect(menu.getByRole("menuitemcheckbox", { name: "MACD" })).toHaveAttribute("aria-checked", "true");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await expect(menu.getByRole("menuitemcheckbox", { name: "Bollinger 20" })).toHaveAttribute("aria-checked", "true");
+      await expect(menu).toBeVisible();
+      expect((await studyNames(page)).sort()).toEqual(["Bollinger Bands", "MACD"]);
+    });
+  }
+
+  test("another element going fullscreen closes the chart's menu", async ({ page }) => {
+    await openWidget(page);
+    await sidebar(page).getByRole("button", { name: "Indicators" }).click();
+    const menu = page.getByRole("menu", { name: "Indicators" });
+    await expect(menu.getByRole("menuitemcheckbox").first()).toBeFocused();
+    await page.evaluate(async () => {
+      const other = document.createElement("div");
+      other.id = "other";
+      other.textContent = "Video";
+      document.body.appendChild(other);
+      await other.requestFullscreen();
+    });
+    await page.waitForFunction(() => document.fullscreenElement?.id === "other");
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator("#other [role=menu]")).toHaveCount(0);
+  });
 });
 
 test.describe("shadow root", () => {
@@ -593,6 +664,68 @@ test.describe("placement and motion", () => {
     await expect(menu.getByRole("menuitem", { name: "B" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(menu.getByRole("menuitem", { name: "A" })).toBeFocused();
+  });
+});
+
+test.describe("menu keyboard model", () => {
+  test("disabled rows are reached by the arrow keys but never run, and ignore the pointer", async ({ page }) => {
+    await openKit(page);
+    await page.evaluate(() => {
+      const kit = (window as any).RazeKit;
+      (window as any).__ran = [];
+      const popup = kit.openPopup({ anchor: document.getElementById("side-anchor"), fontFamily: "sans-serif", label: "Kit menu", presentation: "anchored" });
+      for (const label of ["Off", "A", "B", "C"]) {
+        const row = kit.popupRow(label, () => (window as any).__ran.push(label));
+        if (label === "Off" || label === "B") row.setAttribute("aria-disabled", "true");
+        popup.el.appendChild(row);
+      }
+    });
+    const menu = page.getByRole("menu", { name: "Kit menu" });
+    const row = (name: string) => menu.getByRole("menuitem", { name, exact: true });
+    // The menu opens on its first enabled row.
+    await expect(row("A")).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(row("B")).toBeFocused();
+    await expect(row("B")).toHaveAttribute("aria-disabled", "true");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press(" ");
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("ArrowDown");
+    await expect(row("C")).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(row("Off")).toBeFocused();
+
+    // The pointer never moves focus onto a disabled row, and pressing one
+    // leaves focus where it was.
+    await row("C").hover();
+    await expect(row("C")).toBeFocused();
+    await row("B").hover();
+    await expect(row("C")).toBeFocused();
+    await row("B").click({ force: true }); // Playwright waits for aria-disabled rows to enable
+    await expect(row("C")).toBeFocused();
+    await expect(menu).toBeVisible();
+    expect(await page.evaluate(() => (window as any).__ran)).toEqual([]);
+    await row("C").click();
+    expect(await page.evaluate(() => (window as any).__ran)).toEqual(["C"]);
+  });
+
+  test("Tab from a field inside a menu moves within it; Tab from a row leaves", async ({ page }) => {
+    await openKit(page);
+    await page.evaluate(() => {
+      const kit = (window as any).RazeKit;
+      const popup = kit.openPopup({ anchor: document.getElementById("side-anchor"), fontFamily: "sans-serif", label: "Kit menu", presentation: "anchored" });
+      const field = document.createElement("input");
+      field.setAttribute("aria-label", "Filter");
+      popup.el.append(field, kit.popupRow("Apply", () => {}));
+    });
+    const menu = page.getByRole("menu", { name: "Kit menu" });
+    await expect(menu.getByRole("menuitem", { name: "Apply" })).toBeFocused();
+    await menu.getByRole("textbox", { name: "Filter" }).focus();
+    await page.keyboard.press("Tab");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Apply" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(menu).toHaveCount(0);
   });
 });
 

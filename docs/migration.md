@@ -130,8 +130,11 @@ removes the default item named `Label` instead of adding a row. Because a
 separator or a removal needs no handler, `ContextMenuItem.click` and
 `ContextMenuItem.position` are now optional (`position` defaults to `"top"`).
 Code that builds items compiles unchanged; code that reads `item.click` or
-`item.position` back needs an `undefined` check. Tab and Shift+Tab now close
-an open menu and move on from its button instead of walking its rows.
+`item.position` back needs an `undefined` check. Tab and Shift+Tab on a row
+now close an open menu and move on from its button instead of walking its
+rows; a field or other control a host puts inside an `openPopup()` menu keeps
+the normal Tab order. An item without `click` renders disabled: the arrow
+keys reach it, as the WAI-ARIA menu pattern recommends, but it does nothing.
 
 ### Custom financial shells
 

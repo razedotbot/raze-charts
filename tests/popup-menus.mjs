@@ -133,12 +133,16 @@ try {
   key(items[0], "ArrowDown");
   assert.equal(document.activeElement, items[1], "ArrowDown skips the separator");
   key(items[1], "ArrowDown");
-  assert.equal(document.activeElement, items[3], "ArrowDown skips the disabled item");
+  assert.equal(document.activeElement, items[2], "ArrowDown reaches the disabled item (APG: disabled menu items stay focusable)");
+  items[2].click(); // what Enter or Space on the focused button does
+  assert(menu.isConnected, "activating a disabled item does nothing");
+  assert.equal(document.activeElement, items[2]);
+  key(items[2], "ArrowDown");
+  assert.equal(document.activeElement, items[3]);
   key(items[3], "ArrowUp");
+  key(items[2], "ArrowUp");
   key(items[1], "ArrowUp");
   assert.equal(document.activeElement, items[0], "ArrowUp skips the separator");
-  items[2].click();
-  assert(menu.isConnected, "clicking a disabled item does nothing");
   items[3].click();
   assert.equal(menu.isConnected, false, "a throwing handler still closes the menu");
   assert(errors.some((line) => line.includes('context menu item "Explodes" threw')), "and is reported, not swallowed");
@@ -170,6 +174,15 @@ try {
   ]) assert(css.includes(rule), `popup stylesheet contains ${rule}`);
   const separator = kit.popupSeparator();
   assert.equal(separator.getAttribute("role"), "separator");
+  assert(css.includes(".raze-chart-popup:not([data-pointer]) .raze-chart-popup-row:focus-visible{outline:2px solid var(--raze-focus"), "keyboard focus draws a ring");
+  let ran = 0;
+  const inert = kit.popupRow("Inert", () => ran++);
+  inert.setAttribute("aria-disabled", "true");
+  inert.click();
+  assert.equal(ran, 0, "a disabled popupRow never runs its action");
+  inert.removeAttribute("aria-disabled");
+  inert.click();
+  assert.equal(ran, 1);
 
   kit.ensureBaseStyles();
   const sheet = document.querySelector("style[data-raze-styles]");
@@ -198,6 +211,29 @@ try {
   key(tabRow, "Tab");
   assert.equal(tabbed.el.isConnected, false, "Tab closes the menu");
   assert.equal(document.activeElement, anchor, "and hands focus to the opener before the browser moves on");
+
+  // A field inside a menu keeps the browser's Tab order; a row still leaves.
+  const withField = kit.openPopup({ anchor, fontFamily: "sans-serif", presentation: "anchored", label: "With field" });
+  const field = withField.el.appendChild(document.createElement("input"));
+  const fieldRow = withField.el.appendChild(kit.popupRow("Apply", noop));
+  await wait();
+  field.focus();
+  key(field, "Tab");
+  assert(withField.el.isConnected, "Tab from a field inside a menu does not close it");
+  fieldRow.focus();
+  key(fieldRow, "Tab");
+  assert.equal(withField.el.isConnected, false, "Tab from a row does");
+
+  // ── A menu opens on its first enabled row ──────────────────────────────
+  const leading = kit.openPopup({ anchor, fontFamily: "sans-serif", presentation: "anchored", label: "Leading" });
+  const off = leading.el.appendChild(kit.popupRow("Unavailable", noop));
+  off.setAttribute("aria-disabled", "true");
+  const on = leading.el.appendChild(kit.popupRow("Available", noop));
+  await wait();
+  assert.equal(document.activeElement, on, "initial focus skips a leading disabled row");
+  key(on, "ArrowUp");
+  assert.equal(document.activeElement, off, "which the arrow keys still reach");
+  leading.close();
 
   // ── A re-render that removes the focused row keeps the menu ────────────
   const rerender = kit.openPopup({ anchor, fontFamily: "sans-serif", presentation: "anchored", label: "Rerender" });

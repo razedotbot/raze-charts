@@ -19,7 +19,7 @@ import { lockScroll, trapFocus, type FocusTrap } from "./kit/focus";
 import { isInLayerAbove, pushLayer, type Layer } from "./kit/layers";
 import { isCoarsePointer, watchSheetPreference } from "./kit/media";
 import { resolvePresentation } from "./kit/Popover";
-import { createPortal, type Portal } from "./kit/portal";
+import { createPortal, fullscreenElementOf, portalContainerFor, type Portal } from "./kit/portal";
 import { computePosition, type Side } from "./kit/position";
 import { setMarkup, trustedMarkup } from "./kit/safe";
 import { createSheetFrame, SHEET_STYLES, type SheetFrame } from "./kit/Sheet";
@@ -53,6 +53,10 @@ export const POPUP_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   ".raze-chart-popup-row[data-touch],.raze-kit-sheet-content .raze-chart-popup-row{padding:12px 14px}" +
   ".raze-chart-popup-row:focus,.raze-chart-popup-row[aria-selected=true]," +
   ".raze-chart-popup:not(:focus-within) .raze-chart-popup-row:not([aria-disabled=true]):hover{background:var(--raze-hover,rgba(255,255,255,.08))}" +
+  // Keyboard focus also rings the lit row: the hover tint alone is too faint
+  // to be the only focus indicator (WCAG 1.4.11, 2.4.7). Focus the pointer
+  // moved draws no ring.
+  ".raze-chart-popup:not([data-pointer]) .raze-chart-popup-row:focus-visible{outline:2px solid var(--raze-focus,#2962ff);outline-offset:-2px}" +
   ".raze-chart-popup-row[aria-disabled=true]{opacity:.5;cursor:default}" +
   ".raze-chart-popup-row svg{flex:0 0 auto}" +
   ".raze-chart-popup-separator{height:1px;margin:4px 0;background:var(--raze-border,#363a45)}" +
@@ -149,17 +153,27 @@ function eventOrigin(event: Event): Node | null {
   return origin && typeof (origin as Node).nodeType === "number" ? origin as Node : null;
 }
 
+/**
+ * Rows the arrow keys, Home and End walk. Menu items marked `aria-disabled`
+ * are included (WAI-ARIA APG: disabled menu items stay focusable so screen
+ * reader users can discover them) but never activate; natively `disabled`
+ * controls cannot take focus and are skipped, as are separators.
+ */
 const ITEM_SELECTOR =
-  '[role="menuitem"]:not([aria-disabled="true"]),' +
-  '[role="menuitemcheckbox"]:not([aria-disabled="true"]),' +
-  '[role="menuitemradio"]:not([aria-disabled="true"]),' +
+  '[role="menuitem"]:not([disabled]),' +
+  '[role="menuitemcheckbox"]:not([disabled]),' +
+  '[role="menuitemradio"]:not([disabled]),' +
   'button:not([disabled]):not([aria-disabled="true"])';
 
 function popupItems(el: HTMLElement): HTMLElement[] {
   return Array.from(el.querySelectorAll<HTMLElement>(ITEM_SELECTOR));
 }
 
-/** The interactive row of `el` that contains `node`, if any. */
+function isDisabledItem(item: Element): boolean {
+  return item.getAttribute("aria-disabled") === "true";
+}
+
+/** The navigable row of `el` that contains `node`, if any. */
 function itemAt(el: HTMLElement, node: EventTarget | null): HTMLElement | null {
   const element = node instanceof Element ? node : (node as Node | null)?.parentElement ?? null;
   const item = element?.closest<HTMLElement>(ITEM_SELECTOR) ?? null;
@@ -219,10 +233,12 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   // fullscreen and into its shadow root, mirrors the widget's theme
   // variables (CSS variables would otherwise stop at the portal boundary and
   // light/custom themes would fall back to the dark palette), and adopts the
-  // popup stylesheet wherever it lands. A context menu has no anchor; its
-  // chart (the theme root) decides where it renders.
+  // popup stylesheet wherever it lands. The popup belongs to its anchor or,
+  // for an anchor-less context menu, its chart (the theme root; failing
+  // that, the opener), which decides where it renders.
+  const owner: HTMLElement | null = opts.anchor ?? themeRoot ?? (returnFocus?.isConnected ? returnFocus : null);
   const portal: Portal = createPortal({
-    anchor: opts.anchor ?? themeRoot ?? (returnFocus?.isConnected ? returnFocus : null),
+    anchor: owner,
     themeRoot,
     fontFamily: opts.fontFamily,
     className: sheet && opts.className ? `${opts.className}-sheet` : undefined,
@@ -271,6 +287,15 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     const item = items[Math.max(0, Math.min(items.length - 1, index))]!;
     focusWithoutScroll(item);
     revealItem(item);
+  };
+  /** Focus `row` again if it is still one of the rows, else the row now at `index`. */
+  const refocus = (row: Node | null, index: number): void => {
+    if (!(row instanceof HTMLElement) || !popupItems(el).includes(row)) {
+      focusItem(Math.max(0, index));
+      return;
+    }
+    focusWithoutScroll(row);
+    revealItem(row);
   };
 
   // ── Placement ──────────────────────────────────────────────────────────
@@ -358,6 +383,9 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   const resizeObserver = !sheet && ResizeObserverImpl ? new ResizeObserverImpl(() => scheduleReposition()) : null;
 
   let closed = false;
+  // A pending check of focus that left a row for nowhere, and that row.
+  let focusOutTimer = 0;
+  let dropped: { row: Node | null; index: number } | null = null;
   const close = (options?: { restoreFocus?: boolean }): void => {
     if (closed) return;
     closed = true;
@@ -365,6 +393,7 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     resizeObserver?.disconnect();
     doc.removeEventListener("pointerdown", onAway, true);
     doc.removeEventListener("keydown", onKey, true);
+    view.clearTimeout(focusOutTimer);
     for (const root of focusRoots) root.removeEventListener("focusin", onFocusIn as EventListener, true);
     focusRoots = [];
     doc.removeEventListener("scroll", onScroll, true);
@@ -420,11 +449,16 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     close();
   };
   const onMenuKey = (e: KeyboardEvent): void => {
-    if (e.key === "Tab" && !sheet && role === "menu" && !e.altKey && !e.ctrlKey && !e.metaKey) {
-      // Menu-button pattern: Tab and Shift+Tab leave the menu. It closes and
-      // returns focus to its opener first, so the browser's own Tab moves on
-      // from there to the next (or previous) control rather than walking
-      // the rows, which are navigated with the arrow keys.
+    // The keyboard is driving again, so keyboard focus shows its ring.
+    delete el.dataset.pointer;
+    const fromRow = e.target === el || itemAt(el, e.target) === e.target;
+    if (e.key === "Tab" && fromRow && !sheet && role === "menu" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      // Menu-button pattern: Tab and Shift+Tab leave the menu from a row (or
+      // the menu itself). It closes and returns focus to its opener first, so
+      // the browser's own Tab moves on from there to the next (or previous)
+      // control rather than walking the rows, which are navigated with the
+      // arrow keys. A field or other control a host put inside a menu keeps
+      // the browser's Tab order.
       close();
       return;
     }
@@ -445,23 +479,31 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   // The pointer moves the one highlight: inside a menu that holds focus,
   // hovering a row focuses it (the native menu model), so a keyboard-focused
   // row and a hovered row are never lit together. Popups whose focus stays
-  // elsewhere (combobox results) use CSS :hover instead.
+  // elsewhere (combobox results) use CSS :hover instead. Disabled rows take
+  // focus from the keyboard only: hovering one leaves the highlight where it
+  // is. Focus the pointer moved draws no focus ring (`data-pointer`), whatever
+  // an engine's :focus-visible heuristics decide for focus moved from script
+  // after a key press (Chromium keeps it "visible").
   const onPointerMove = (e: PointerEvent): void => {
     if (sheet || e.pointerType === "touch" || !focusIsInside()) return;
     const item = itemAt(el, e.target);
-    if (item && item !== deepActiveElement(doc)) focusWithoutScroll(item);
+    if (!item || isDisabledItem(item) || item === deepActiveElement(doc)) return;
+    el.dataset.pointer = "";
+    focusWithoutScroll(item);
   };
   // A mouse press on a row of a menu that holds focus lands on that row
   // without a focus round-trip through <body>. Browsers disagree on whether a
   // pressed <button> takes focus (WebKit does not), and a press that dropped
   // focus looked like focus leaving the menu. Keeping focus in the menu and
-  // moving it to the pressed row makes the click reliable everywhere.
+  // moving it to the pressed row makes the click reliable everywhere. A press
+  // on a disabled row leaves focus where it was.
   const onMouseDown = (e: MouseEvent): void => {
     if (sheet || e.button !== 0 || !focusIsInside()) return;
     const item = itemAt(el, e.target);
     if (!item) return;
     e.preventDefault();
-    if (item !== deepActiveElement(doc)) focusWithoutScroll(item);
+    el.dataset.pointer = "";
+    if (!isDisabledItem(item) && item !== deepActiveElement(doc)) focusWithoutScroll(item);
   };
   // Focus leaving an anchored menu (Tab, or focus moved by code) closes it.
   // A sheet's focus trap keeps focus inside instead. The decision is made
@@ -479,6 +521,7 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     if (!target) return;
     if (isInside(target)) {
       hadFocus = true;
+      dropped = null;
       return;
     }
     if (!hadFocus || isAnchor(target) || isAbove(target)) return;
@@ -499,26 +542,76 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     for (const root of next) if (!focusRoots.includes(root)) root.addEventListener("focusin", onFocusIn as EventListener, true);
     focusRoots = next;
   };
-  // The portal re-homes itself into (or out of) the fullscreen element in
-  // its own (capturing) listener; placement and focus roots follow.
-  const onFullscreenChange = (): void => {
-    if (closed) return;
+  // ── Fullscreen ─────────────────────────────────────────────────────────
+  const focusIsNowhere = (): boolean => {
+    const active = deepActiveElement(doc);
+    return !active || active === doc.body;
+  };
+  // Whether another element is fullscreen: the chart this popup belongs to
+  // is hidden behind it.
+  const fullscreenHidesOwner = (): boolean => {
+    const fullscreen = fullscreenElementOf(doc);
+    return !!fullscreen && !!owner && !composedContains(fullscreen, owner);
+  };
+  // Put focus back on the row a fullscreen transition knocked it off.
+  const recoverFocus = (): boolean => {
+    if (!dropped || !focusIsNowhere()) return false;
+    const { row, index } = dropped;
+    dropped = null;
+    refocus(row, index);
+    return true;
+  };
+  // Entering element fullscreen blurs a focused row that sits outside the
+  // new fullscreen element (Chromium does), and fullscreenchange, which
+  // re-homes the portal, fires up to a frame later. Focus lost while the
+  // portal is not where the fullscreen state says it belongs is the chart
+  // moving, not the user leaving the menu: the popup moves now and its row
+  // gets focus back. Returns whether that is what happened.
+  const followFullscreen = (): boolean => {
+    if (!dropped || !focusIsNowhere() || fullscreenHidesOwner() || owner?.isConnected === false) return false;
+    const home = surface.parentNode;
+    if (portalContainerFor(owner, doc) === home) return false;
+    // Outside fullscreen the portal sits in <body> or a shadow root, so it
+    // only needs moving mid-transition: entering (a fullscreen element is
+    // set) or leaving (it still sits in the element that was fullscreen).
+    if (!fullscreenElementOf(doc) && (home === doc.body || home?.nodeType !== 1)) return false;
+    portal.update();
     syncFocusRoots();
     scheduleReposition();
+    return recoverFocus();
+  };
+  // The portal re-homes itself into (or out of) the fullscreen element in
+  // its own (capturing) listener; placement and focus roots follow, and a row
+  // the transition blurred gets focus back. Another element going fullscreen
+  // hides the chart, so its menus close.
+  const onFullscreenChange = (): void => {
+    if (closed) return;
+    if (fullscreenHidesOwner()) {
+      close({ restoreFocus: false });
+      return;
+    }
+    syncFocusRoots();
+    scheduleReposition();
+    recoverFocus();
   };
   // Focus that goes nowhere (blur() from code, Tab out of the page) fires no
   // focusin. The check waits a task, not a microtask: while a press is still
   // moving focus the active element is <body>, and some engines focus the
   // pressed element asynchronously. The window itself losing focus leaves
   // the active element inside, so the menu stays. A focused row removed by a
-  // re-render hands focus back to the menu instead of closing it.
+  // re-render hands focus back to the menu instead of closing it, and a row
+  // blurred by the chart entering or leaving fullscreen follows it.
   const onFocusOut = (e: FocusEvent): void => {
     if (sheet || e.relatedTarget) return;
     const from = e.target as Node | null;
-    view.setTimeout(() => {
+    dropped = { row: from, index: from instanceof HTMLElement ? popupItems(el).indexOf(from) : -1 };
+    view.clearTimeout(focusOutTimer);
+    focusOutTimer = view.setTimeout(() => {
       if (closed) return;
       const active = deepActiveElement(doc);
       if (isInside(active) || isAnchor(active) || isAbove(active)) return;
+      if (followFullscreen()) return;
+      dropped = null;
       if ((!active || active === doc.body) && from && !from.isConnected && el.isConnected) {
         focusItem();
         return;
@@ -545,7 +638,8 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     if (closed) return;
     doc.addEventListener("pointerdown", onAway, true);
     doc.addEventListener("keydown", onKey, true);
-    if (opts.initialFocus !== false) focusItem();
+    // The first row the user can act on, when there is one.
+    if (opts.initialFocus !== false) focusItem(Math.max(0, popupItems(el).findIndex((item) => !isDisabledItem(item))));
   }, 0);
 
   reposition();
@@ -579,6 +673,9 @@ export function popupRow(
   }
   row.addEventListener("click", (e) => {
     e.stopPropagation();
+    // A disabled row can take focus (so Enter or Space "click" it) but never
+    // runs its action.
+    if (row.getAttribute("aria-disabled") === "true") return;
     onClick(e);
   });
   return row;
