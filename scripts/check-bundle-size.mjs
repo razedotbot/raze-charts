@@ -315,7 +315,23 @@ function kibCell(bytes) {
   return `${(bytes / 1024).toFixed(2)} KiB`;
 }
 
+export const SUPPORTED_FLAGS = Object.freeze(["--json", "--check-docs", "--write-docs", "--help"]);
+
+/** Returns an error message for unknown or conflicting arguments, else null. */
+export function argumentProblem(argv) {
+  const unknown = argv.find((argument) => !SUPPORTED_FLAGS.includes(argument));
+  if (unknown) return `Unknown option "${unknown}". Supported options: ${SUPPORTED_FLAGS.join(", ")}.`;
+  const modes = argv.filter((argument) => argument !== "--help");
+  if (new Set(modes).size > 1) return `Choose one of ${modes.join(", ")}; they select different modes.`;
+  return null;
+}
+
 async function main(argv) {
+  const problem = argumentProblem(argv);
+  if (problem) {
+    console.error(`[raze-charts] ${problem}\n\n${usage}`);
+    return 2;
+  }
   if (argv.includes("--help")) {
     console.log(usage);
     return 0;

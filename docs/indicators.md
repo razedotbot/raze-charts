@@ -205,6 +205,7 @@ data change retries.
 Register a study's input types once and `createStudy()` rejects typos and
 wrongly typed inputs at compile time:
 
+<!-- prelude: indicator -->
 ```ts
 import type { StudyInputsOf } from "@razedotbot/charts";
 
@@ -215,8 +216,10 @@ declare module "@razedotbot/charts" {
 }
 
 chart.createStudy("Envelope", false, false, { length: 50, src: "hl2" }); // ok
-chart.createStudy("Envelope", false, false, { length: "50" });           // type error
-chart.createStudy("Envelope", false, false, { lenght: 50 });             // type error
+// @ts-expect-error `length` must be a number
+chart.createStudy("Envelope", false, false, { length: "50" });
+// @ts-expect-error `lenght` is not an input of Envelope
+chart.createStudy("Envelope", false, false, { lenght: 50 });
 ```
 
 Names that are not registered keep the open TradingView input map.

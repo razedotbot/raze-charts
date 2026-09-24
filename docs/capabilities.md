@@ -153,9 +153,12 @@ a widget through `raze.custom_studies`.
 | `CartesianGrid` | **Yes** | Boolean configuration descriptor. |
 | `Tooltip` | **Subset** | Enables the native tooltip; custom content/render props are not implemented. |
 | `Legend` | **Subset** | Enables the native legend; click-to-hide is mount state, not a Recharts render prop. |
-| `ReferenceLine` | **Yes** | Exactly one of numeric `y` or `x`; optional `stroke`, `strokeWidth`, and `name`. |
-| `ResponsiveContainer` | **Subset** | Measures its box with `ResizeObserver` and injects numeric width/height into exactly one chart child; it is not the complete Recharts sizing API. |
+| `ReferenceLine` | **Yes** | Exactly one of numeric `y` or a category/number/Date `x`; optional `stroke`, `strokeWidth`, and `name`. |
+| `ResponsiveContainer` | **Subset** | Measures its box with `ResizeObserver` and injects numeric width/height into one component child (a chart or a wrapper that forwards them) or passes `{ width, height }` to a render function; host elements and bare descriptors such as `<Line>` are rejected. It is not the complete Recharts sizing API. |
 | `Brush` | **Yes** | `startIndex`/`endIndex` or a time domain window the native viewport; `height` enables the navigator strip. |
+| `syncId` / `viewportGroup` | **Subset** | Charts sharing a `syncId` or a `createViewportGroup()` group share one X window across pan, zoom, brush and presets; they join on mount and leave on unmount. `onReady` handles also implement `ViewportHandle` (`group.add(handle)`). Unlike Recharts, tooltip and crosshair sync (the shared active index) is not implemented. |
+| Re-render cost | **Yes** | Inline callbacks, `interaction` and `viewport` literals never recompile; JSX containers memoize on the structure of their children. See [React update flow](./performance.md#react-update-flow). |
+| Next.js App Router / Server Components | **Yes** | The `/react` bundles start with `"use client"`; Server Components render charts without a user wrapper when props are serializable. |
 | Recharts event/custom-shape ecosystem | **No** | Use the native grammar or a custom mark plugin instead. |
 
 ## Accessibility support boundary

@@ -16,7 +16,7 @@
 // through `npx playwright test`.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -124,19 +124,54 @@ function displayPath(path) {
   return relative(repositoryRoot, path).split(sep).join("/");
 }
 
+/** Friendly step labels for the tsconfig projects `npm run typecheck` checks. */
+const TYPECHECK_LABELS = Object.freeze({
+  "tsconfig.json": "src",
+  "tsconfig.type-tests.json": "API type tests",
+});
+
+/**
+ * Derive the type gate from package.json `scripts.typecheck`, so `npm test`
+ * and `npm run typecheck` can never check different projects. The script must
+ * be `tsc` invocations joined by `&&`; anything else throws with guidance
+ * rather than being skipped. Returns `{ label, args }` per command, where
+ * `args` are the tsc arguments.
+ */
+export function typecheckCommands(script) {
+  if (typeof script !== "string" || !script.trim()) {
+    throw new Error('package.json has no "typecheck" script; the test runner derives its type gate from it.');
+  }
+  return script.split("&&").map((part) => {
+    const words = part.trim().split(/\s+/);
+    if (words[0] !== "tsc" || words.some((word) => /[|;<>`$]/.test(word))) {
+      throw new Error(
+        `package.json "typecheck" must be tsc commands joined by "&&" (found "${part.trim()}"); ` +
+        "scripts/run-tests.mjs runs each one as a prerequisite step.",
+      );
+    }
+    const args = words.slice(1);
+    const projectFlag = args.findIndex((word) => word === "-p" || word === "--project");
+    const project = projectFlag >= 0 ? args[projectFlag + 1] : "tsconfig.json";
+    if (projectFlag >= 0 && !project) throw new Error(`package.json "typecheck": ${words[projectFlag + 1] ?? "-p"} needs a project path`);
+    const normalized = project.replace(/^\.\//, "");
+    return { label: `typecheck (${TYPECHECK_LABELS[normalized] ?? normalized})`, args };
+  });
+}
+
+function packageTypecheckScript() {
+  const manifest = JSON.parse(readFileSync(resolve(repositoryRoot, "package.json"), "utf8"));
+  return manifest.scripts?.typecheck;
+}
+
 /** Build the ordered list of steps (commands) for a plan. */
-export function planSteps(plan) {
+export function planSteps(plan, { typecheckScript = packageTypecheckScript() } = {}) {
   const node = process.execPath;
   const steps = [];
   if (plan.typecheck) {
     const tsc = createRequire(import.meta.url).resolve("typescript/bin/tsc");
-    steps.push({ label: "typecheck (src)", command: node, args: [tsc, "--noEmit"], prerequisite: true });
-    steps.push({
-      label: "typecheck (API type tests)",
-      command: node,
-      args: [tsc, "-p", "tsconfig.type-tests.json"],
-      prerequisite: true,
-    });
+    for (const { label, args } of typecheckCommands(typecheckScript)) {
+      steps.push({ label, command: node, args: [tsc, ...args], prerequisite: true });
+    }
   }
   if (plan.build) {
     steps.push({ label: "build", command: node, args: ["build.mjs"], prerequisite: true });
@@ -182,7 +217,13 @@ function main(argv) {
     console.log(usage);
     return 0;
   }
-  const steps = planSteps(plan);
+  let steps;
+  try {
+    steps = planSteps(plan);
+  } catch (error) {
+    console.error(`[raze-charts] ${error.message}`);
+    return 2;
+  }
   if (plan.list) {
     for (const step of steps) console.log(step.label);
     return 0;

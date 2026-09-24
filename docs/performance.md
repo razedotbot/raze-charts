@@ -71,7 +71,7 @@ npm run check:size
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 49 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 33 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
-| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 52 KiB |
+| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 53 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
 | Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 17 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
@@ -252,6 +252,20 @@ exception until W2-12's feature packs move optional chrome (legend, drawing
 tools beyond the basics, go-to-date, compare loading, the header interval
 menu) out of the root, or direct cuts.
 
+The React "React LineChart" scenario budget was raised from 52 KiB to 53 KiB
+when W1B-24 (React and docs correctness) merged after the wave 1B integration.
+On its own branch the adapter changes fit the old 37 KiB budget with about
+0.5 KiB to spare, but the integrated 52 KiB budget kept only 566 bytes of
+headroom over the merged `/chart` runtime, and W1B-24 adds 875 bytes gzip to
+the scenario (52,682 to 53,557 bytes on the merged tree): stable callback
+trampolines and the structural JSX memo key (so inline props and fresh JSX
+children stop recompiling), `viewportGroup`/`syncId` registration for
+synchronized dashboards, and the `ResponsiveContainer` render-prop and
+wrapper-component path. The `/react` artifact stays well inside its 10 KiB
+budget (7.35 KiB). 53 KiB keeps about 0.7 KiB of headroom so the next growth
+fails loudly; the per-mark tree shaking planned in wave 2 (W2-13) is expected
+to win the shared runtime back.
+
 ## Dense native charts
 
 Line and area marks use automatic extrema-envelope decimation. Unless
@@ -267,7 +281,10 @@ extremely small cap cannot represent every priority, the tail wins. The
 compiler never reconnects retained segments across invalid data; raise the
 budget or disable decimation when every tiny segment matters.
 
+<!-- prelude: native-data -->
 ```ts
+import { compileChart, defineChart, line } from "@razedotbot/charts/chart";
+
 const chart = defineChart({
   marks: [line(points, { x: "time", y: "value" })],
   performance: {
@@ -339,21 +356,53 @@ categories stay near-linear: 5,000 bar categories compile in about 6 ms and
 
 ## React update flow
 
-The React `<Chart>` component mounts the framework-neutral runtime once. New
-definition references and options call `MountHandle.update()` instead of
-destroying and recreating the mount.
+The React `<Chart>` component mounts the framework-neutral runtime once and
+calls `MountHandle.update()` only when something that changes the picture
+changed. An update is one scene compile and one repaint. A chart that is zoomed
+or hides series also keeps a full-data scene for the navigator and the zoom
+limits. The mount compiles that scene once more when the content may have
+changed: on a new definition, and on every update of a chart without a
+controlled `viewport`, because rows may have been mutated in place. A
+controlled `viewport` is forwarded with every update, so a resize or an option
+change counts as navigation and reuses the cached full-data scene; only a
+navigator whose size changed compiles its sparkline again. The props compare
+as follows:
+
+| Prop | Compared by | Recompiles when |
+| --- | --- | --- |
+| `definition` | identity | a new definition object |
+| `width`, `height`, `renderer`, `idPrefix` | value | the value changes |
+| `ariaLabel`, `ariaDescription` | value | the text changes |
+| `interaction` | shallow value | a flag changes; `interaction={{ zoom: true }}` inline is free |
+| `viewport` | value (Dates by time) | the window changes; an inline literal is free |
+| `onViewportChange`, `onSelect` | never | never: stable trampolines always call the latest callback |
+| `viewportGroup`, `syncId` | identity / value | only when the joined group already has a window (the chart adopts it with one repaint); leaving never repaints |
+
+Recharts-shaped containers (`<LineChart>` and friends) derive their definition
+from the JSX children. Children are new objects on every React render, so the
+adapter memoizes on a structural key instead: each descriptor's role in order,
+plus its props shallowly (strings, numbers, booleans and Dates by value;
+arrays, objects and functions by identity), plus the `data` array identity. An
+unrelated parent re-render therefore costs a child walk and no DOM work;
+changing a prop such as `<Line stroke>` repaints exactly once. Per-series
+`data` arrays are compared by identity, so keep them stable too.
 
 Keep large input arrays and definitions referentially stable when nothing
-changed. In Recharts-shaped JSX, `useMemo` can prevent avoidable definition
-work in the host, but data changes still require a full native compile:
+changed; a new data array is always a full native compile. With `<Chart>`,
+build the definition in `useMemo`:
 
+<!-- prelude: native-data -->
 ```tsx
-const definition = useMemo(
-  () => defineChart({ marks: [line(points, { x: "time", y: "value" })] }),
-  [points],
-);
+import { useMemo } from "react";
+import { Chart, defineChart, line } from "@razedotbot/charts/react";
 
-return <Chart definition={definition} renderer="canvas" />;
+export function PriceChart({ points }: { points: { time: number; value: number }[] }) {
+  const definition = useMemo(
+    () => defineChart({ marks: [line(points, { x: "time", y: "value" })] }),
+    [points],
+  );
+  return <Chart definition={definition} renderer="canvas" />;
+}
 ```
 
 ## Financial data correctness
@@ -438,12 +487,16 @@ node scripts/benchmark-widget.mjs
 | `--no-raster` | Skip the per-frame canvas readback, so only script time is measured. |
 
 `PW_PORT` selects the static server port (default 8798). The suite uses its
-own [playwright.perf.config.ts](../playwright.perf.config.ts), so the visual
+own `playwright.perf.config.ts` (in the
+[repository](https://github.com/razedotbot/raze-charts/blob/main/playwright.perf.config.ts),
+not the npm package), so the visual
 and accessibility suites (`npx playwright test`) never run it.
 
 ### Method
 
-- The page is [examples/benchmark.html](../examples/benchmark.html). It uses a
+- The page is `examples/benchmark.html` in the
+  [repository](https://github.com/razedotbot/raze-charts/blob/main/examples/benchmark.html)
+  (the npm package does not ship examples). It uses a
   1100x620 CSS px viewport at DPR 1, the same surface as the visual goldens.
   Widget chrome is on by default; the countdown and hint popups are disabled.
 - The data is a deterministic 1-minute OHLCV random walk. The whole series is

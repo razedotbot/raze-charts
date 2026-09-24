@@ -14,6 +14,7 @@ import {
 import {
   area,
   bar,
+  createViewportGroup,
   defineChart,
   heatmap,
   line,
@@ -29,6 +30,8 @@ import {
   type CompiledChart,
   type MountChartOptions,
   type MountHandle,
+  type ViewportGroup,
+  type ViewportHandle,
 } from "../chart";
 
 export type DeepReadonly<T> =
@@ -42,18 +45,6 @@ export type DeepReadonly<T> =
 
 /** A detached renderer-neutral snapshot. Mutating it can never mutate the mounted chart. */
 export type ReactChartSnapshot = DeepReadonly<CompiledChart>;
-
-const CHART_COMPONENT = Symbol.for("@razedotbot/charts/react-chart-component");
-
-function markChartComponent<T extends (...args: never[]) => ReactElement>(component: T): T {
-  Object.defineProperty(component, CHART_COMPONENT, { value: true });
-  return component;
-}
-
-function isChartComponent(value: unknown): boolean {
-  return (typeof value === "function" || (typeof value === "object" && value != null))
-    && (value as Record<PropertyKey, unknown>)[CHART_COMPONENT] === true;
-}
 
 /** Width and height are owned by Chart props (or ResponsiveContainer), never by host CSS. */
 export type ChartHostStyle = Omit<CSSProperties, "width" | "height"> & {
@@ -72,17 +63,46 @@ export interface ChartProps {
   className?: string;
   style?: ChartHostStyle;
   onReady?: (chart: ReactChartHandle) => void;
+  /**
+   * Compared by value: an inline `{ zoom: true }` literal on every render does
+   * not recompile the chart.
+   */
   interaction?: MountChartOptions["interaction"];
+  /** Controlled window, compared by value (Dates by time). Omit to let users pan and zoom freely. */
   viewport?: ChartViewport;
+  /** Latest callback always wins; changing its identity never recompiles the chart. */
   onViewportChange?: NonNullable<MountChartOptions["onViewportChange"]>;
+  /** Latest callback always wins; changing its identity never recompiles the chart. */
   onSelect?: NonNullable<MountChartOptions["onSelect"]>;
+  /**
+   * Join a host-owned group from `createViewportGroup()`: a pan, zoom, brush or
+   * range preset on any member moves every other member to the same window.
+   * The chart joins on mount and leaves on unmount.
+   */
+  viewportGroup?: ViewportGroup;
+  /**
+   * Recharts-style shorthand for `viewportGroup`: charts rendered with the same
+   * `syncId` share one viewport group. Use either prop, not both.
+   */
+  syncId?: string;
 }
 
-/** React owns mount lifecycle; consumers receive only immutable diagnostic snapshots. */
-export interface ReactChartHandle {
+/**
+ * React owns the mount lifecycle. Consumers receive detached, immutable scene
+ * snapshots plus viewport control, so the handle can join a `ViewportGroup`
+ * (`group.add(handle)`) or drive the window from host UI.
+ */
+export interface ReactChartHandle extends ViewportHandle {
   getSnapshot(): ReactChartSnapshot | null;
   /** Compatibility alias for getSnapshot(). */
   getScene(): ReactChartSnapshot | null;
+  /**
+   * Move the chart to `viewport`, or back to its full domain with `null`.
+   * Programmatic changes do not call `onViewportChange`.
+   */
+  setViewport(viewport: ChartViewport | null): void;
+  /** Detached copy of the window set by gestures, presets, or setViewport(); null when none is active. */
+  getViewport(): ChartViewport | null;
 }
 
 function snapshotValue<T>(value: T, seen = new WeakMap<object, unknown>()): DeepReadonly<T> {
@@ -128,11 +148,104 @@ function assertChartHostStyle(style: ChartHostStyle | undefined): void {
   }
 }
 
+function assertViewportSync(viewportGroup: ViewportGroup | undefined, syncId: string | undefined): void {
+  if (viewportGroup !== undefined && syncId !== undefined) {
+    throw new Error(
+      "[@razedotbot/charts/react] Pass either viewportGroup or syncId, not both. " +
+      "syncId is shorthand for a shared createViewportGroup() instance.",
+    );
+  }
+  if (syncId !== undefined && (typeof syncId !== "string" || !syncId.trim())) {
+    throw new Error("[@razedotbot/charts/react] syncId must be a non-empty string.");
+  }
+}
+
+function sameViewportValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  return left instanceof Date && right instanceof Date && left.getTime() === right.getTime();
+}
+
+function sameViewportAxis(
+  left: readonly unknown[] | undefined,
+  right: readonly unknown[] | undefined,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right || left.length !== right.length) return false;
+  return left.every((value, index) => sameViewportValue(value, right[index]));
+}
+
+/** Value equality for controlled viewports, so an inline literal never recompiles. */
+function sameViewport(left: ChartViewport | undefined, right: ChartViewport | undefined): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return sameViewportAxis(left.x, right.x) && sameViewportAxis(left.y, right.y);
+}
+
+/** Shallow equality for `interaction`, so `interaction={{ zoom: true }}` never recompiles. */
+function sameInteraction(
+  left: MountChartOptions["interaction"],
+  right: MountChartOptions["interaction"],
+): boolean {
+  if (left === right) return true;
+  if (typeof left !== "object" || typeof right !== "object" || !left || !right) return false;
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (!Object.is(a[key], b[key])) return false;
+  }
+  return true;
+}
+
+function copyViewport(viewport: ChartViewport | null): ChartViewport | null {
+  if (!viewport) return null;
+  const copy: { x?: ChartViewport["x"]; y?: ChartViewport["y"] } = {};
+  if (viewport.x) {
+    copy.x = viewport.x.map((value) => value instanceof Date ? new Date(value.getTime()) : value) as ChartViewport["x"];
+  }
+  if (viewport.y) copy.y = [viewport.y[0], viewport.y[1]];
+  return copy;
+}
+
+/** Groups shared by `syncId`, reference-counted so an idle id holds no charts. */
+const syncGroups = new Map<string, { group: ViewportGroup; members: number }>();
+
+function acquireSyncGroup(syncId: string): { group: ViewportGroup; release(): void } {
+  let entry = syncGroups.get(syncId);
+  if (!entry) {
+    entry = { group: createViewportGroup(), members: 0 };
+    syncGroups.set(syncId, entry);
+  }
+  entry.members += 1;
+  const acquired = entry;
+  let released = false;
+  return {
+    group: acquired.group,
+    release() {
+      if (released) return;
+      released = true;
+      acquired.members -= 1;
+      if (acquired.members === 0 && syncGroups.get(syncId) === acquired) syncGroups.delete(syncId);
+    },
+  };
+}
+
+interface AppliedChartState {
+  definition: ChartDefinition;
+  width: number | undefined;
+  height: number;
+  renderer: NonNullable<MountChartOptions["renderer"]>;
+  idPrefix: string | undefined;
+  interaction: MountChartOptions["interaction"];
+  viewport: ChartViewport | undefined;
+}
+
 /**
  * Thin lifecycle adapter around the framework-neutral chart runtime. The host
- * is mounted once; new definitions and sizes are forwarded through update().
+ * is mounted once; a new definition, size, renderer, id prefix, interaction or
+ * viewport is forwarded through update(). Callbacks are read through stable
+ * trampolines, so their identity never causes a recompile or repaint.
  */
-const ChartComponent = function Chart({
+export function Chart({
   definition,
   width,
   height = 320,
@@ -147,23 +260,20 @@ const ChartComponent = function Chart({
   viewport,
   onViewportChange,
   onSelect,
+  viewportGroup,
+  syncId,
 }: ChartProps): ReactElement {
   assertChartDimension("width", width);
   assertChartDimension("height", height);
   assertChartHostStyle(style);
+  assertViewportSync(viewportGroup, syncId);
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<MountHandle | null>(null);
-  const applied = useRef<{
-    definition: ChartDefinition;
-    width: number | undefined;
-    height: number;
-    renderer: NonNullable<MountChartOptions["renderer"]>;
-    idPrefix: string | undefined;
-    interaction: MountChartOptions["interaction"];
-    viewport: ChartViewport | undefined;
-    onViewportChange: MountChartOptions["onViewportChange"];
-    onSelect: MountChartOptions["onSelect"];
-  } | null>(null);
+  const applied = useRef<AppliedChartState | null>(null);
+  /** The group this chart currently belongs to (viewportGroup or its syncId group). */
+  const activeGroup = useRef<ViewportGroup | null>(null);
+  /** True while this chart broadcasts its own gesture, so the group echo is skipped. */
+  const broadcasting = useRef(false);
 
   const def = useMemo(() => {
     if (!ariaLabel && !ariaDescription) return definition;
@@ -191,8 +301,20 @@ const ChartComponent = function Chart({
       idPrefix: current.idPrefix,
       interaction: current.interaction,
       viewport: current.viewport,
-      onViewportChange: current.onViewportChange,
-      onSelect: current.onSelect,
+      // Stable trampolines: the mount never needs an update() for a new callback.
+      onViewportChange: (next) => {
+        const group = activeGroup.current;
+        if (group) {
+          broadcasting.current = true;
+          try {
+            group.setViewport(next);
+          } finally {
+            broadcasting.current = false;
+          }
+        }
+        latest.current.onViewportChange?.(next);
+      },
+      onSelect: (event) => latest.current.onSelect?.(event),
     });
     handle.current = mounted;
     applied.current = {
@@ -203,9 +325,8 @@ const ChartComponent = function Chart({
       idPrefix: current.idPrefix,
       interaction: current.interaction,
       viewport: current.viewport,
-      onViewportChange: current.onViewportChange,
-      onSelect: current.onSelect,
     };
+    let warnedAfterUnmount = false;
     const getSnapshot = (): ReactChartSnapshot | null => {
       const scene = mounted.getScene();
       return scene ? snapshotValue(scene) : null;
@@ -213,6 +334,23 @@ const ChartComponent = function Chart({
     const publicHandle: ReactChartHandle = Object.freeze({
       getSnapshot,
       getScene: getSnapshot,
+      setViewport(next: ChartViewport | null) {
+        if (handle.current !== mounted) {
+          if (!warnedAfterUnmount) {
+            warnedAfterUnmount = true;
+            console.warn(
+              "[@razedotbot/charts/react] setViewport() was called on an unmounted chart and was ignored. " +
+              "Call the function returned by group.add(handle) when the chart unmounts, " +
+              "or pass viewportGroup/syncId so the chart leaves its group automatically.",
+            );
+          }
+          return;
+        }
+        mounted.setViewport(next);
+      },
+      getViewport() {
+        return handle.current === mounted ? copyViewport(mounted.getViewport()) : null;
+      },
     });
     try {
       current.onReady?.(publicHandle);
@@ -229,6 +367,29 @@ const ChartComponent = function Chart({
     };
   }, []);
 
+  // Joins the viewport group after the mount effect (effects run in order) and
+  // leaves it on unmount or when the group changes.
+  useEffect(() => {
+    const mounted = handle.current;
+    if (!mounted || (!viewportGroup && syncId === undefined)) return;
+    const lease = viewportGroup
+      ? { group: viewportGroup, release() {} }
+      : acquireSyncGroup(syncId as string);
+    const member: ViewportHandle = {
+      setViewport(next) {
+        if (broadcasting.current || handle.current !== mounted) return;
+        mounted.setViewport(next);
+      },
+    };
+    activeGroup.current = lease.group;
+    const leave = lease.group.add(member);
+    return () => {
+      leave();
+      if (activeGroup.current === lease.group) activeGroup.current = null;
+      lease.release();
+    };
+  }, [viewportGroup, syncId]);
+
   useEffect(() => {
     const mounted = handle.current;
     const previous = applied.current;
@@ -239,30 +400,19 @@ const ChartComponent = function Chart({
       && previous.height === height
       && previous.renderer === renderer
       && previous.idPrefix === idPrefix
-      && previous.interaction === interaction
-      && previous.viewport === viewport
-      && previous.onViewportChange === onViewportChange
-      && previous.onSelect === onSelect
+      && sameInteraction(previous.interaction, interaction)
+      && sameViewport(previous.viewport, viewport)
     ) return;
-    const updateOptions: MountChartOptions = {
-      width, height, renderer, idPrefix, interaction, onViewportChange, onSelect,
-    };
-    // An absent viewport means “preserve the user's live pan/zoom”. Include an
-    // explicit undefined only for the controlled -> uncontrolled transition.
-    if (previous.viewport !== undefined || viewport !== undefined) updateOptions.viewport = viewport;
+    const updateOptions: MountChartOptions = { width, height, renderer, idPrefix, interaction };
+    // An absent viewport means “preserve the user's live pan/zoom”. A
+    // controlled viewport is forwarded on every update, so the mount treats
+    // it as navigation and keeps its cached full-data scene (a resize or an
+    // interaction change does not recompile every row). Also forward the
+    // explicit undefined of a controlled -> uncontrolled transition.
+    if (viewport !== undefined || previous.viewport !== undefined) updateOptions.viewport = viewport;
     mounted.update(def, updateOptions);
-    applied.current = {
-      definition: def,
-      width,
-      height,
-      renderer,
-      idPrefix,
-      interaction,
-      viewport,
-      onViewportChange,
-      onSelect,
-    };
-  }, [def, width, height, renderer, idPrefix, interaction, viewport, onViewportChange, onSelect]);
+    applied.current = { definition: def, width, height, renderer, idPrefix, interaction, viewport };
+  }, [def, width, height, renderer, idPrefix, interaction, viewport]);
 
   return (
     <div
@@ -272,9 +422,7 @@ const ChartComponent = function Chart({
       style={{ ...style, width: width === undefined ? "100%" : `${width}px`, height: `${height}px` }}
     />
   );
-};
-
-export const Chart = /* @__PURE__ */ markChartComponent(ChartComponent);
+}
 
 export type DataKey<T extends object> = Extract<keyof T, string>;
 
@@ -414,8 +562,23 @@ export type ResponsiveContainerStyle = Omit<CSSProperties, "width" | "height" | 
   readonly minWidth?: never;
 };
 
+/** Numeric size measured by <ResponsiveContainer>, in CSS pixels. */
+export interface ResponsiveContainerSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * One element that accepts numeric width/height props (a chart, or a wrapper
+ * component that forwards them to one), or a render function that receives
+ * the measured size once both dimensions are known.
+ */
+export type ResponsiveContainerChild =
+  | ReactElement<{ width?: number; height?: number }>
+  | ((size: ResponsiveContainerSize) => ReactNode);
+
 export interface ResponsiveContainerProps {
-  children: ReactElement<{ width?: number; height?: number }>;
+  children: ResponsiveContainerChild;
   width?: number | string;
   height?: number | string;
   className?: string;
@@ -435,6 +598,42 @@ function numericResponsiveDimension(name: "width" | "height", value: number | st
     );
   }
   return value;
+}
+
+function describeResponsiveChild(children: unknown): string {
+  if (Array.isArray(children)) return `${children.length} children`;
+  if (!isValidElement(children)) return children == null ? "no child" : `a ${typeof children} child`;
+  if (typeof children.type === "string") return `<${children.type}>`;
+  const role = componentRole(children.type);
+  if (!role) return "a Fragment";
+  const name = COMPONENT_NAMES[role];
+  // Every series descriptor has a same-named container: <Line> → <LineChart>.
+  return SERIES_ROLES.has(role)
+    ? `<${name}>, a series descriptor; wrap it in a chart container such as <${name}Chart>`
+    : `<${name}>, a chart descriptor; wrap it in a chart container such as <LineChart> or <ComposedChart>`;
+}
+
+/**
+ * Any component element can receive the measured size: a chart, or a user
+ * wrapper such as <RevenueChart /> that forwards width and height. Host
+ * elements, fragments and bare descriptors (<Line>, <Tooltip>, which render
+ * nothing outside a chart container) cannot, so they fail loudly instead of
+ * rendering an empty container.
+ */
+function assertResponsiveChild(
+  children: unknown,
+): asserts children is ReactElement<{ width?: number; height?: number }> {
+  if (
+    isValidElement(children)
+    && typeof children.type !== "string"
+    && children.type !== Fragment
+    && componentRole(children.type) === null
+  ) return;
+  throw new Error(
+    "[@razedotbot/charts/react] ResponsiveContainer requires exactly one chart element " +
+    "(a chart, or a component that forwards width and height to one) or a render function child " +
+    `({ width, height }) => …; received ${describeResponsiveChild(children)}.`,
+  );
 }
 
 export function ResponsiveContainer({
@@ -485,13 +684,21 @@ export function ResponsiveContainer({
     return () => window.removeEventListener("resize", onResize);
   }, [explicitWidth, explicitHeight]);
 
-  if (!isValidElement(children) || children.type === Fragment || !isChartComponent(children.type)) {
-    throw new Error("[@razedotbot/charts/react] ResponsiveContainer requires exactly one chart element.");
-  }
-  const child = cloneElement(children, {
+  const size = {
     width: explicitWidth ?? measured.width,
     height: explicitHeight ?? measured.height,
-  });
+  };
+  let child: ReactNode;
+  if (typeof children === "function") {
+    // A render function receives only real numbers: nothing renders until
+    // both dimensions are known (for example before the first layout).
+    child = size.width !== undefined && size.height !== undefined
+      ? children({ width: size.width, height: size.height })
+      : null;
+  } else {
+    assertResponsiveChild(children);
+    child = cloneElement(children, size);
+  }
   return (
     <div
       ref={host}
@@ -599,10 +806,68 @@ function assertDescriptorProps(role: ComponentRole, props: Record<string, unknow
   }
 }
 
+interface DescriptorRecord {
+  role: ComponentRole;
+  props: Record<string, unknown>;
+}
+
+/** Validated descriptor children in document order; Fragments are flattened. */
+function collectDescriptors(children: ReactNode): DescriptorRecord[] {
+  const descriptors: DescriptorRecord[] = [];
+  const collect = (nodes: ReactNode): void => {
+    Children.forEach(nodes, (child) => {
+      if (!isValidElement(child)) return;
+      if (child.type === Fragment) {
+        collect((child.props as { children?: ReactNode }).children);
+        return;
+      }
+      const role = componentRole(child.type);
+      if (!role) return;
+      const props = child.props as Record<string, unknown>;
+      assertDescriptorProps(role, props);
+      descriptors.push({ role, props });
+    });
+  };
+  collect(children);
+  return descriptors;
+}
+
+/** Stable per-object tokens, so structural keys compare arrays and callbacks by identity. */
+const identityTokens = new WeakMap<object, number>();
+let nextIdentityToken = 0;
+
+function structuralToken(value: unknown): string {
+  if (value instanceof Date) return `d${value.getTime()}`;
+  if ((typeof value === "object" && value !== null) || typeof value === "function") {
+    let token = identityTokens.get(value as object);
+    if (token === undefined) {
+      token = nextIdentityToken += 1;
+      identityTokens.set(value as object, token);
+    }
+    return `r${token}`;
+  }
+  if (typeof value === "string") return `s${JSON.stringify(value)}`;
+  // Numbers (NaN, -0 and Infinity included), booleans, undefined, bigint, symbols.
+  return typeof value === "number" && Object.is(value, -0) ? "n-0" : `${typeof value}:${String(value)}`;
+}
+
+/**
+ * Structural key of the JSX children: descriptor roles in order plus their
+ * shallow props (primitives and Dates by value, arrays and objects by
+ * identity). JSX elements are new objects on every render, but an unchanged
+ * key means an identical chart, so the adapter skips compile and repaint.
+ */
+function descriptorKey(descriptors: readonly DescriptorRecord[]): string {
+  return descriptors.map(({ role, props }) => {
+    const fields = Object.keys(props).sort().map((key) => `${key}=${structuralToken(props[key])}`);
+    return `${role}(${fields.join(",")})`;
+  }).join(";");
+}
+
 function specFromJsx<T extends object>(
   kind: "line" | "bar" | "area" | "scatter" | "pie" | "radar" | "heatmap" | "composed",
   data: readonly T[],
-  children: ReactNode,
+  descriptors: readonly DescriptorRecord[],
   xDefault: DataKey<T>,
   valueDefault: DataKey<T>,
   heatmapYDefault?: DataKey<T>,
@@ -615,26 +880,6 @@ function specFromJsx<T extends object>(
   let viewport: ChartViewport | undefined;
   let interaction: MountChartOptions["interaction"];
   const marks: ChartMark[] = [];
-  const descriptors: {
-    role: ComponentRole;
-    props: Record<string, unknown>;
-  }[] = [];
-
-  const collect = (nodes: ReactNode): void => {
-    Children.forEach(nodes, (child) => {
-      if (!isValidElement(child)) return;
-      if (child.type === Fragment) {
-        collect((child.props as { children?: ReactNode }).children);
-        return;
-      }
-      const role = componentRole(child.type);
-      if (!role) return;
-      const p = child.props as Record<string, unknown>;
-      assertDescriptorProps(role, p);
-      descriptors.push({ role, props: p });
-    });
-  };
-  collect(children);
 
   // Configuration is resolved before marks, so JSX child order never changes
   // data encoding (for example <Line/> may safely precede <XAxis/>).
@@ -808,6 +1053,14 @@ export interface BoxProps<T extends object = Record<string, unknown>> {
   className?: string;
   style?: ChartHostStyle;
   onReady?: (chart: ReactChartHandle) => void;
+  /** Latest callback always wins; see ChartProps.onViewportChange. */
+  onViewportChange?: ChartProps["onViewportChange"];
+  /** Latest callback always wins; see ChartProps.onSelect. */
+  onSelect?: ChartProps["onSelect"];
+  /** Share the X window with other charts; see ChartProps.viewportGroup. */
+  viewportGroup?: ViewportGroup;
+  /** Recharts-style shorthand for a shared viewport group; see ChartProps.syncId. */
+  syncId?: string;
 }
 
 function JsxChart<T extends object>({
@@ -822,6 +1075,10 @@ function JsxChart<T extends object>({
   className,
   style,
   onReady,
+  onViewportChange,
+  onSelect,
+  viewportGroup,
+  syncId,
   kind,
   x,
   value,
@@ -832,9 +1089,15 @@ function JsxChart<T extends object>({
   value: DataKey<T>;
   heatmapY?: DataKey<T>;
 }): ReactElement {
+  // JSX children are new objects on every render; memoize on their structure
+  // (roles plus shallow props) and the data identity instead, so an unrelated
+  // parent re-render never recompiles or repaints the chart.
+  const descriptors = collectDescriptors(children);
+  const key = descriptorKey(descriptors);
   const parsed = useMemo(
-    () => specFromJsx(kind, data, children, x, value, heatmapY),
-    [kind, data, children, x, value, heatmapY],
+    () => specFromJsx(kind, data, descriptors, x, value, heatmapY),
+    // `key` stands in for `descriptors`: equal keys describe the same chart.
+    [kind, data, key, x, value, heatmapY],
   );
   return (
     <Chart
@@ -849,42 +1112,38 @@ function JsxChart<T extends object>({
       className={className}
       style={style}
       onReady={onReady}
+      onViewportChange={onViewportChange}
+      onSelect={onSelect}
+      viewportGroup={viewportGroup}
+      syncId={syncId}
     />
   );
 }
 
-const LineChartComponent = function LineChart<T extends object>(props: BoxProps<T>): ReactElement {
+export const LineChart = function LineChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="line" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
 };
-export const LineChart = /* @__PURE__ */ markChartComponent(LineChartComponent);
-const BarChartComponent = function BarChart<T extends object>(props: BoxProps<T>): ReactElement {
+export const BarChart = function BarChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="bar" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
 };
-export const BarChart = /* @__PURE__ */ markChartComponent(BarChartComponent);
-const AreaChartComponent = function AreaChart<T extends object>(props: BoxProps<T>): ReactElement {
+export const AreaChart = function AreaChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="area" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
 };
-export const AreaChart = /* @__PURE__ */ markChartComponent(AreaChartComponent);
-const ScatterChartComponent = function ScatterChart<T extends object>(props: BoxProps<T>): ReactElement {
+export const ScatterChart = function ScatterChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="scatter" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
 };
-export const ScatterChart = /* @__PURE__ */ markChartComponent(ScatterChartComponent);
-const PieChartComponent = function PieChart<T extends object>(props: BoxProps<T>): ReactElement {
+export const PieChart = function PieChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="pie" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
 };
-export const PieChart = /* @__PURE__ */ markChartComponent(PieChartComponent);
-const RadarChartComponent = function RadarChart<T extends object>(props: BoxProps<T>): ReactElement {
+export const RadarChart = function RadarChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="radar" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
 };
-export const RadarChart = /* @__PURE__ */ markChartComponent(RadarChartComponent);
-const HeatmapChartComponent = function HeatmapChart<T extends object>(props: BoxProps<T>): ReactElement {
+export const HeatmapChart = function HeatmapChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="heatmap" x={"x" as DataKey<T>} value={"value" as DataKey<T>} heatmapY={"y" as DataKey<T>} {...props} />;
 };
-export const HeatmapChart = /* @__PURE__ */ markChartComponent(HeatmapChartComponent);
-const ComposedChartComponent = function ComposedChart<T extends object>(props: BoxProps<T>): ReactElement {
+export const ComposedChart = function ComposedChart<T extends object>(props: BoxProps<T>): ReactElement {
   return <JsxChart kind="composed" x={"name" as DataKey<T>} value={"value" as DataKey<T>} {...props} />;
 };
-export const ComposedChart = /* @__PURE__ */ markChartComponent(ComposedChartComponent);
 
 /**
  * Creates a Recharts-shaped component set whose dataKey props are constrained
@@ -913,9 +1172,9 @@ export function createChartComponents<T extends object>(defaults: ChartComponent
   const make = (
     kind: "line" | "bar" | "area" | "scatter" | "pie" | "radar" | "heatmap" | "composed",
     x: DataKey<T>,
-  ) => markChartComponent(function TypedChart(props: BoxProps<T>): ReactElement {
+  ) => function TypedChart(props: BoxProps<T>): ReactElement {
     return <JsxChart kind={kind} x={x} value={defaults.valueKey} heatmapY={defaults.heatmapYKey} {...props} />;
-  });
+  };
   return {
     LineChart: make("line", defaults.xKey),
     BarChart: make("bar", defaults.xKey),
@@ -943,3 +1202,4 @@ export function createChartComponents<T extends object>(defaults: ChartComponent
 }
 
 export { defineChart, line, area, bar, point, ruleY, ruleX, pie, radar, heatmap, compileChart, createViewportGroup } from "../chart";
+export type { ChartViewport, ViewportGroup, ViewportHandle } from "../chart";

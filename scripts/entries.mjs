@@ -23,6 +23,11 @@
 //               downstream tree-shaking contract.
 //   jsx         esbuild JSX mode for .tsx entries
 //   external    bare specifiers left as imports (peer dependencies)
+//   directive   module directive emitted as the first statement of the ESM
+//               and CJS artifacts. "use client" marks entries that use React
+//               hooks, so React Server Component bundlers (the Next.js App
+//               Router) treat them as a client boundary without a user-written
+//               wrapper file.
 //   shareRuntime  { [relative specifier]: entry id } — imports of another
 //               public entry that are rewritten to that entry's artifact so
 //               consumers mixing subpaths get one module instance
@@ -64,6 +69,7 @@ export const PACKAGE_ENTRIES = Object.freeze([
     basename: "react",
     jsx: "automatic",
     external: ["react", "react/jsx-runtime", "react/jsx-dev-runtime"],
+    directive: "use client",
     shareRuntime: { "../chart": "chart" },
     smoke: "Chart",
   },
@@ -194,6 +200,16 @@ if (isMain) {
   const manifestPath = resolve(root, "package.json");
   const text = readFileSync(manifestPath, "utf8");
   const pkg = JSON.parse(text);
+  const supported = ["--write", "--check", "--json", "--help"];
+  const args = process.argv.slice(2);
+  const unknown = args.find((argument) => !supported.includes(argument));
+  const modes = args.filter((argument) => argument !== "--help");
+  if (unknown || new Set(modes).size > 1) {
+    console.error(unknown
+      ? `[raze-charts] Unknown option "${unknown}". Supported options: ${supported.join(", ")}.`
+      : `[raze-charts] Choose one of ${modes.join(", ")}; they select different modes.`);
+    process.exit(2);
+  }
   if (process.argv.includes("--help")) {
     console.log(`Usage: node scripts/entries.mjs [--write | --check | --json]
 
