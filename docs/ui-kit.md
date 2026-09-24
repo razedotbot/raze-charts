@@ -102,11 +102,30 @@ exactly one library stylesheet that grows as chunks are adopted:
   shadow root or fullscreen element of the same page reuse it. The document
   element keeps the historic id `raze-chart-base-css`.
 
-`--raze-*` tokens (surface, text, border, hover, active, accent, focus, danger,
-success, warning, shadow, backdrop, radius, row heights, duration, z-index) are
+`--raze-*` tokens (surface, text, muted text, border, hover, active, accent,
+focus, danger, success, warning, shadow, backdrop, radius, row heights,
+duration, z-index) are
 defined on widget roots and kit portals. They default to the
 TradingView-compatible `--tv-color-*` variables, so existing theme overrides
 keep working.
+
+## Icons and menu rows
+
+Built-in chrome icons come from `src/ui/icons.ts`: one 18px grid, a 1.5px
+round-capped stroke in `currentColor`, and one exported constant per icon
+(`ICON_TREND_LINE`, `ICON_FIT`, `ICON_UNDO`, …) so unused icons tree-shake.
+`createIcon(ICON_X)` builds the SVG with DOM APIs (no markup sink), marks it
+decorative, and sets the stroke as presentation attributes so it renders
+without any stylesheet. Parts are stroked by default; `f` parts are solid,
+`o` parts are a 30% fill and `d` parts are dotted. Do not add inline SVG
+strings or per-icon stroke widths.
+
+Menu rows use `fillMenuRow(row, { checked, icon, label, muted })` with
+`MENU_ROW_STYLES` adopted into the popup's root. Every row gets a fixed 18px
+check slot (a check icon when checked), an optional 18px icon slot, and the
+label, so labels align whether or not a row is checked. Never prefix a label
+with a check glyph. `menuSeparator()` adds a `role="separator"` rule between
+groups; `muted` rows use `--raze-text-muted`.
 
 `LoadingScreen` (a public export) adopts its own spinner keyframes and
 reduced-motion rule into the document, and into the shadow root it is
@@ -180,7 +199,7 @@ renaming `trustedMarkup` on import, and `trustedMarkup()` with a non-constant
 argument, anywhere in `src/`. The exceptions are the allow-listed statements
 in the script, each with its reason: `setMarkup()` and the two `SafeMarkup`
 factories, the documented host-markup opt-ins (`popupRow`'s `trustedHtml` and
-a string `SidebarCustomItem.icon`), the library chart-type icon table, and the
+a string `SidebarCustomItem.icon`), and the
 native SVG stage, whose markup is generated with escaped text. Comments and
 string contents are ignored, so documentation that mentions a sink does not
 trip the lint.
@@ -216,6 +235,8 @@ Some forms cannot be checked statically. Keep them out of UI modules:
 | `tests/safe-text.mjs` | Escaping, `setMarkup`, Trusted Types policy behaviour, URL filtering, `h()` |
 | `tests/dom-sinks.mjs` | The lint on the repository and on each sink family |
 | `tests/extract-messages.mjs` | Extraction, conflicts, pack coverage |
+| `tests/sidebar-icons.mjs` | The icon set (18px grid, 1.5 stroke, round caps, stroked candle wicks, distinct fit and fullscreen), class-styled sidebar with no `title` attributes, 500ms tooltips with shortcut hints and Escape, check-slot menu rows in the chart-type, Indicators and Objects tree menus, the muted-text token |
+| `tests/sidebar-icons.spec.ts` | Real Chromium: rendered candle wicks, a 3× sidebar icon golden, label alignment in every menu from rects, AA contrast of the muted "Clear all" row in dark and light themes, hover/focus/Escape tooltips placed right of the sidebar, touch long-press tooltips that do not activate the tool |
 
 The browser spec builds the kit from source with esbuild. Every audited
 surface (desktop dialog, sheet dialog, colour popover, the Indicators menu

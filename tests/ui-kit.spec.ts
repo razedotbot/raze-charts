@@ -988,16 +988,17 @@ test.describe("content security", () => {
     const typeMenu = page.getByRole("menu", { name: "Chart type" });
     await expect(typeMenu).toBeVisible();
     const icons = await typeMenu.getByRole("menuitemradio").evaluateAll((rows) => rows.map((row) => {
-      const icon = row.querySelector("span")!;
+      const icon = row.querySelector(".raze-menu-icon")!;
       const style = getComputedStyle(icon);
-      return { checked: row.getAttribute("aria-checked"), color: style.color, display: style.display, width: style.width, text: row.textContent };
+      return { checked: row.getAttribute("aria-checked"), color: style.color, display: style.display, width: style.width, check: !!row.querySelector(".raze-menu-check svg") };
     }));
     const checked = icons.find((icon) => icon.checked === "true")!;
     const unchecked = icons.find((icon) => icon.checked === "false")!;
     // inline-flex, blockified by the flex row (a blocked style="" gives "block").
     expect(checked.display).toBe("flex");
     expect(checked.width).toBe("18px");
-    expect(checked.text).toMatch(/^✓ /);
+    expect(checked.check).toBe(true);
+    expect(unchecked.check).toBe(false);
     expect(checked.color).not.toBe(unchecked.color);
     expect(unchecked.color).toBe(await typeMenu.evaluate((menu) => getComputedStyle(menu).color));
     await page.keyboard.press("Escape");
