@@ -62,10 +62,13 @@ export const SERVER_TIME_RESYNC_MS = 5 * 60_000;
 
 /**
  * Viewport changes that can bring the left edge into view. Loads, rebases,
- * realtime shifts and timeframe reveals page history themselves.
+ * realtime shifts and timeframe reveals page history themselves. A fit shows
+ * exactly the loaded bars (F, double-click, `fitContent()`), so it does not
+ * page: a page arriving after it would shift the window and the fit would no
+ * longer show every loaded bar.
  */
 const PAGINATION_REASONS: ReadonlySet<ViewportChangeReason> = new Set<ViewportChangeReason>([
-  "pan", "zoom", "pinch", "keyboard", "fit", "reset", "preset", "api", "sync", "resize",
+  "pan", "zoom", "pinch", "keyboard", "reset", "preset", "api", "sync", "resize",
 ]);
 
 interface DataTarget {

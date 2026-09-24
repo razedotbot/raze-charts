@@ -32,7 +32,12 @@ async function canvasChanges(page: Page, selector: string, mode: "baseline" | "d
   return page.evaluate(({ sel, mode: m, axisWidth: axis }) => {
     const store = window as unknown as { __timeAxisBaseline?: ImageData[] };
     const images = [...document.querySelectorAll(sel)].map((cell) => {
-      const canvases = [...cell.querySelectorAll("canvas")].filter((c) => c.width > 0 && c.height > 0);
+      // Paint order, not DOM order: the scene layer (raze-chart-layer-main)
+      // sits below the overlay canvas that comes first in the host.
+      const isScene = (c: HTMLCanvasElement): number => (c.classList.contains("raze-chart-layer-main") ? 0 : 1);
+      const canvases = [...cell.querySelectorAll("canvas")]
+        .filter((c) => c.width > 0 && c.height > 0)
+        .sort((a, b) => isScene(a) - isScene(b));
       const out = document.createElement("canvas");
       out.width = Math.max(...canvases.map((c) => c.width));
       out.height = Math.max(...canvases.map((c) => c.height));

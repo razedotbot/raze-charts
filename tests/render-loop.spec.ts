@@ -27,8 +27,9 @@ async function settle(page: Page): Promise<void> {
 }
 
 /**
- * Spy on the two layer canvases' own 2D contexts: every layer paint starts
- * with setTransform, so it counts paints; `frames` counts animation frames.
+ * Spy on the two layer canvases' own 2D contexts: every layer paint is one
+ * outermost save()/restore() pair, so those count paints; `frames` counts
+ * animation frames.
  */
 async function installLayerSpy(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -44,12 +45,22 @@ async function installLayerSpy(page: Page): Promise<void> {
       };
     };
     for (const name of ["setTransform", "fillRect", "clearRect", "fillText", "stroke", "fill", "drawImage"]) {
-      wrap(main, name, () => {
-        spy.main.calls += 1;
-        if (name === "setTransform") spy.main.paints += 1;
-      });
+      wrap(main, name, () => { spy.main.calls += 1; });
     }
-    wrap(overlay, "setTransform", () => { spy.overlay.paints += 1; });
+    // A layer paint is one outermost save()/restore() pair: the engine sets
+    // the device transform inside it, and bitmap-space painters (paint/pixel.ts)
+    // set their own transforms in nested saves, so setTransform no longer
+    // counts paints.
+    const countPaints = (ctx: CanvasRenderingContext2D, onPaint: () => void): void => {
+      let depth = 0;
+      wrap(ctx, "save", () => {
+        depth += 1;
+        if (depth === 1) onPaint();
+      });
+      wrap(ctx, "restore", () => { depth = Math.max(0, depth - 1); });
+    };
+    countPaints(main, () => { spy.main.paints += 1; });
+    countPaints(overlay, () => { spy.overlay.paints += 1; });
     const raf = window.requestAnimationFrame.bind(window);
     window.requestAnimationFrame = (callback) => raf((time) => {
       spy.frames += 1;
@@ -316,10 +327,19 @@ test.describe("render loop", () => {
       document.querySelectorAll<HTMLCanvasElement>(".raze-chart-layout-pane canvas.raze-chart-layer-main").forEach((canvas, index) => {
         counts[index] = 0;
         const ctx = canvas.getContext("2d")!;
-        const original = ctx.setTransform.bind(ctx) as (...args: unknown[]) => void;
-        (ctx as unknown as { setTransform: (...args: unknown[]) => void }).setTransform = (...args: unknown[]) => {
-          counts[index] = (counts[index] ?? 0) + 1;
-          original(...args);
+        // One paint is one outermost save(); bitmap-space painters set their
+        // own transforms inside nested saves.
+        let depth = 0;
+        const save = ctx.save.bind(ctx);
+        const restore = ctx.restore.bind(ctx);
+        ctx.save = () => {
+          depth += 1;
+          if (depth === 1) counts[index] = (counts[index] ?? 0) + 1;
+          save();
+        };
+        ctx.restore = () => {
+          depth = Math.max(0, depth - 1);
+          restore();
         };
       });
       (window as unknown as { __paneMainPaints?: number[] }).__paneMainPaints = counts;

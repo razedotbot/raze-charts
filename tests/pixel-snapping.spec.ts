@@ -656,7 +656,9 @@ async function openWidget(browser: Browser, dpr: number, testCase: "grid" | "spi
 
 async function readWidgetCanvas(page: Page): Promise<Pixels> {
   const result = await page.evaluate(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>("canvas.raze-chart-canvas")!;
+    // The series, grid and separators paint on the scene layer; the first
+    // canvas (raze-chart-canvas) holds only the interactive overlay.
+    const canvas = document.querySelector<HTMLCanvasElement>("canvas.raze-chart-layer-main")!;
     const ctx = canvas.getContext("2d")!;
     const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const encode = (window as unknown as { __encodePixels: (d: Uint8ClampedArray) => string }).__encodePixels;

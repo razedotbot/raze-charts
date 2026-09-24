@@ -20,9 +20,17 @@ async function ready(page: Page): Promise<void> {
 /** Pixels within `tol` of `rgb` in the chart canvas rows [fromY, toY) (fractions of its height). */
 async function countColor(page: Page, rgb: Rgb, fromY = 0, toY = 1, tol = 36): Promise<number> {
   return page.evaluate(({ rgb, fromY, toY, tol }) => {
-    const canvas = document.querySelector<HTMLCanvasElement>(".raze-chart-root canvas");
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) throw new Error("chart canvas missing");
+    // The chart paints a scene layer with the interactive overlay above it
+    // (the overlay is the first canvas in the host); composite them.
+    const main = document.querySelector<HTMLCanvasElement>(".raze-chart-root canvas.raze-chart-layer-main");
+    const overlay = document.querySelector<HTMLCanvasElement>(".raze-chart-root canvas.raze-chart-canvas");
+    if (!main || !overlay) throw new Error("chart canvas missing");
+    const canvas = document.createElement("canvas");
+    canvas.width = main.width;
+    canvas.height = main.height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(main, 0, 0);
+    ctx.drawImage(overlay, 0, 0);
     const y0 = Math.floor(canvas.height * fromY);
     const y1 = Math.ceil(canvas.height * toY);
     const data = ctx.getImageData(0, y0, canvas.width, Math.max(1, y1 - y0)).data;
@@ -53,7 +61,7 @@ test.describe("forced overlay studies", () => {
     const after = await countColor(page, RSI);
     expect(after - before, "RSI pixels appear on the price pane").toBeGreaterThan(300);
 
-    const canvas = page.locator(".raze-chart-root canvas");
+    const canvas = page.locator(".raze-chart-root canvas.raze-chart-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("canvas not laid out");
     await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.4);
