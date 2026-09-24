@@ -83,6 +83,7 @@ try {
         export { validateSnapshot } from "./src/core/widget/PersistenceController";
         export { EventHub } from "./src/core/widget/EventHub";
         export { CompareController } from "./src/core/widget/CompareController";
+        export { IdAllocator } from "./src/core/ids";
         export { ActionController } from "./src/core/widget/ActionController";
         export { LifecycleController } from "./src/core/widget/LifecycleController";
         export { LayoutController } from "./src/core/widget/LayoutController";
@@ -117,6 +118,7 @@ const {
   Delegate,
   EventHub,
   GestureController,
+  IdAllocator,
   HANDLERS,
   INTERACTION_HANDLERS,
   LayoutController,
@@ -193,17 +195,33 @@ assert(
 // ── CompareController ──────────────────────────────────────────────────────
 {
   let paints = 0;
-  const context = { compare: [], requestPaint: () => { paints += 1; } };
+  const datafeed = {
+    resolveSymbol: (name, onResolve) => onResolve({ name }),
+    getBars: (info, _resolution, _period, onResult) => onResult([{ time: 1, open: 1, high: 1, low: 1, close: info.name.length }]),
+    subscribeBars() {},
+    unsubscribeBars() {},
+  };
+  const context = {
+    compare: [],
+    bars: [],
+    symbol: "BASE",
+    resolution: "1",
+    datafeed,
+    ids: new IdAllocator(),
+    now: () => 1_700_000_000_000,
+    scaleState: () => ({ mode: "percent" }),
+    requestPaint: () => { paints += 1; },
+  };
   const lifecycle = { destroyed: false };
-  const data = { loadCompare: async (symbol) => [{ time: 1, open: 1, high: 1, low: 1, close: symbol.length }] };
-  const compare = new CompareController({ context, lifecycle, data });
-  const first = compare.add("ETH", []);
+  const compare = new CompareController({ context, lifecycle, data: { ready: async () => {} } });
+  const first = await compare.create("ETH");
   const second = await compare.create("SOL");
   assert(
     first === "compare_ETH_1" && second === "compare_SOL_2" && context.compare[0].color !== context.compare[1].color,
     "compare ids are sequential per widget and colours rotate",
   );
-  assert(compare.remove(first) && context.compare.length === 1 && paints === 3, "removing a compare series repaints");
+  paints = 0;
+  assert(compare.remove(first) && context.compare.length === 1 && paints === 1, "removing a compare series repaints");
   assert(!compare.remove("study_1"), "remove reports ids that are not compare series");
   lifecycle.destroyed = true;
   let rejected = false;

@@ -26,7 +26,10 @@ export function createApiDeps(host: WidgetHost): ChartApiDeps {
   return {
     refreshMarks: () => host.data.refreshMarks(),
     clearMarks: () => host.data.clearMarks(),
-    resetData: () => host.data.resetData(),
+    resetData: () => {
+      host.data.resetData();
+      host.controllers.compare.reload();
+    },
     setResolution: (resolution, callback) => lifecycle.changeResolution(resolution, callback),
     setSymbol: (symbol, callback) => lifecycle.changeSymbol(symbol, undefined, callback),
     createShape: (point, options) => host.shapes.create(point, options),

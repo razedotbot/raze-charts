@@ -58,7 +58,7 @@ registry created there is standalone; pass definitions to a widget through
 | Order and position lines | **Yes** | TradingView-style fluent adapters, styling, quantity/P&L labels, move/modify/cancel callbacks, mouse/touch drag, and one-tick keyboard adjustment. |
 | Stop-loss / take-profit brackets | **Yes** | Linked entry/SL/TP lines, risk/reward shading and ratio, auto-scale participation, group callbacks and cancellation. |
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
-| Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
+| Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series and rejects, adding nothing, when the symbol cannot be resolved or its history fails. Compares refetch on interval and symbol changes and `resetData()`, page back with the main series, stream live bars under their own listener GUIDs, and unsubscribe on `removeEntity()` or `remove()`. The first compare switches the price scale to percent; removing the last one restores the previous mode unless the user changed it. `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
 | Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
 | Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |
 | Encapsulated runtime surface | **Yes** | `widget` and `activeChart()` objects expose only the documented `IChartingLibraryWidget` / `IChartWidgetApi` methods. Internal state is `#private` or module-private and cannot be reached or mutated at runtime. |

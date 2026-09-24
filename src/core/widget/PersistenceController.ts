@@ -1,7 +1,8 @@
 // `save()` / `load()`: the versioned layout snapshot (symbol, interval, range,
 // style and scale flags, drawings, study specs, compare symbols).
 
-import type { Bar, ChartLayoutSnapshot, EntityId, ResolutionString } from "../../types/charting_library";
+import type { ChartLayoutSnapshot, EntityId, ResolutionString } from "../../types/charting_library";
+import type { PreparedCompare } from "./CompareController";
 import type { WidgetController, WidgetHost } from "./host";
 
 declare module "./host" {
@@ -109,11 +110,11 @@ export class PersistenceController implements WidgetController {
     // Fetch everything before replacing drawings/studies. This keeps the
     // visible object model coherent if a compare/range request fails and lets
     // a newer load supersede this one without leaving half a snapshot behind.
-    const comparisons: { symbol: string; bars: Bar[] }[] = [];
+    const comparisons: PreparedCompare[] = [];
     for (const symbol of state.compare ?? []) {
-      const bars = await data.loadCompare(symbol);
+      const prepared = await controllers.compare.prepare(symbol);
       if (!isCurrent()) return;
-      comparisons.push({ symbol, bars });
+      if (prepared) comparisons.push(prepared);
     }
     await data.revealTimeRange(state.visibleRange.from, state.visibleRange.to);
     if (!isCurrent()) return;
@@ -155,8 +156,7 @@ export class PersistenceController implements WidgetController {
           inputs: study.inputs ?? {},
         });
       }
-      context.compare = [];
-      for (const comparison of comparisons) controllers.compare.add(comparison.symbol, comparison.bars);
+      controllers.compare.restore(comparisons);
       chrome.symbolSearch?.setSymbol(context.symbol);
       chrome.intervalSelector?.refresh();
       chrome.syncAccessibility();

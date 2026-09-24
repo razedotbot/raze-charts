@@ -222,6 +222,14 @@ pending readiness work.
 This rule is more important than transport cancellation: a callback API may
 not offer `AbortSignal`, but an obsolete callback still cannot commit.
 
+Compare series follow the same rule. `CompareController` watches the main
+series (`dataChanged` and viewport changes) and, through `CompareLoader`,
+refetches each compare after a symbol or resolution commit, pages it over the
+range the main series just added, and gives it its own live subscription and
+reset callback. Every compare request belongs to a cancellable group, so a
+newer reload, `removeEntity()` or `remove()` drops pending callbacks, and a
+compare never keeps bars of another resolution on the axis while it reloads.
+
 For new code, `defineDataSource` describes a Promise-first data source and
 `createDatafeed` adapts it to the callback contract consumed by the widget.
 Native realtime subscriptions receive an `AbortSignal` and may return a cleanup
@@ -241,7 +249,9 @@ calls.
 
 `widget.save()` / `widget.load()` serialize a versioned JSON snapshot: symbol,
 interval, visible range, style/scale flags, drawings with stable IDs and behavior
-flags, study specs (not derived values), and compare symbols. The host owns
+flags, study specs (not derived values), and compare symbols. `load()` fetches
+every compare before it replaces anything, so a compare symbol that no longer
+resolves rejects the load and keeps the committed chart. The host owns
 storage. A drawing with `disableSave` remains live but is omitted from the
 snapshot. `executeActionById("undo"|"redo")`
 walks a command stack for drawings and studies. `disableUndo` on a shape skips
