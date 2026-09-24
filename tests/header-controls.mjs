@@ -1,7 +1,8 @@
 // Header controls & class-based styling (W1B-22): interval list precedence
 // (symbol → onReady configuration → favorites) with has_* filtering and the
 // overflow menu, ScaleBar state from the scaleChanged seam and its touch menu,
-// element.class selectors and the context font, reduced-motion header
+// element.class selectors and the context font, token reads that carry their
+// TOKEN_STYLES default (standalone mounting), reduced-motion header
 // scrolling, per-root stylesheet adoption (LoadingScreen keyframes in shadow
 // roots and after a remount), and a ratchet that keeps inline presentation and
 // JS hover out of the header modules.
@@ -66,11 +67,11 @@ window.ResizeObserver = globalThis.ResizeObserver;
 // ── Bundle the modules under test from source ───────────────────────────────
 const entry = [
   'export { IntervalSelector, DEFAULT_INTERVAL_FAVORITES } from "./src/ui/IntervalSelector";',
-  'export { ScaleBar } from "./src/ui/ScaleBar";',
+  'export { ScaleBar, SCALE_BAR_STYLES } from "./src/ui/ScaleBar";',
   'export { Toolbar, HEADER_STYLES } from "./src/ui/Toolbar";',
   'export { TimeframeBar } from "./src/ui/TimeframeBar";',
   'export { LoadingScreen } from "./src/ui/LoadingScreen";',
-  'export { adoptStyles, adoptStylesOnConnect, configureStyles, defineStyles } from "./src/ui/styles";',
+  'export { adoptStyles, adoptStylesOnConnect, configureStyles, defineStyles, TOKEN_STYLES } from "./src/ui/styles";',
   'export { createChartContext } from "./src/core/context";',
   'export { Delegate } from "./src/util/delegate";',
 ].join("\n");
@@ -90,12 +91,15 @@ writeFileSync(bundlePath, bundled.outputFiles[0].text);
 const {
   IntervalSelector,
   ScaleBar,
+  SCALE_BAR_STYLES,
   Toolbar,
+  HEADER_STYLES,
   TimeframeBar,
   LoadingScreen,
   adoptStylesOnConnect,
   configureStyles,
   defineStyles,
+  TOKEN_STYLES,
   createChartContext,
   Delegate,
 } = await import(pathToFileURL(bundlePath).href);
@@ -450,6 +454,47 @@ function keyframesIn(rootNode) {
   const probed = [...shadow.querySelectorAll("style[data-raze-styles]")].some((style) => style.textContent.includes(".probe"));
   assert(!probed, "a stopped watcher adopts nothing further");
   host.remove();
+}
+
+// ── Token reads carry the TOKEN_STYLES default ──────────────────────────────
+// TOKEN_STYLES defines the tokens only on chart roots and kit portals; the
+// header modules are public exports and may be mounted anywhere, where a bare
+// var(--raze-*) is invalid (browser-default size, square corners, a pressed
+// state that looks idle). Every read needs the token's own default.
+{
+  const defaults = new Map();
+  const body = TOKEN_STYLES.css.slice(TOKEN_STYLES.css.indexOf("{") + 1, TOKEN_STYLES.css.lastIndexOf("}"));
+  for (const declaration of body.split(";")) {
+    const colon = declaration.indexOf(":");
+    if (colon > 0) defaults.set(declaration.slice(0, colon).trim(), declaration.slice(colon + 1).trim());
+  }
+  assert(defaults.get("--raze-accent")?.includes("#2962ff") && defaults.get("--raze-font-size") === "12px", "(precondition) TOKEN_STYLES defaults parse");
+
+  /** Each `var(--raze-…)` in `css` with its fallback text (null when it has none). */
+  const reads = (css) => {
+    const out = [];
+    for (const match of css.matchAll(/var\((--raze-[a-z0-9-]+)/g)) {
+      let index = match.index + match[0].length;
+      if (css[index] !== ",") {
+        out.push({ name: match[1], fallback: null });
+        continue;
+      }
+      const start = ++index;
+      for (let depth = 0; index < css.length; index += 1) {
+        if (css[index] === "(") depth += 1;
+        else if (css[index] === ")" && depth-- === 0) break;
+      }
+      out.push({ name: match[1], fallback: css.slice(start, index) });
+    }
+    return out;
+  };
+  for (const [label, chunk] of [["HEADER_STYLES", HEADER_STYLES], ["SCALE_BAR_STYLES", SCALE_BAR_STYLES]]) {
+    // --raze-font alone may go without: an unset font inherits, which is its default.
+    const checked = reads(chunk.css).filter((read) => read.name !== "--raze-font");
+    assert(checked.length >= 6, `(precondition) ${label} reads tokens`);
+    const wrong = checked.filter((read) => read.fallback === null || (defaults.has(read.name) && read.fallback !== defaults.get(read.name)));
+    assert(wrong.length === 0, `every token read in ${label} falls back to the TOKEN_STYLES default${wrong.length ? `: ${wrong.map((read) => `${read.name} → ${read.fallback}`).join(", ")}` : ""}`);
+  }
 }
 
 // ── Ratchet: header modules carry no inline presentation or JS hover ───────

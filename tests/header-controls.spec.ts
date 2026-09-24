@@ -5,7 +5,8 @@ import { expect, test, type Page } from "@playwright/test";
 // after axis drags and double-clicks, the ScaleBar kept out of the plot and
 // the price labels (and its single 24px touch target and menu), class-based
 // styling that page-wide resets cannot reach but host classes and tokens can
-// override, reduced-motion header scrolling and per-root keyframes.
+// override (and that holds outside a chart root), group dividers,
+// reduced-motion header scrolling and per-root keyframes.
 
 const HARNESS = `<!doctype html>
 <html lang="en">
@@ -37,6 +38,35 @@ const HARNESS = `<!doctype html>
       w.onChartReady(() => resolve(true));
     });
     window.__harness = true;
+  </script>
+</body>
+</html>`;
+
+// The public header modules on a plain page: no widget, no `.raze-chart-root`.
+const STANDALONE = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Standalone header modules</title>
+<style>body{margin:0;padding:16px;background:#131722;font-family:Arial, Helvetica, sans-serif}</style></head>
+<body>
+  <div id="intervals"></div>
+  <div id="ranges"></div>
+  <div id="scale" style="position:relative;width:120px;height:40px"></div>
+  <script type="module">
+    import { IntervalSelector, TimeframeBar, ScaleBar } from "/dist/charting_library.esm.js";
+    const context = {
+      resolution: "5",
+      symbol: "TEST",
+      symbolInfo: { name: "TEST", supported_resolutions: ["1", "5", "15"] },
+      logScale: false,
+      percentScale: false,
+      autoScalePrice: true,
+      priceRange: null,
+    };
+    new IntervalSelector(context, document.getElementById("intervals"), () => {}, ["1", "5", "15"]);
+    new TimeframeBar(context, document.getElementById("ranges"), () => {}, () => {}).setActive("1D");
+    const scale = new ScaleBar(context, () => {});
+    document.getElementById("scale").appendChild(scale.el);
+    window.__standalone = true;
   </script>
 </body>
 </html>`;
@@ -333,20 +363,86 @@ test.describe("header controls", () => {
     await context.close();
   });
 
-  test("with reduced motion, focusing an offscreen header control scrolls instantly", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 700 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await openHarness(page);
-    const scroll = await page.evaluate(() => {
-      const toolbar = document.querySelector<HTMLElement>(".raze-chart-toolbar")!;
-      const last = [...toolbar.querySelectorAll<HTMLElement>("button")].at(-1)!;
-      const before = toolbar.scrollLeft;
-      last.focus();
-      return { before, after: toolbar.scrollLeft, overflow: toolbar.scrollWidth > toolbar.clientWidth };
+  for (const reducedMotion of ["reduce", "no-preference"] as const) {
+    test(`focusing an offscreen header control reveals it ${reducedMotion === "reduce" ? "instantly under reduced motion" : "smoothly by default"}`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 700 });
+      await page.emulateMedia({ reducedMotion });
+      await openHarness(page);
+      const readScroll = () => page.evaluate(() => document.querySelector<HTMLElement>(".raze-chart-toolbar")!.scrollLeft);
+      const scroll = await page.evaluate(() => {
+        const toolbar = document.querySelector<HTMLElement>(".raze-chart-toolbar")!;
+        const last = [...toolbar.querySelectorAll<HTMLElement>("button")].at(-1)!;
+        const before = toolbar.scrollLeft;
+        // preventScroll: the browser's own focus scrolling (always instant)
+        // stays out of it, so only the toolbar's reveal handler can scroll.
+        last.focus({ preventScroll: true });
+        return { before, after: toolbar.scrollLeft, focused: document.activeElement === last, overflow: toolbar.scrollWidth > toolbar.clientWidth };
+      });
+      expect(scroll).toMatchObject({ before: 0, focused: true, overflow: true });
+      if (reducedMotion === "reduce") {
+        // Read synchronously after focus(): an animated scroll has not moved yet.
+        expect(scroll.after).toBeGreaterThan(0);
+      } else {
+        // Smooth: nothing has moved synchronously, and the rail then gets there.
+        expect(scroll.after).toBe(0);
+        await expect.poll(readScroll).toBeGreaterThan(0);
+      }
     });
-    expect(scroll.overflow).toBe(true);
-    expect(scroll.before).toBe(0);
-    expect(scroll.after).toBeGreaterThan(0);
+  }
+
+  test("header modules mounted outside a chart root keep the header look", async ({ page }) => {
+    // The header classes are public exports. Outside `.raze-chart-root` no
+    // token is defined, so every token read needs its default as a fallback.
+    await page.route("**/__header/standalone.html", (route) => route.fulfill({ body: STANDALONE, contentType: "text/html" }));
+    await page.goto("/__header/standalone.html");
+    await page.waitForFunction(() => (window as unknown as { __standalone?: boolean }).__standalone === true);
+    const read = (name: string | RegExp) => page.getByRole("button", { name, exact: true }).evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        height: el.getBoundingClientRect().height,
+        font: style.fontSize,
+        radius: style.borderTopLeftRadius,
+        background: style.backgroundColor,
+        color: style.color,
+        pressed: el.getAttribute("aria-pressed"),
+      };
+    });
+    await expect(page.locator(".raze-chart-root")).toHaveCount(0);
+    const idle = { height: 26, font: "12px", radius: "4px", background: "rgba(0, 0, 0, 0)", color: "rgb(209, 212, 220)", pressed: "false" };
+    const pressed = { height: 26, font: "12px", radius: "4px", background: "rgba(41, 98, 255, 0.18)", color: "rgb(41, 98, 255)", pressed: "true" };
+    expect(await read("Interval 1m")).toEqual(idle);
+    expect(await read("Interval 5m")).toEqual(pressed);
+    expect(await read("Range 1M")).toEqual(idle);
+    expect(await read("Range 1D")).toEqual(pressed);
+    // The scale toggles use the smaller axis size in the same shape.
+    const scaleIdle = await read("Percent scale");
+    const scalePressed = await read("Auto-scale price (double-click axis)");
+    expect({ font: scaleIdle.font, radius: scaleIdle.radius, background: scaleIdle.background }).toEqual({ font: "11px", radius: "4px", background: "rgba(0, 0, 0, 0)" });
+    expect({ font: scalePressed.font, radius: scalePressed.radius, background: scalePressed.background, color: scalePressed.color, pressed: scalePressed.pressed })
+      .toEqual({ font: "11px", radius: "4px", background: "rgba(41, 98, 255, 0.18)", color: "rgb(41, 98, 255)", pressed: "true" });
+
+    // A token the host sets on any ancestor still applies.
+    await page.addStyleTag({ content: "body{--raze-accent:rgb(1, 2, 3);--raze-control-height:30px}" });
+    await expect.poll(async () => (await read("Interval 5m")).color).toBe("rgb(1, 2, 3)");
+    expect((await read("Interval 1m")).height).toBe(30);
+    expect((await read("Auto-scale price (double-click axis)")).color).toBe("rgb(1, 2, 3)");
+  });
+
+  test("a hairline separates every pair of non-empty header groups", async ({ page }) => {
+    const dividers = () => page.evaluate(() => {
+      const groups = [...document.querySelectorAll(".raze-chart-toolbar-slot > .raze-chart-toolbar-slot")];
+      return groups.map((group) => {
+        const before = getComputedStyle(group, "::before");
+        return group.childElementCount === 0 ? "empty" : before.content === "none" ? "none" : `${before.width}/${before.height}`;
+      });
+    });
+    await openHarness(page);
+    // search | intervals | ranges
+    expect(await dividers()).toEqual(["none", "1px/16px", "1px/16px"]);
+    // With the interval group disabled, its empty slot sits between the other
+    // two, which still get a divider.
+    await openHarness(page, { disabled_features: ["popup_hints", "countdown", "header_resolutions"] });
+    expect(await dividers()).toEqual(["none", "empty", "1px/16px"]);
   });
 
   test("the loading spinner keeps its keyframes in every shadow root and after a remount", async ({ page }) => {

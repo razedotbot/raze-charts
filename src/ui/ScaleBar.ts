@@ -26,6 +26,7 @@ import { t } from "../i18n";
 import { attachTooltip, type TooltipHandle } from "./kit/Tooltip";
 import { enableToolbarKeyboardNavigation, openPopup, popupRow, type PopupHandle } from "./popup";
 import { adoptStyles, adoptStylesOnConnect, defineStyles, TOKEN_STYLES, type StyleChunk } from "./styles";
+import { TOKEN_ACCENT, TOKEN_ACTIVE, TOKEN_RADIUS_SM, TOKEN_TOOLBAR_HOVER, TOKEN_TOOLBAR_TEXT } from "./Toolbar";
 
 /**
  * Clearance kept above the toggles so the lowest price label (painted down to
@@ -41,27 +42,29 @@ const TOUCH_TARGET = 24;
  * resets leave the toggles alone. The axis colours arrive as private custom
  * properties (`--_raze-axis-*`, set from the theme); the public tokens
  * `--raze-scale-bar-background` / `--raze-scale-bar-text` are never set by
- * the library, so a host rule anywhere above the bar wins.
+ * the library, so a host rule anywhere above the bar wins. Every other token
+ * read carries its TOKEN_STYLES default (see Toolbar.ts), so a bar mounted
+ * outside a chart root keeps its size, radius and pressed colours.
  */
 export const SCALE_BAR_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "scale-bar",
   `.raze-chart-scale-bar{position:absolute;right:0;bottom:0;z-index:4;box-sizing:border-box;display:flex;align-items:stretch;justify-content:flex-end;gap:1px;` +
   `height:${BAR_HEIGHT}px;max-width:${PRICE_AXIS_W_MIN - 1}px;padding:0 2px;` +
   "background:var(--raze-scale-bar-background,var(--_raze-axis-background,var(--tv-color-pane-background,#131722)));" +
-  "color:var(--raze-scale-bar-text,var(--_raze-axis-text,var(--raze-toolbar-text)));" +
-  "font-size:var(--raze-font-size-sm);line-height:1;user-select:none;-webkit-user-select:none;pointer-events:auto}" +
+  `color:var(--raze-scale-bar-text,var(--_raze-axis-text,${TOKEN_TOOLBAR_TEXT}));` +
+  "font-size:var(--raze-font-size-sm,11px);line-height:1;user-select:none;-webkit-user-select:none;pointer-events:auto}" +
   "button.raze-chart-scale-btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:0 1 auto;box-sizing:border-box;" +
-  "min-width:16px;height:auto;margin:0;padding:0 3px;border:0;border-radius:var(--raze-radius-sm);background:transparent;box-shadow:none;" +
+  `min-width:16px;height:auto;margin:0;padding:0 3px;border:0;border-radius:${TOKEN_RADIUS_SM};background:transparent;box-shadow:none;` +
   "color:inherit;font:inherit;text-transform:none;cursor:pointer;touch-action:manipulation}" +
-  "@media (hover:hover){button.raze-chart-scale-btn:hover{background:var(--raze-toolbar-hover)}}" +
-  "button.raze-chart-scale-btn[aria-pressed=\"true\"]{background:var(--raze-active);color:var(--raze-accent);font-weight:600}" +
+  `@media (hover:hover){button.raze-chart-scale-btn:hover{background:${TOKEN_TOOLBAR_HOVER}}}` +
+  `button.raze-chart-scale-btn[aria-pressed="true"]{background:${TOKEN_ACTIVE};color:${TOKEN_ACCENT};font-weight:600}` +
   ".raze-chart-scale-btn.raze-chart-focusable:focus-visible{outline-offset:-1px}" +
   ".raze-chart-scale-hit{display:none}" +
   `@media (pointer:coarse){.raze-chart-scale-hit{display:block;position:absolute;left:0;right:0;bottom:0;top:${BAR_HEIGHT - TOUCH_TARGET}px;` +
   "cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}}" +
   // The touch menu's checked rows (rows carry inline popup styles, hence ::before).
   ".raze-chart-scale-menu [role=menuitemcheckbox]::before{content:\"\";width:12px;flex:none}" +
-  ".raze-chart-scale-menu [aria-checked=true]::before{content:\"✓\";color:var(--raze-accent,var(--tv-color-toolbar-button-text-hover,#2962ff))}",
+  `.raze-chart-scale-menu [aria-checked=true]::before{content:"✓";color:${TOKEN_ACCENT}}`,
 );
 
 const SCALE_BAR_CHUNKS: readonly StyleChunk[] = [TOKEN_STYLES, SCALE_BAR_STYLES];

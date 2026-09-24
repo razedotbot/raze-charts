@@ -176,7 +176,11 @@ Tokens are custom properties on `.raze-chart-root` (and kit portals). They
 default to the TradingView `--tv-color-*` variables, so
 `setCSSCustomProperty()` and existing overrides keep working, and a host rule
 such as `.raze-chart-root { --raze-accent: red }` recolours every pressed
-control.
+control. Every token read in the header and scale-toggle rules also carries
+the token's default as its fallback (`var(--raze-accent, var(--tv-color-…, #2962ff))`).
+So a header module mounted outside the widget root (they are public exports)
+keeps the same height, type size, radius and pressed colours, and there a
+token set on any ancestor, `body` included, still applies.
 
 | Token | Default | Used for |
 | --- | --- | --- |
