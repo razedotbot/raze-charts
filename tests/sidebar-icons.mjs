@@ -41,6 +41,7 @@ try {
         'export { IndicatorsMenu } from "./src/ui/IndicatorsMenu.ts";',
         'export { ObjectsTree } from "./src/ui/ObjectsTree.ts";',
         'export { TOKEN_STYLES } from "./src/ui/styles.ts";',
+        'export { registerMessages, setLocale } from "./src/i18n/index.ts";',
       ].join("\n"),
       resolveDir: root,
       loader: "ts",
@@ -109,6 +110,16 @@ try {
     assert(button.classList.contains("raze-chart-sidebar-button"));
     const svg = button.querySelector("svg");
     assert.equal(svg?.getAttribute("stroke-width"), "1.5", `${button.getAttribute("aria-label")}: icon from the shared set`);
+  }
+  // Locale-independent hooks, and the shortcut exposed semantically.
+  assert.deepEqual(
+    buttons.map((button) => button.dataset.razeItem),
+    ui.DEFAULT_SIDEBAR_ITEMS.filter((item) => item !== "separator"),
+    "every built-in button carries its item id in data-raze-item",
+  );
+  for (const button of buttons) {
+    const expected = button.dataset.razeItem === "fit" ? "F" : null;
+    assert.equal(button.getAttribute("aria-keyshortcuts"), expected, `${button.dataset.razeItem}: aria-keyshortcuts`);
   }
   for (const separator of sidebar.el.querySelectorAll('[role="separator"]')) {
     assert.equal(separator.getAttribute("style"), null, "separators are class-styled");
@@ -259,6 +270,27 @@ try {
   assert.equal(hiddenRow.getAttribute("aria-checked"), "false");
   assert.equal(document.querySelectorAll("[title]").length, 0, "menus use no title attributes");
   tree.destroy();
+
+  // ── Translated names: data-raze-item still finds built-in buttons ──────
+  // Accessible names follow the locale, so code that needs a built-in button
+  // (executeActionById("objects_tree"), host tests) selects it by item id.
+  ui.registerMessages("de", { "sidebar.objectsTree": "Objektbaum", "sidebar.fit": "Inhalt einpassen" });
+  await ui.setLocale("de");
+  try {
+    const localized = new ui.LeftSidebar(context, {
+      onTool() {}, onIndicatorsClick() {}, onFit() {}, onScreenshot() {}, onFullscreen() {}, onChartType() {},
+    });
+    document.body.appendChild(localized.el);
+    const treeButton = localized.el.querySelector('[data-raze-item="objects_tree"]');
+    assert.equal(treeButton?.getAttribute("aria-label"), "Objektbaum", "the name is translated");
+    assert.equal(localized.el.querySelector('[aria-label="Objects tree"]'), null, "the English name is no selector");
+    const fitButton = localized.el.querySelector('[data-raze-item="fit"]');
+    assert.equal(fitButton?.getAttribute("aria-label"), "Inhalt einpassen");
+    assert.equal(fitButton?.getAttribute("aria-keyshortcuts"), "F", "the shortcut does not depend on the locale");
+    localized.destroy();
+  } finally {
+    await ui.setLocale("en");
+  }
 
   // ── Sources: no title attributes or check glyphs remain ────────────────
   for (const path of ["src/ui/LeftSidebar.ts", "src/ui/IndicatorsMenu.ts", "src/ui/ObjectsTree.ts"]) {

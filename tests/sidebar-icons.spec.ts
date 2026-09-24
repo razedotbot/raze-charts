@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 
 // W1B-23 in a real browser: the icon set renders (candle wicks visible, fit
@@ -101,10 +102,22 @@ test.describe("icon set", () => {
 
   test.describe("zoomed", () => {
     test.use({ deviceScaleFactor: 3 });
-    test("sidebar icon strip golden", async ({ page }) => {
+    test("sidebar icon strip golden at 3x device pixels", async ({ page }, testInfo) => {
       await openCase(page);
       await page.mouse.move(600, 300);
-      await expect(page.locator(".raze-chart-left-sidebar")).toHaveScreenshot("sidebar-icons.png", { maxDiffPixelRatio: 0.01 });
+      const sidebar = page.locator(".raze-chart-left-sidebar");
+      const { width } = (await sidebar.boundingBox())!;
+      // scale "device" keeps every 3x pixel (the default "css" scale would
+      // downsample to 1x), and the budget is absolute, not a ratio: the strip
+      // is ~220k pixels, so even 1% would hide a redrawn icon. Measured
+      // against this golden: dropping one candle-wick stub changes 22
+      // pixels, dropping every wick 77, drawing Fit as Fullscreen 404.
+      // Repeated runs differ by 0, so 8 leaves room only for stray
+      // anti-aliasing (the default per-pixel threshold absorbs the rest).
+      await expect(sidebar).toHaveScreenshot("sidebar-icons.png", { scale: "device", maxDiffPixels: 8 });
+      // The committed golden itself is the zoomed image (PNG IHDR width).
+      const golden = readFileSync(testInfo.snapshotPath("sidebar-icons.png", { kind: "screenshot" }));
+      expect(golden.readUInt32BE(16)).toBe(Math.round(width * 3));
     });
   });
 });
@@ -193,6 +206,10 @@ test.describe("tooltips", () => {
     await expect(tooltip).toHaveText("Fit content\u2003F");
     const id = await tooltip.getAttribute("id");
     await expect(fit).toHaveAttribute("aria-describedby", id!);
+    // The key is exposed semantically too, and the button has a stable,
+    // locale-independent hook now that it has no title.
+    await expect(fit).toHaveAttribute("aria-keyshortcuts", "F");
+    await expect(page.locator('.raze-chart-left-sidebar [data-raze-item="fit"]')).toHaveAccessibleName("Fit content");
   });
 
   test.describe("touch", () => {

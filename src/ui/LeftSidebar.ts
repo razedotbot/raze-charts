@@ -7,7 +7,10 @@
 // the sidebar), icons come from the shared set in ./icons, and every button
 // gets a kit tooltip instead of a `title` attribute: after 500ms of hover, on
 // keyboard focus, or on a touch long-press, placed to the right of the
-// sidebar, with the keyboard shortcut when the action has one.
+// sidebar, with the keyboard shortcut when the action has one (also exposed as
+// `aria-keyshortcuts`). Built-in buttons carry `data-raze-item="<id>"`, the
+// stable selector for them now that names are translatable and there is no
+// `title`.
 
 import type {
   ChartStyleName,
@@ -222,6 +225,9 @@ export class LeftSidebar {
     }
     const label = def.label();
     const b = this.mkBtn(label, def.shortcut);
+    // Locale-independent hook for code that needs a built-in button (the
+    // accessible name is translated, so never select by aria-label).
+    b.dataset.razeItem = item;
     b.appendChild(createIcon(def.icon));
     if (item === "chart_type") {
       this.styleBtn = b;
@@ -295,6 +301,8 @@ export class LeftSidebar {
     b.type = "button";
     b.setAttribute("aria-label", title);
     b.className = "raze-chart-sidebar-button raze-chart-focusable";
+    // The shortcut is exposed semantically as well as in the tooltip text.
+    if (shortcut) b.setAttribute("aria-keyshortcuts", shortcut);
     // An em space keeps the shortcut visually apart (the tooltip collapses
     // ordinary runs of spaces); assistive technology reads "Fit content F".
     this.addTooltip(b, shortcut ? `${title}\u2003${shortcut}` : title);

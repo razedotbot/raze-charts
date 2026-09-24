@@ -80,7 +80,8 @@ and orientation. Controls use native buttons with accessible labels and state:
   attributes) after 500ms of hover, on keyboard focus, or on a touch
   long-press (which does not activate the button). It sits to the right of
   the toolbar, includes the keyboard shortcut where one exists ("Fit content
-  F", exposed through `aria-describedby`), and Escape dismisses it;
+  F", exposed through `aria-describedby` and `aria-keyshortcuts="F"`), and
+  Escape dismisses it;
 - separators are semantic;
 - loading uses `role="status"`, polite live updates, and busy state.
 

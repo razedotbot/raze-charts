@@ -235,8 +235,8 @@ Some forms cannot be checked statically. Keep them out of UI modules:
 | `tests/safe-text.mjs` | Escaping, `setMarkup`, Trusted Types policy behaviour, URL filtering, `h()` |
 | `tests/dom-sinks.mjs` | The lint on the repository and on each sink family |
 | `tests/extract-messages.mjs` | Extraction, conflicts, pack coverage |
-| `tests/sidebar-icons.mjs` | The icon set (18px grid, 1.5 stroke, round caps, stroked candle wicks, distinct fit and fullscreen), class-styled sidebar with no `title` attributes, 500ms tooltips with shortcut hints and Escape, check-slot menu rows in the chart-type, Indicators and Objects tree menus, the muted-text token |
-| `tests/sidebar-icons.spec.ts` | Real Chromium: rendered candle wicks, a 3× sidebar icon golden, label alignment in every menu from rects, AA contrast of the muted "Clear all" row in dark and light themes, hover/focus/Escape tooltips placed right of the sidebar, touch long-press tooltips that do not activate the tool |
+| `tests/sidebar-icons.mjs` | The icon set (18px grid, 1.5 stroke, round caps, stroked candle wicks, distinct fit and fullscreen), class-styled sidebar with no `title` attributes, `data-raze-item` hooks that survive translated names, `aria-keyshortcuts`, 500ms tooltips with shortcut hints and Escape, check-slot menu rows in the chart-type, Indicators and Objects tree menus, the muted-text token |
+| `tests/sidebar-icons.spec.ts` | Real Chromium: rendered candle wicks, a sidebar icon golden stored at 3× device pixels (`scale: "device"`, at most 8 differing pixels, so one missing wick stub fails it), label alignment in every menu from rects, AA contrast of the muted "Clear all" row in dark and light themes, hover/focus/Escape tooltips placed right of the sidebar, touch long-press tooltips that do not activate the tool |
 
 The browser spec builds the kit from source with esbuild. Every audited
 surface (desktop dialog, sheet dialog, colour popover, the Indicators menu
