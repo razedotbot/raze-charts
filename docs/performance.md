@@ -73,9 +73,9 @@ npm run check:size
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
 | | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 37 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
-| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 5 KiB |
+| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 10 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
-| | Scenario: Registry with built-ins | `import { StudyRegistry }` | 3 KiB |
+| | Scenario: Registry with built-ins | `import { StudyRegistry }` | 7 KiB |
 
 <!-- bundle-budgets:end -->
 
@@ -104,6 +104,17 @@ uses (about 5.2 KiB), the context seams and id allocator (about 2.4 KiB), and
 the controller and interaction-handler split of the widget (about 2.1 KiB).
 72 KiB is a ceiling, not a target: AD-01 requires a later wave to win back at
 least 10 KiB of headroom.
+
+The study kernels artifact budget grew from 5 to 10 KiB and the "Registry with
+built-ins" scenario from 3 to 7 KiB in wave 1B (W1B-14). Session-anchored VWAP
+needs the shared DST-aware time core (`src/util/time/zone.ts` plus the Intl
+cache, about 2.3 KiB gzip) instead of UTC-day arithmetic; the kernels gained
+gap handling, source selection, offsets and the O(n) rolling moments (about
+1.2 KiB); and the registry now carries each built-in's input declarations,
+input validation with guidance, exact name resolution, search and the pane
+value formatter (about 2 KiB). The catalogue is declared in one pure
+expression and the time core's module state is annotated pure, so the
+"Single kernel" scenario still ships well under its 1 KiB budget.
 
 ## Dense native charts
 

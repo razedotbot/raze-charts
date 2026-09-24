@@ -13,7 +13,8 @@
 // anything on a mounted widget.
 
 // ── Kernels ─────────────────────────────────────────────────────────────────
-export { bollinger, closesFromBars, ema, macd, rsi, sma, stdev, vwap } from "./calc";
+export { bollinger, closesFromBars, ema, macd, rsi, sma, sourceValues, stdev, vwap } from "./calc";
+export type { VwapAnchor, VwapOptions } from "./calc";
 
 // ── Registry ────────────────────────────────────────────────────────────────
 export { BUILTIN_STUDIES, StudyRegistry } from "./registry";
@@ -28,3 +29,4 @@ export type {
   StudySeries,
   StudySeriesStyle,
 } from "../types/charting_library";
+export type { StudySource } from "./types";

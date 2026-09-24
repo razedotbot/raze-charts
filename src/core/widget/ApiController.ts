@@ -40,7 +40,7 @@ export function createApiDeps(host: WidgetHost): ChartApiDeps {
     removeAllTradingLines: () => host.trading.removeAll(),
     createStudy: (name, forceOverlay, lock, inputs) => {
       const id = host.studies.add(studySpecFromArgs(name, forceOverlay, lock, inputs));
-      if (!id) return Promise.reject(new Error(`[raze-charts] unknown study: ${name}`));
+      if (!id) return Promise.reject(new Error(host.studies.registry.unknownStudyMessage(name)));
       return Promise.resolve(id);
     },
     setVisibleRange: (range) => host.data.revealTimeRange(range.from, range.to),

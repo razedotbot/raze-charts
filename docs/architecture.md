@@ -234,7 +234,11 @@ case where unsubscribe happens before async setup completes. Existing
 Built-in EMA, SMA, and RSI recognize append and replace-last mutations and
 update the newest sample incrementally. VWAP, Bollinger Bands, and MACD use
 the multi-series `compute` contract (`{ series }`) and recompute in full after
-a structural data change. VWAP also resets on UTC day boundaries. A new array
+a structural data change. VWAP resets at the start of each trading day of the
+symbol's session, measured in the symbol's time zone through the shared time
+core (UTC days for `24x7` symbols). Every kernel treats a non-finite sample as
+a gap: it emits `null` and is skipped by windows and recurrences, and the
+incremental path falls back to a full recompute around such a bar. A new array
 reference, a backfill, a historical correction, or a custom study uses the
 public full-array `compute` contract. Custom code must not assume incremental
 calls.

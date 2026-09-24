@@ -926,12 +926,15 @@ class StudyRegistry
   list(): StudyDefinition[]
   register(def: StudyDefinition): void
   resolve(name: string): StudyDefinition | null
+  search(query: string): StudyDefinition[]
+  unknownStudyMessage(name: string): string
 interface StudySeries
   color?: string | undefined
   name?: string | undefined
   style?: StudySeriesStyle | undefined
   values: (null | number)[]
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
+type StudySource = 'close' | 'high' | 'hl2' | 'hlc3' | 'hlcc4' | 'low' | 'ohlc4' | 'open' | 'volume'
 interface StudySpec
   color?: string | undefined
   forceOverlay?: boolean | undefined
@@ -1098,6 +1101,12 @@ interface ViewportChange
   readonly reason: 'api' | 'cancel' | 'fit' | 'initial' | 'keyboard' | 'load' | 'pan' | 'pinch' | 'preset' | 'realtime' | 'rebase' | 'reset' | 'resize' | 'sync' | 'timeframe' | 'zoom'
 type ViewportChangeReason = 'api' | 'cancel' | 'fit' | 'initial' | 'keyboard' | 'load' | 'pan' | 'pinch' | 'preset' | 'realtime' | 'rebase' | 'reset' | 'resize' | 'sync' | 'timeframe' | 'zoom'
 type VolumeMode = 'hidden' | 'overlay' | 'pane'
+type VwapAnchor = 'month' | 'quarter' | 'session' | 'week' | 'year'
+interface VwapOptions
+  anchor?: VwapAnchor | undefined
+  session?: string | undefined
+  source?: StudySource | undefined
+  timezone?: string | undefined
 class Widget implements IChartingLibraryWidget
   new (options: ChartingLibraryWidgetOptions): Widget
   activeChart(): IChartWidgetApi
@@ -1143,9 +1152,10 @@ function resolveTimeframe(timeframe: string | undefined | { value: string; type:
 function rsi(closes: number[], length: number): (null | number)[]
 function showContextMenu(x: number, y: number, items: ContextMenuItem[], fontFamily: string, themeRoot?: HTMLElement | undefined): void
 function sma(closes: number[], length: number): (null | number)[]
+function sourceValues(bars: readonly Bar[], source?: StudySource | undefined): number[]
 function stdev(closes: number[], length: number): (null | number)[]
 const version: string
-function vwap(bars: Bar[]): (null | number)[]
+function vwap(bars: Bar[], options?: VwapOptions | undefined): (null | number)[]
 class widget implements IChartingLibraryWidget
   new (options: ChartingLibraryWidgetOptions): Widget
   activeChart(): IChartWidgetApi

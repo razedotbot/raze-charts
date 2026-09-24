@@ -110,6 +110,7 @@ await test("/studies exports the kernels and registry pieces, matching the root"
     "macd",
     "rsi",
     "sma",
+    "sourceValues",
     "stdev",
     "vwap",
   ];

@@ -352,7 +352,8 @@ function fixedOffsetOf(id: string): number | null {
 }
 
 const zones = new Map<string, TimeZone>();
-const UTC_ZONE: TimeZone = new FixedZone(UTC_ZONE_ID, 0);
+// Pure: modules that import the time core without using it stay tree-shakable.
+const UTC_ZONE: TimeZone = /* @__PURE__ */ new FixedZone(UTC_ZONE_ID, 0);
 
 function unknownZone(id: string): RangeError {
   return new RangeError(

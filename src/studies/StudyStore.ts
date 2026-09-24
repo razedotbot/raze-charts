@@ -3,9 +3,18 @@
 // Which studies exist at all is the StudyRegistry's business — this store only
 // tracks live instances.
 
-import type { Bar, EntityId, StudyDefinition, StudySeries } from "../types/charting_library";
+import type {
+  Bar,
+  EntityId,
+  StudyComputeResult,
+  StudyDefinition,
+  StudyInputs,
+  StudySeries,
+} from "../types/charting_library";
 import type { ChartContext } from "../core/context";
 import type { CommandStack } from "../core/CommandStack";
+import type { StudyComputeContext } from "./types";
+import { rsiState, sourceValue } from "./calc";
 import { BUILTIN_STUDIES, StudyRegistry } from "./registry";
 
 /** @deprecated Studies are registry-driven; any registered name is valid. */
@@ -107,9 +116,17 @@ function sameBar(bar: Bar | undefined, value: BarFingerprint | null): boolean {
     && bar.volume === value.volume;
 }
 
+/** The close as the calc kernels read it: zero/negative are values, non-finite is a gap. */
 function closeOf(bar: Bar): number {
-  return bar.close > 0 ? bar.close : bar.open;
+  return sourceValue(bar, "close");
 }
+
+/** compute() also receives the symbol's session context (VWAP anchoring). */
+type ComputeWithContext = (
+  bars: Bar[],
+  inputs: StudyInputs,
+  ctx: Partial<StudyComputeContext>,
+) => StudyComputeResult;
 
 let seq = 0;
 function nextId(name: string): EntityId {
@@ -292,7 +309,12 @@ export class StudyStore {
 
   private recompute(study: StudyInstance): void {
     try {
-      const raw = study.def.compute(this.context.bars, { length: study.length, ...study.inputs });
+      const compute = study.def.compute as ComputeWithContext;
+      const raw = compute(
+        this.context.bars,
+        { length: study.length, ...study.inputs },
+        { symbolInfo: this.context.symbolInfo },
+      );
       if (Array.isArray(raw)) {
         study.values = raw;
         study.series = [{ values: raw, style: "line", color: study.color }];
@@ -329,6 +351,9 @@ export class StudyStore {
     if (!runtime?.kind) return false;
     const builtin = BUILTIN_KINDS.get(study.def);
     if (!builtin || builtin.compute !== study.def.compute) return false;
+    // Extra inputs (source, offset, in_N lengths) change the recurrence, and
+    // a non-finite sample is a gap only the full path skips correctly.
+    if (Object.keys(study.inputs).length > 0) return false;
 
     const bars = this.context.bars;
     const n = bars.length;
@@ -345,6 +370,7 @@ export class StudyStore {
       }
       let sum = 0;
       for (let i = n - study.length; i < n; i++) sum += closeOf(bars[i]!);
+      if (!Number.isFinite(sum)) return false;
       study.values[index] = sum / study.length;
       return true;
     }
@@ -357,13 +383,15 @@ export class StudyStore {
       if (index === study.length - 1) {
         let sum = 0;
         for (let i = 0; i < study.length; i++) sum += closeOf(bars[i]!);
+        if (!Number.isFinite(sum)) return false;
         study.values[index] = sum / study.length;
         return true;
       }
       const previous = study.values[index - 1];
-      if (typeof previous !== "number") return false;
+      const close = closeOf(bars[index]!);
+      if (typeof previous !== "number" || !Number.isFinite(close)) return false;
       const weight = 2 / (study.length + 1);
-      study.values[index] = closeOf(bars[index]!) * weight + previous * (1 - weight);
+      study.values[index] = close * weight + previous * (1 - weight);
       return true;
     }
 
@@ -387,6 +415,7 @@ export class StudyStore {
       avgLoss = 0;
       for (let i = 1; i <= study.length; i++) {
         const delta = closeOf(bars[i]!) - closeOf(bars[i - 1]!);
+        if (!Number.isFinite(delta)) return false;
         if (delta >= 0) avgGain += delta;
         else avgLoss -= delta;
       }
@@ -397,6 +426,7 @@ export class StudyStore {
       const previousLoss = rsi.avgLosses[index - 1];
       if (typeof previousGain !== "number" || typeof previousLoss !== "number") return false;
       const delta = closeOf(bars[index]!) - closeOf(bars[index - 1]!);
+      if (!Number.isFinite(delta)) return false;
       const gain = delta > 0 ? delta : 0;
       const loss = delta < 0 ? -delta : 0;
       avgGain = (previousGain * (study.length - 1) + gain) / study.length;
@@ -409,33 +439,8 @@ export class StudyStore {
   }
 
   private buildRsiRuntime(length: number): RsiRuntime {
-    const bars = this.context.bars;
-    const avgGains: (number | null)[] = new Array(bars.length).fill(null);
-    const avgLosses: (number | null)[] = new Array(bars.length).fill(null);
-    if (bars.length < length + 1) return { avgGains, avgLosses };
-
-    let avgGain = 0;
-    let avgLoss = 0;
-    for (let i = 1; i <= length; i++) {
-      const delta = closeOf(bars[i]!) - closeOf(bars[i - 1]!);
-      if (delta >= 0) avgGain += delta;
-      else avgLoss -= delta;
-    }
-    avgGain /= length;
-    avgLoss /= length;
-    avgGains[length] = avgGain;
-    avgLosses[length] = avgLoss;
-
-    for (let i = length + 1; i < bars.length; i++) {
-      const delta = closeOf(bars[i]!) - closeOf(bars[i - 1]!);
-      const gain = delta > 0 ? delta : 0;
-      const loss = delta < 0 ? -delta : 0;
-      avgGain = (avgGain * (length - 1) + gain) / length;
-      avgLoss = (avgLoss * (length - 1) + loss) / length;
-      avgGains[i] = avgGain;
-      avgLosses[i] = avgLoss;
-    }
-    return { avgGains, avgLosses };
+    const state = rsiState(this.context.bars.map(closeOf), length);
+    return { avgGains: state.avgGain, avgLosses: state.avgLoss };
   }
 
   private classifyBarsMutation(): BarsMutation {

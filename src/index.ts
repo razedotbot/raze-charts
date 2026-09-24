@@ -99,7 +99,9 @@ export type {
 export type { AxisTag, AxisTagSourceKind, Rect, ScreenPoint, TimescaleMarkHit } from "./engine/paint/view";
 
 // ── Studies (indicator math is pure and dependency-free) ────────────────────
-export { bollinger, closesFromBars, ema, macd, rsi, sma, stdev, vwap } from "./studies/calc";
+export { bollinger, closesFromBars, ema, macd, rsi, sma, sourceValues, stdev, vwap } from "./studies/calc";
+export type { VwapAnchor, VwapOptions } from "./studies/calc";
+export type { StudySource } from "./studies/types";
 export { BUILTIN_STUDIES, StudyRegistry } from "./studies/registry";
 export { StudyStore } from "./studies/StudyStore";
 export type { StudyInstance, StudyKind, StudySpec } from "./studies/StudyStore";
