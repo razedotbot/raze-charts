@@ -3,8 +3,11 @@
 // grouped into labelled fieldsets by `group` and laid out on shared rows by
 // `inline`. Values are resolved through the same rules as createStudy()
 // (defaults, clamping, documented errors), so what the form commits is what
-// the store accepts. The study settings dialog renders this form in its
-// Inputs tab; hosts can also mount it in their own UI.
+// the store accepts. Each control owns its error message, so several invalid
+// fields each keep their own. Input titles, groups and tooltips come from the
+// plugin and are shown verbatim (plugins localise their own strings); the
+// library's own labels go through t(). The study settings dialog renders this
+// form in its Inputs tab; hosts can also mount it in their own UI.
 
 import { t } from "../i18n";
 import type { StudyInputPrimitive, StudyInputSchema, StudySource } from "../types/charting_library";
@@ -27,7 +30,7 @@ const FORM_STYLES = /* @__PURE__ */ defineStyles(
   "text-transform:uppercase;color:var(--raze-text-muted,currentColor);opacity:.8}" +
   ".raze-study-inputs-inline{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}" +
   ".raze-study-inputs-inline>.raze-kit-field{flex:1 1 12em}" +
-  ".raze-study-inputs-error{margin:0;color:var(--raze-danger,#f23645);font-size:.9em}" +
+  ".raze-study-inputs-error{grid-column:1/-1;margin:0;color:var(--raze-danger,#f23645);font-size:.9em}" +
   ".raze-study-inputs-error:empty{display:none}",
 );
 
@@ -81,40 +84,51 @@ interface Control {
   show(value: StudyInputPrimitive): void;
 }
 
+interface MountedControl extends Control {
+  /** This control's own error message (an assertive live region). */
+  readonly error: HTMLElement;
+}
+
+/** Flag or clear one control; its message is linked through aria-errormessage. */
+function setInvalid(control: MountedControl, message: string | null): void {
+  const input = control.ui.control;
+  if (message === null) {
+    input.removeAttribute("aria-invalid");
+    input.removeAttribute("aria-errormessage");
+    control.error.textContent = "";
+    return;
+  }
+  input.setAttribute("aria-invalid", "true");
+  input.setAttribute("aria-errormessage", control.error.id);
+  control.error.textContent = message;
+}
+
 export function createStudyInputsForm(options: StudyInputsFormOptions): StudyInputsForm {
   const schema = normalizeInputSchema(options.schema, options.study);
   let values: Readonly<Record<string, StudyInputPrimitive>> = resolveStudyInputs(schema, options.values, options.study);
   const el = document.createElement("div");
   el.className = "raze-study-inputs";
   adoptStyles(el, FORM_STYLES);
-  const error = document.createElement("p");
-  error.className = "raze-study-inputs-error";
-  error.setAttribute("role", "alert");
-  error.id = uid("study-inputs-error");
-  const controls: Control[] = [];
+  const controls: MountedControl[] = [];
   const tooltips: TooltipHandle[] = [];
 
-  const commit = (id: string, raw: unknown, control: Control): void => {
+  const commit = (id: string, raw: unknown, control: MountedControl): void => {
     try {
       values = resolveStudyInputs(schema, { ...values, [id]: raw }, options.study);
     } catch (reason) {
-      control.ui.control.setAttribute("aria-invalid", "true");
-      control.ui.control.setAttribute("aria-errormessage", error.id);
-      error.textContent = reason instanceof Error ? reason.message.replace(/^\[raze-charts\] /, "") : String(reason);
+      setInvalid(control, reason instanceof Error ? reason.message.replace(/^\[raze-charts\] /, "") : String(reason));
       return;
     }
-    control.ui.control.removeAttribute("aria-invalid");
-    control.ui.control.removeAttribute("aria-errormessage");
-    error.textContent = "";
+    setInvalid(control, null);
     // Clamped or coerced values are shown as stored.
     control.show(values[id]!);
     options.onChange?.(values, id);
   };
 
-  const build = (field: StudyInputField): Control => {
+  const build = (field: StudyInputField): MountedControl => {
     const label = field.title;
     let control: Control;
-    const self = (): Control => control;
+    const self = (): MountedControl => mounted;
     switch (field.control) {
       case "number": {
         const ui = numberField({
@@ -185,7 +199,13 @@ export function createStudyInputsForm(options: StudyInputsFormOptions): StudyInp
     control.ui.el.dataset.input = field.id;
     control.ui.el.dataset.type = field.type;
     if (field.tooltip) tooltips.push(attachTooltip(control.ui.control, field.tooltip));
-    return control;
+    const error = document.createElement("p");
+    error.className = "raze-study-inputs-error";
+    error.id = uid("study-input-error");
+    error.setAttribute("role", "alert");
+    control.ui.el.append(error);
+    const mounted: MountedControl = { ...control, error };
+    return mounted;
   };
 
   // Group consecutive inputs sharing `group`, and rows sharing `inline`.
@@ -232,14 +252,11 @@ export function createStudyInputsForm(options: StudyInputsFormOptions): StudyInp
       groupHost.append(control.ui.el);
     }
   }
-  el.append(error);
-
   const showAll = (): void => {
     for (const control of controls) {
       control.show(values[control.field.id]!);
-      control.ui.control.removeAttribute("aria-invalid");
+      setInvalid(control, null);
     }
-    error.textContent = "";
   };
 
   return {

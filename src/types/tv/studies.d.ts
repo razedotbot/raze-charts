@@ -25,9 +25,9 @@ export type StudyInputPrimitive = number | string | boolean;
 /** Fields shared by every input descriptor. */
 export interface StudyInputBase<V> {
   /**
-   * Settings-dialog label (English default; translated through t()). An empty
-   * title is filled from the input id (`fastLength` -> `Fast length`) when the
-   * definition is registered.
+   * Settings-dialog label, shown verbatim: plugins localise their own titles,
+   * groups and tooltips. An empty title is filled from the input id
+   * (`fastLength` -> `Fast length`) when the definition is registered.
    */
   readonly title: string;
   readonly default: V;
@@ -270,7 +270,9 @@ export interface StudyDefinition {
   /**
    * Values aligned 1:1 with `bars`; null = warm-up gap. Arrays stay one line;
    * objects carry MACD/bands. `ctx` exposes the symbol, resolution, timezone
-   * and (for `dependsOn: ["visibleRange"]`) the visible range.
+   * and (for `dependsOn: ["visibleRange"]`) the visible range. The store
+   * always passes it; code that calls compute() itself builds one with
+   * `createStudyContext()` from `@razedotbot/charts/studies`.
    */
   compute: (bars: Bar[], inputs: StudyInputs, ctx: StudyComputeContext) => StudyComputeResult;
   /**

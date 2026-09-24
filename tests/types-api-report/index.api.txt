@@ -1042,6 +1042,7 @@ interface StudyInstance
   error: null | string
   forceOverlay: boolean
   id: EntityId
+  inputWarning?: string | undefined
   inputs: Record<string, StudyInputPrimitive>
   length: number
   lock: boolean
@@ -1174,7 +1175,8 @@ interface StudySpec
   disableUndo?: boolean | undefined
   forceOverlay?: boolean | undefined
   id?: EntityId | undefined
-  inputs?: Readonly<Record<string, StudyInputPrimitive>> | undefined
+  inputs?: Readonly<Record<string, unknown>> | undefined
+  invalidInputs?: 'default' | 'throw' | undefined
   length?: number | undefined
   lock?: boolean | undefined
   name: string

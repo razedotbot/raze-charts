@@ -261,10 +261,23 @@ function checkedDefault(input: StudyInput, study: string, id: string): StudyInpu
   return value;
 }
 
+/** A short, never-throwing rendering of a caller value for error messages. */
+export function describeInputValue(value: unknown): string {
+  if (typeof value === "function") return "a function";
+  if (typeof value === "symbol" || typeof value === "bigint") return String(value);
+  try {
+    const json = JSON.stringify(value);
+    if (json !== undefined) return json.length > 60 ? `${json.slice(0, 57)}...` : json;
+  } catch {
+    // Circular structures: fall through to the type name.
+  }
+  return Array.isArray(value) ? "an array" : typeof value === "object" ? "an object" : String(value);
+}
+
 /** Coerce one value to the input's type without clamping; throws `invalid-value`. */
 function coerce(input: StudyInput, value: unknown, study: string, id: string): StudyInputPrimitive {
   const reject = (expected: string): never => {
-    throw new StudyInputError("invalid-value", study, id, `expected ${expected}, got ${JSON.stringify(value) ?? String(value)}`);
+    throw new StudyInputError("invalid-value", study, id, `expected ${expected}, got ${describeInputValue(value)}`);
   };
   if (NUMERIC_TYPES.has(input.type)) {
     const number = typeof value === "number"
@@ -313,6 +326,13 @@ export interface StudyInputClamp {
 export interface ResolveInputsOptions {
   /** Called for each out-of-range number that was clamped. */
   onClamp?(clamp: StudyInputClamp): void;
+  /**
+   * Lenient resolution, for restoring saved state whose schema may have
+   * evolved. When set, an unknown id is skipped and an invalid value keeps
+   * the input's default; each `unknown-input`/`invalid-value` error is passed
+   * here instead of being thrown. Malformed schemas still throw.
+   */
+  onInvalid?(error: StudyInputError): void;
 }
 
 /**
@@ -332,8 +352,7 @@ export function resolveStudyInputs<S extends StudyInputSchema>(
   // Defaults are checked here too, so a hand-written v1 schema is validated
   // the first time it is used even though it never went through defineIndicator().
   for (const id of ids) out[id] = checkedDefault(schema[id]!, study, id);
-  for (const [key, value] of Object.entries(values ?? {})) {
-    if (value === undefined || value === null) continue;
+  const resolveOne = (key: string, value: unknown): void => {
     let id = key;
     if (!Object.prototype.hasOwnProperty.call(schema, id)) {
       const positional = /^in_(\d+)$/.exec(key);
@@ -359,6 +378,19 @@ export function resolveStudyInputs<S extends StudyInputSchema>(
       }
     }
     out[id] = next;
+  };
+  for (const [key, value] of Object.entries(values ?? {})) {
+    if (value === undefined || value === null) continue;
+    if (!options.onInvalid) {
+      resolveOne(key, value);
+      continue;
+    }
+    try {
+      resolveOne(key, value);
+    } catch (error) {
+      if (!(error instanceof StudyInputError) || error.code === "invalid-schema") throw error;
+      options.onInvalid(error);
+    }
   }
   return Object.freeze(out) as StudyInputValues<S>;
 }

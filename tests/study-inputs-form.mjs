@@ -1,7 +1,8 @@
 // The input schema yields a working settings form (W1B-15): every input type
 // renders an accessible kit control, groups become fieldsets, inline inputs
 // share a row, edits resolve through the createStudy() rules (clamping,
-// coercion, documented errors), and reset() restores the defaults.
+// coercion, documented errors), each invalid control keeps its own linked
+// message, and reset() restores the defaults.
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { JSDOM } from "jsdom";
@@ -139,17 +140,28 @@ try {
   const sessionInput = row("hours").querySelector("input");
   const before = changes.length;
   change(sessionInput, "9:30 to 4");
-  const alert = form.el.querySelector('[role="alert"]');
+  const alert = row("hours").querySelector('[role="alert"]');
   ok(changes.length === before && form.values.hours === "0930-1600", "invalid values are not committed");
-  ok(sessionInput.getAttribute("aria-invalid") === "true" && sessionInput.getAttribute("aria-errormessage") === alert.id, "invalid controls are flagged and linked to the message");
+  ok(sessionInput.getAttribute("aria-invalid") === "true" && sessionInput.getAttribute("aria-errormessage") === alert.id, "invalid controls are flagged and linked to their own message");
   ok(alert.textContent.includes('input "hours"') && alert.textContent.includes("0930-1600"), "the error explains the accepted format");
+
+  // A second invalid field gets its own message; the first keeps its message.
+  const colorInput = row("namedColor").querySelector("input");
+  change(colorInput, "   ");
+  const colorAlert = row("namedColor").querySelector('[role="alert"]');
+  ok(colorAlert && colorAlert.id !== alert.id && colorInput.getAttribute("aria-errormessage") === colorAlert.id, "each invalid control links to its own message");
+  ok(colorAlert.textContent.includes('input "namedColor"') && alert.textContent.includes('input "hours"'), "a second error does not overwrite the first");
+  ok(form.el.querySelectorAll('[aria-invalid="true"]').length === 2, "both invalid controls stay flagged");
   change(sessionInput, "0800-1700:23456");
-  ok(form.values.hours === "0800-1700:23456" && !sessionInput.hasAttribute("aria-invalid") && alert.textContent === "", "a valid value clears the error");
+  ok(form.values.hours === "0800-1700:23456" && !sessionInput.hasAttribute("aria-invalid") && !sessionInput.hasAttribute("aria-errormessage") && alert.textContent === "", "a valid value clears that control's error");
+  ok(colorInput.getAttribute("aria-invalid") === "true" && colorAlert.textContent.includes('input "namedColor"'), "fixing one field leaves the other field's error in place");
 
   // setValues() and reset().
   const count = changes.length;
   form.setValues({ length: 3, mode: "ema" });
   ok(changes.length === count && lengthInput.value === "3" && modeSelect.value === "ema", "setValues() updates controls without firing onChange");
+  ok(!colorInput.hasAttribute("aria-invalid") && !colorInput.hasAttribute("aria-errormessage") && colorAlert.textContent === "", "setValues() clears every error, including the aria-errormessage link");
+  ok(colorInput.value === "tomato", "setValues() shows the committed value of a field that was invalid");
   form.reset();
   ok(form.values.length === 14 && form.values.showSignal === true && lengthInput.value === "14" && changes.length === count + 1, "reset() restores defaults and reports once");
   form.focus();

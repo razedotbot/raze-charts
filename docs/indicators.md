@@ -137,28 +137,52 @@ validated the same way and `compute()` receives every input.
 
 `createStudy()`, `load()` and the store resolve inputs the same way:
 
-1. Missing inputs take their declared default.
-2. Numeric strings are accepted for numeric inputs, `"true"`/`"false"` for
-   booleans, numbers for text-like inputs.
+1. Missing inputs (and `null`/`undefined` values) take their declared default.
+2. Numeric strings are accepted for numeric inputs, `"true"`/`"false"` as
+   well as real booleans for `bool` inputs, numbers for text-like inputs.
 3. `int` values round; `int`, `float` and `price` values outside
    `min`/`max` are **clamped**, with a console warning that names the input.
 4. TradingView positional ids (`in_0`, `in_1`, …) map onto the inputs in
-   declaration order; `positionalStudyInputs(schema, [30, "close"])` maps a
-   legacy positional array.
-5. An unknown input id or a value of the wrong type **rejects** with a
-   `StudyInputError`.
+   declaration order. So does TradingView's legacy positional array for a
+   study with a schema: `createStudy("X", false, false, [30, "close"])` sets
+   the first two declared inputs, and an array longer than the schema rejects
+   with `unknown-input`. `positionalStudyInputs(schema, [30, "close"])` does
+   the same mapping outside the widget. Studies without a schema (the
+   built-ins today) do not map positional arrays yet; pass `{ length: 30 }`.
+5. An unknown input id or a value of the wrong type (including objects,
+   arrays and functions) **rejects** with a `StudyInputError`. Nothing a
+   caller passes is dropped silently.
 
 The classic shorthand still works: `createStudy("X", false, false, { length: 9, color: "#f00" })`
-feeds a declared `length` input and a declared `color` input.
+feeds a declared `length` input and a declared `color` input. A numeric string
+length (`"9"`) is used as the length; any other non-numeric `length`, `Length`
+or `periods`, or a `color` that is not a string, rejects with `invalid-value`
+instead of falling back to the default.
 
 For v1 definitions without a schema, `compute()` receives
 `{ ...defaults, ...inputs, length }` (every default except `color`), and the
-same effective inputs are what `save()` stores.
+same effective inputs are what `save()` stores. Numbers, strings and booleans
+are forwarded; any other value rejects with `invalid-value`.
+
+### Restoring saved layouts
+
+Restores are lenient, so a plugin whose schema evolved cannot break a saved
+layout. `load()`, `StudyStore.restore()` and undo/redo resolve saved inputs
+with `invalidInputs: "default"`: an input id the definition no longer
+declares is dropped, and a value that no longer validates (a removed select
+option, a changed type) is replaced by its declared default. The other inputs,
+the other studies and the drawings are restored as saved. Each affected study
+logs one warning naming the study, every dropped or reset input and the fix
+(save the layout again), and records the same text on
+`StudyInstance.inputWarning` until its inputs are next edited.
+`createStudy()` and `StudyStore.update()` stay strict. `StudyStore.add()` is
+strict unless its spec sets `invalidInputs: "default"`.
 
 ### Errors
 
 `StudyInputError` extends `TypeError`. `createStudy()` rejects with it and
-`StudyStore.add()` throws it. The root entry and `/studies` are separate
+`StudyStore.add()` throws it; `load()` never does (see
+[Restoring saved layouts](#restoring-saved-layouts)). The root entry and `/studies` are separate
 bundles, each with its own copy of the class: use `instanceof` with the class
 from the entry that threw (the root for `createStudy()`), or test
 `error.name === "StudyInputError"`.
@@ -213,10 +237,13 @@ receive a frozen, live view of the chart:
 | `requestRecompute()` | Ask for a throttled full recompute, for example after an async resource resolves. |
 
 `dependsOn: ["visibleRange"]` recomputes the study when the chart pans or
-zooms, and `dependsOn: ["timezone"]` when the display timezone changes.
-Context-driven recomputes are throttled to one pass per 100 ms; a burst of pan
-events costs one recompute with the latest range. Symbol and resolution changes
-reload the bars, which recomputes every study.
+zooms, and `dependsOn: ["timezone"]` when the display timezone changes. The
+store listens to both viewport events, so drag, wheel, pinch, keyboard and
+axis-scale gestures, range presets and `setVisibleRange()` all count; the
+F-key/double-click fit still writes the range without an event until it moves
+to `setViewport()`. Context-driven recomputes are throttled to one pass per
+100 ms; a burst of pan events costs one recompute with the latest range.
+Symbol and resolution changes reload the bars, which recomputes every study.
 
 Outside a widget, `createStudyContext({ symbolInfo, resolution, timezone })`
 builds a context and `runIndicator(definition, bars, inputs, ctx)` returns one
@@ -237,11 +264,13 @@ aligned array per plot, which is handy for tests, servers and screeners.
   `limit`), dropping the oldest steps first.
 - `update(id, { inputs, length, color, plots })` edits a study in place with
   one undo step and the same validation as `createStudy()`.
+- `add({ …, invalidInputs: "default" })` restores leniently, like `load()`
+  (see [Restoring saved layouts](#restoring-saved-layouts)).
 - `add({ …, disableUndo: true })` skips the undo step (TradingView
   `options.disableUndo`), and `plots: { [plotId]: { color, lineWidth, lineStyle, visible } }`
   overrides plot styles.
 - `save()` stores the effective inputs, booleans included, and `load()`
-  resolves them through the same rules.
+  resolves them through the same rules, leniently.
 
 ### Change stream
 
@@ -259,6 +288,11 @@ inline row and tooltip. `createStudyInputsForm()` (`src/ui/StudyInputsForm.ts`,
 the building block for the study settings dialog) renders that model with the
 UI kit: labelled kit controls,
 `<fieldset>` groups, shared inline rows, UTC date-times for `time` inputs,
-and inline validation messages linked through `aria-errormessage`. Every edit
-resolves through the rules above, so what the form commits is exactly what
-`createStudy()` accepts.
+and inline validation messages. Each control has its own message under it,
+announced as an alert and linked through `aria-errormessage`, so two invalid
+fields keep two messages. Every edit resolves through the rules above, so
+what the form commits is exactly what `createStudy()` accepts.
+
+Input titles, groups and tooltips come from the plugin and are shown verbatim:
+localise them in the definition. The form's own labels (source names, the
+`(UTC)` suffix) go through the library's `t()` catalogue.

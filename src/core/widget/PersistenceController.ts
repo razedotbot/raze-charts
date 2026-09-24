@@ -153,6 +153,7 @@ export class PersistenceController implements WidgetController {
           lock: study.lock ?? false,
           forceOverlay: study.forceOverlay ?? false,
           inputs: study.inputs ?? {},
+          invalidInputs: "default", // Stale saved inputs fall back to their defaults with a warning.
         });
       }
       context.compare = [];

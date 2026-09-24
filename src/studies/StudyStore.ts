@@ -30,7 +30,7 @@ import { IdAllocator, idSlug } from "../core/ids";
 import { Delegate } from "../util/delegate";
 // Type-only: v2 execution code travels with defineIndicator() handles.
 import type { IndicatorHandle, IndicatorRunner, StudyPlotOverride } from "./defineIndicator";
-import { resolveStudyInputs } from "./inputs";
+import { describeInputValue, resolveStudyInputs, StudyInputError } from "./inputs";
 import { BUILTIN_STUDIES, StudyRegistry } from "./registry";
 import type { StudyChange, StudyChangeKind } from "./types";
 
@@ -51,11 +51,22 @@ export interface StudySpec {
   lock?: boolean;
   forceOverlay?: boolean;
   /**
-   * Input values. Definitions with an input schema validate them (unknown ids
-   * and wrong types throw a StudyInputError, numbers clamp to min/max);
-   * others receive them verbatim on top of their defaults.
+   * Input values, validated by the store. Definitions with an input schema
+   * coerce them and clamp numbers to min/max; unknown ids and wrongly typed
+   * values are invalid. Definitions without a schema receive numbers,
+   * strings and booleans on top of their defaults; other values are invalid.
+   * `invalidInputs` decides what happens to invalid inputs.
    */
-  inputs?: Readonly<Record<string, StudyInputPrimitive>>;
+  inputs?: Readonly<Record<string, unknown>>;
+  /**
+   * What to do with inputs that do not validate:
+   * - `"throw"` (default): throw a StudyInputError and add nothing.
+   * - `"default"`: drop unknown ids and use the declared default for invalid
+   *   values, log one warning per study and record it on
+   *   `StudyInstance.inputWarning`. load() uses this, as do restore() and
+   *   undo/redo, so a plugin whose input schema evolved cannot break a saved layout.
+   */
+  invalidInputs?: "throw" | "default";
   /** Per-plot style overrides for v2 indicators, keyed by plot id. */
   plots?: Readonly<Record<string, StudyPlotOverride>>;
   /** Add without an undo step (TradingView `options.disableUndo`). */
@@ -108,6 +119,11 @@ export interface StudyInstance {
   outputs?: Readonly<Record<string, (number | null)[]>>;
   /** Why the last compute/update failed, or null. */
   error: string | null;
+  /**
+   * Set when restored inputs no longer validated and were replaced by their
+   * defaults (`invalidInputs: "default"`): which inputs, and why.
+   */
+  inputWarning?: string;
 }
 
 const FALLBACK_COLORS = ["#f5a623", "#26a69a", "#2962ff", "#e040fb", "#7E57C2"];
@@ -190,6 +206,18 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isInputPrimitive(value: unknown): value is StudyInputPrimitive {
+  return typeof value === "number" || typeof value === "string" || typeof value === "boolean";
+}
+
+/** A StudyInputError's message without its `[raze-charts] study "X" input "y": ` prefix. */
+function inputErrorDetail(error: StudyInputError): string {
+  const prefix = `[raze-charts] study "${error.study}"${error.input === null ? "" : ` input "${error.input}"`}: `;
+  return error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
+}
+
+type InvalidInputs = NonNullable<StudySpec["invalidInputs"]>;
+
 function copyPlots(plots: Readonly<Record<string, StudyPlotOverride>> | undefined): Record<string, StudyPlotOverride> | undefined {
   if (!plots) return undefined;
   const out: Record<string, StudyPlotOverride> = {};
@@ -221,9 +249,14 @@ export class StudyStore {
     // headless hosts) get a private allocator.
     this.ids = context.ids ?? new IdAllocator();
     this.barsSnapshot = this.captureBars();
-    this.context.dataChanged.subscribe(this.subscriptionOwner, this.onDataChanged as (...args: never[]) => void);
-    this.context.rangeChanged?.subscribe(this.subscriptionOwner, this.onRangeChanged as (...args: never[]) => void);
-    this.context.timezoneChanged?.subscribe(this.subscriptionOwner, this.onTimezoneChanged as (...args: never[]) => void);
+    const owner = this.subscriptionOwner;
+    this.context.dataChanged.subscribe(owner, this.onDataChanged as (...args: never[]) => void);
+    this.context.rangeChanged?.subscribe(owner, this.onRangeChanged as (...args: never[]) => void);
+    // Drag, wheel, pinch and axis gestures still write visibleRange directly
+    // and publish only viewportChanged (until every writer goes through
+    // setViewport). setViewport fires both events; the pending set coalesces them.
+    this.context.viewportChanged?.subscribe(owner, this.onRangeChanged as (...args: never[]) => void);
+    this.context.timezoneChanged?.subscribe(owner, this.onTimezoneChanged as (...args: never[]) => void);
   }
 
   list(): StudyInstance[] {
@@ -250,13 +283,14 @@ export class StudyStore {
 
   /**
    * Returns the new study id, or null when `spec.name` is not in the registry
-   * or `spec.id` is already live. Throws a StudyInputError for invalid inputs.
+   * or `spec.id` is already live. Throws a StudyInputError for invalid inputs
+   * unless `spec.invalidInputs` is `"default"`.
    */
   add(spec: StudySpec): EntityId | null {
     const def = this.registry.resolve(spec.name);
     if (!def) return null;
     if (spec.id && this.items.has(spec.id)) return null;
-    const study = this.instantiate(def, spec, this.items.size);
+    const study = this.instantiate(def, spec, this.items.size, spec.invalidInputs ?? "throw");
     const id = spec.id ?? this.ids.next("study", {
       label: `study_${idSlug(def.name)}`,
       isTaken: (candidate) => this.items.has(candidate as EntityId),
@@ -323,7 +357,7 @@ export class StudyStore {
     const current = this.items.get(id);
     if (!current) return false;
     const before = this.snapshot(current);
-    const inputs: Record<string, StudyInputPrimitive> = { ...before.inputs, ...(patch.inputs ?? {}) };
+    const inputs: Record<string, unknown> = { ...before.inputs, ...(patch.inputs ?? {}) };
     // A schema-declared `length` input is the length: keep the shorthand in sync.
     if (patch.length !== undefined && "length" in before.inputs && !(patch.inputs && "length" in patch.inputs)) {
       inputs.length = patch.length;
@@ -335,7 +369,7 @@ export class StudyStore {
       length: patch.length ?? before.length,
       color: patch.color ?? before.color,
       ...(plots ? { plots } : {}),
-    }, 0);
+    }, 0, "throw");
     next.id = id;
     const after = this.snapshot(next);
     if (JSON.stringify(after) === JSON.stringify(before)) return true;
@@ -365,11 +399,15 @@ export class StudyStore {
     return out;
   }
 
-  /** Restore a snapshot without allocating a new public entity id. */
+  /**
+   * Restore a snapshot without allocating a new public entity id. Inputs that
+   * no longer validate fall back to their defaults with a warning
+   * (`invalidInputs: "default"`).
+   */
   restore(snapshot: StudySnapshot, index?: number): boolean {
     const def = this.registry.resolve(snapshot.name);
     if (!def) return false;
-    const study = this.instantiate(def, snapshot, index ?? this.items.size);
+    const study = this.instantiate(def, snapshot, index ?? this.items.size, "default");
     study.id = snapshot.id;
     this.ids.reserve("study", study.id);
     this.initialiseRuntime(study);
@@ -388,10 +426,25 @@ export class StudyStore {
 
   // ── Instances ─────────────────────────────────────────────────────────────
 
-  /** Resolve a spec against its definition: length, colour and effective inputs. */
-  private instantiate(def: StudyDefinition, spec: Omit<StudySpec, "name">, paletteIndex: number): StudyInstance {
+  /**
+   * Resolve a spec against its definition: length, colour and effective
+   * inputs. `invalidInputs` decides whether invalid inputs throw or fall back
+   * to their defaults (restores).
+   */
+  private instantiate(
+    def: StudyDefinition,
+    spec: Omit<StudySpec, "name">,
+    paletteIndex: number,
+    invalidInputs: InvalidInputs,
+  ): StudyInstance {
     const schema = def.inputs ?? null;
     const defaults = def.defaults ?? {};
+    // Lenient mode collects each problem instead of throwing.
+    const lenient = invalidInputs === "default";
+    const issues: string[] = [];
+    const note = (error: StudyInputError, dropped: boolean): void => {
+      issues.push(`input "${error.input ?? "?"}" ${dropped ? "dropped" : "reset to its default"}: ${inputErrorDetail(error)}`);
+    };
     let inputs: Record<string, StudyInputPrimitive>;
     let length: number;
     if (schema) {
@@ -402,6 +455,7 @@ export class StudyStore {
       inputs = { ...resolveStudyInputs(schema, raw, def.name, {
         onClamp: ({ id, value, clamped }) =>
           console.warn(`[raze-charts] study "${def.name}" input "${id}" = ${value} is out of range; clamped to ${clamped}`),
+        ...(lenient ? { onInvalid: (error: StudyInputError) => note(error, error.code === "unknown-input") } : {}),
       }) };
       const declared = inputs.length;
       length = typeof declared === "number" ? declared : Math.max(0, Math.floor(spec.length || defaults.length || 0));
@@ -410,7 +464,23 @@ export class StudyStore {
       for (const [key, value] of Object.entries(defaults)) {
         if (key !== "length" && key !== "color" && value !== undefined) inputs[key] = value;
       }
-      Object.assign(inputs, spec.inputs ?? {});
+      // Without a schema any number, string or boolean is forwarded; other
+      // values (objects, arrays, functions) cannot be saved or edited.
+      for (const [key, value] of Object.entries(spec.inputs ?? {})) {
+        if (value === undefined || value === null) continue;
+        if (isInputPrimitive(value)) {
+          inputs[key] = value;
+          continue;
+        }
+        const error = new StudyInputError(
+          "invalid-value",
+          def.name,
+          key,
+          `expected a number, string or boolean, got ${describeInputValue(value)}`,
+        );
+        if (!lenient) throw error;
+        note(error, !Object.prototype.hasOwnProperty.call(inputs, key));
+      }
       length = Math.max(1, Math.floor(spec.length || defaults.length || 14));
     }
     const study: StudyInstance = {
@@ -429,17 +499,28 @@ export class StudyStore {
     };
     const plots = copyPlots(spec.plots);
     if (plots) study.plots = plots;
+    if (issues.length) {
+      study.inputWarning = issues.join("; ");
+      console.warn(
+        `[raze-charts] study "${def.name}"${spec.id ? ` (${spec.id})` : ""}: saved inputs no longer match its definition — `
+          + `${study.inputWarning}. Save the layout again to store the current inputs.`,
+      );
+    }
     return study;
   }
 
   /** Replace an instance's spec in place (update/undo/redo) and recompute it. */
   private applySnapshot(study: StudyInstance, snapshot: StudySnapshot): void {
-    const resolved = this.instantiate(study.def, snapshot, 0);
+    // Snapshots are history: `update()` validated them strictly already, and a
+    // definition re-registered since then must not make undo/redo throw.
+    const resolved = this.instantiate(study.def, snapshot, 0, "default");
     study.length = resolved.length;
     study.color = resolved.color;
     study.inputs = resolved.inputs;
     if (resolved.plots) study.plots = resolved.plots;
     else delete study.plots;
+    if (resolved.inputWarning) study.inputWarning = resolved.inputWarning;
+    else delete study.inputWarning;
     this.initialiseRuntime(study);
     this.recompute(study);
     this.context.requestPaint();
@@ -785,6 +866,7 @@ export class StudyStore {
     const owner = this.subscriptionOwner;
     this.context.dataChanged.unsubscribe(owner, this.onDataChanged as (...args: never[]) => void);
     this.context.rangeChanged?.unsubscribe(owner, this.onRangeChanged as (...args: never[]) => void);
+    this.context.viewportChanged?.unsubscribe(owner, this.onRangeChanged as (...args: never[]) => void);
     this.context.timezoneChanged?.unsubscribe(owner, this.onTimezoneChanged as (...args: never[]) => void);
     if (this.recomputeTimer !== null) clearTimeout(this.recomputeTimer);
     this.recomputeTimer = null;

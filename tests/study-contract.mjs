@@ -2,7 +2,11 @@
 // input schemas validate/clamp/reject, defineIndicator's incremental update()
 // runs once per tick, undo history keeps specs instead of value arrays, the
 // undo depth is capped, ids come from the per-widget allocator, and the
-// widget API rejects invalid inputs and round-trips boolean inputs.
+// widget API rejects invalid inputs (booleans, objects, arrays and the
+// positional form included) and round-trips boolean inputs. Restores
+// (load(), restore(), undo) are lenient: stale saved inputs fall back to
+// defaults with one warning per study. Visible-range studies recompute on
+// gesture pans, which publish only viewportChanged.
 // Run after the build: node build.mjs && node tests/study-contract.mjs
 
 import assert from "node:assert/strict";
@@ -80,6 +84,17 @@ const captureWarnings = (fn) => {
   console.warn = (...args) => { warnings.push(args.map(String).join(" ")); };
   try {
     const result = fn();
+    return { result, warnings };
+  } finally {
+    console.warn = original;
+  }
+};
+const captureWarningsAsync = async (fn) => {
+  const original = console.warn;
+  const warnings = [];
+  console.warn = (...args) => { warnings.push(args.map(String).join(" ")); };
+  try {
+    const result = await fn();
     return { result, warnings };
   } finally {
     console.warn = original;
@@ -598,6 +613,115 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   store.destroy();
 }
 
+// ── Invalid inputs: strict creates, lenient restores, schema-less checks ──
+{
+  const Evolving = defineIndicator({
+    name: "Evolving",
+    pane: "pane",
+    inputs: { len: int(10, { min: 1, max: 50 }), mode: select(["fast", "slow"], "fast"), show: bool(true) },
+    plots: [{ id: "v", title: "V", style: "line" }],
+    compute: (bars, { len }) => ({ v: bars.map(() => len) }),
+  });
+  const Plain = {
+    name: "Plain v1",
+    pane: "overlay",
+    defaults: { length: 5, offset: 2 },
+    compute: (bars, inputs) => bars.map((item) => item.close + inputs.offset + (inputs.flag ? 1 : 0)),
+  };
+  const bars = series(12);
+  const store = new StudyStore(plainContext(bars), new StudyRegistry([Evolving, Plain]), new CommandStack());
+  // A layout saved before the plugin renamed an input and dropped a select option.
+  const stale = { len: 20, mode: "medium", removed: 3 };
+
+  assert.throws(() => store.add({ name: "Evolving", inputs: stale }), (error) => error.name === "StudyInputError", "add() is strict by default");
+  const { result: id, warnings } = captureWarnings(() => store.add({ id: "study_evolving_7", name: "Evolving", inputs: stale, invalidInputs: "default" }));
+  const study = store.get(id);
+  assert.deepEqual(study.inputs, { len: 20, mode: "fast", show: true }, "lenient adds keep valid inputs and default the rest");
+  ok(warnings.length === 1, `one warning per study (got ${warnings.length})`);
+  ok(
+    warnings[0].includes('study "Evolving" (study_evolving_7)')
+      && warnings[0].includes('input "mode" reset to its default: expected one of fast, slow, got "medium"')
+      && warnings[0].includes('input "removed" dropped: unknown input. Supported inputs: len, mode, show')
+      && warnings[0].includes("Save the layout again"),
+    `the warning names the study, each input and the fix: ${warnings[0]}`,
+  );
+  ok(study.inputWarning.startsWith('input "mode" reset to its default') && study.inputWarning.includes('input "removed" dropped'), "the problem is recorded on StudyInstance.inputWarning");
+  ok(study.error === null && study.values.every((value) => value === 20), "the restored study computes with its surviving inputs");
+
+  // restore() (undo/redo, snapshots) never throws for stale inputs either.
+  const { result: restored, warnings: restoreWarnings } = captureWarnings(() => store.restore({
+    id: "study_evolving_9", name: "Evolving", length: 0, color: "#fff", lock: false, forceOverlay: false, inputs: { len: 999, show: "maybe" },
+  }));
+  const restoredStudy = store.get("study_evolving_9");
+  ok(restored && restoredStudy.inputs.show === true && restoredStudy.inputs.len === 50, "restore() clamps and defaults invalid values instead of throwing");
+  ok(restoreWarnings.some((line) => line.includes('input "show" reset to its default')), "restore() warns about the reset input");
+
+  // Edits stay strict, and a successful edit clears the warning.
+  assert.throws(() => store.update(id, { inputs: { mode: "medium" } }), (error) => error.code === "invalid-value", "update() stays strict");
+  ok(store.update(id, { inputs: { mode: "slow" } }) && store.get(id).inputWarning === undefined, "a successful edit clears inputWarning");
+
+  // Definitions without a schema: numbers, strings and booleans only.
+  const plainId = store.add({ name: "Plain v1", inputs: { flag: true } });
+  ok(store.get(plainId).inputs.flag === true && store.get(plainId).values[0] === bars[0].close + 3, "definitions without a schema receive booleans");
+  let plainError = null;
+  try {
+    store.add({ name: "Plain v1", inputs: { offset: { value: 3 } } });
+  } catch (error) {
+    plainError = error;
+  }
+  ok(
+    plainError instanceof StudyInputError && plainError.code === "invalid-value" && plainError.input === "offset"
+      && plainError.message.includes('expected a number, string or boolean, got {"value":3}'),
+    "objects reject for definitions without a schema",
+  );
+  const { result: lenientPlain, warnings: plainWarnings } = captureWarnings(() => store.add({
+    name: "Plain v1", inputs: { offset: [1], extra: () => 1 }, invalidInputs: "default",
+  }));
+  assert.deepEqual(store.get(lenientPlain).inputs, { offset: 2 }, "lenient mode keeps the default and drops values that have none");
+  ok(
+    plainWarnings.length === 1 && plainWarnings[0].includes('input "offset" reset to its default') && plainWarnings[0].includes('input "extra" dropped: expected a number, string or boolean, got a function'),
+    "the schema-less warning says which values were reset or dropped",
+  );
+  checks += 2;
+  store.destroy();
+}
+
+// ── Gesture pans publish only viewportChanged ─────────────────────────────
+{
+  let computes = 0;
+  const GestureRange = defineIndicator({
+    name: "Gesture range probe",
+    pane: "pane",
+    inputs: {},
+    dependsOn: ["visibleRange"],
+    plots: [{ id: "v", title: "V", style: "line" }],
+    compute: (bars, _inputs, ctx) => {
+      computes += 1;
+      return { v: bars.map(() => ctx.visibleRange.to) };
+    },
+  });
+  const context = seamContext(series(40));
+  const store = new StudyStore(context, new StudyRegistry([GestureRange]));
+  const id = store.add({ name: "Gesture range probe" });
+  // What drag, wheel, pinch and axis-scale gestures do today: write the range,
+  // then publish the public event (no rangeChanged).
+  for (let step = 1; step <= 4; step++) {
+    context.visibleRange = { from: step, to: 20 + step };
+    context.viewportChanged.fire({ from: 0, to: 0 });
+  }
+  ok(computes === 1, "gesture pans schedule the recompute instead of running it synchronously");
+  await wait(30);
+  ok(computes === 2 && store.get(id).values[0] === 24, "a burst of gesture pans recomputes once, with the latest range");
+  await wait(120);
+  context.setViewport({ from: 5, to: 30 }, "pan"); // fires rangeChanged and viewportChanged
+  await wait(30);
+  ok(computes === 3 && store.get(id).values[0] === 30, "setViewport's two events coalesce into one recompute");
+  store.destroy();
+  context.viewportChanged.fire({ from: 0, to: 0 });
+  await wait(150);
+  ok(computes === 3, "destroy() unsubscribes from viewportChanged");
+}
+
 // ── Widget integration: createStudy rejects, booleans round-trip, ctx ─────
 {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true });
@@ -668,6 +792,39 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       lower: bars.map((item) => item.close - width),
     }),
   });
+  const positionalSeen = [];
+  const Positional = defineIndicator({
+    name: "Positional probe",
+    pane: "pane",
+    inputs: { length: int(10, { min: 1, max: 100 }), src: source("close") },
+    plots: [{ id: "v", title: "V", style: "line" }],
+    compute: (bars, inputs) => {
+      positionalSeen.push({ ...inputs });
+      return { v: bars.map(() => inputs.length) };
+    },
+  });
+  const looseSeen = [];
+  const Loose = {
+    name: "Loose v1",
+    pane: "pane",
+    defaults: { length: 3, offset: 1 },
+    compute: (bars, inputs) => {
+      looseSeen.push({ ...inputs });
+      return bars.map((item) => item.close + inputs.offset);
+    },
+  };
+  let gestureComputes = 0;
+  const GestureRange = defineIndicator({
+    name: "Gesture range",
+    pane: "pane",
+    inputs: {},
+    dependsOn: ["visibleRange"],
+    plots: [{ id: "v", title: "V", style: "line" }],
+    compute: (bars, _inputs, ctx) => {
+      gestureComputes += 1;
+      return { v: bars.map(() => ctx.visibleRange?.to ?? null) };
+    },
+  });
   const host = window.document.createElement("div");
   window.document.body.appendChild(host);
   const chartWidget = new root.widget({
@@ -676,14 +833,14 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     container: host,
     datafeed: feed,
     disabled_features: ["header_widget", "left_toolbar", "scale_bar"],
-    raze: { custom_studies: [Probe, Cloud] },
+    raze: { custom_studies: [Probe, Cloud, Positional, Loose, GestureRange] },
   });
   await chartWidget.headerReady();
   for (let i = 0; i < 20 && !chartWidget.save().symbol; i++) await wait(5);
   await wait(20);
   const api = chartWidget.activeChart();
-  // The TV argument adapter (StudyArgs, W1B-12) forwards strings and numbers;
-  // "true" is coerced by the schema, so the stored input is a real boolean.
+  // A "true" string is coerced by the schema, so the stored input is a real
+  // boolean (real boolean arguments are covered below).
   const id = await api.createStudy("Context probe", false, false, { flag: "true", len: 20 });
   const last = seen.at(-1);
   ok(last.inputs.flag === true && last.inputs.len === 20 && last.inputs.mode === "fast", "createStudy inputs reach compute with defaults filled in");
@@ -717,6 +874,88 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const cloudFills = fills.filter((entry) => entry.style === "#00897b33");
   ok(cloudId && cloudFills.length > 0, "the fill between two plots is painted with the fill colour");
   ok(cloudFills.every((entry) => entry.points >= 4), "the fill path spans both plot edges");
+
+  // ── createStudy forwards every caller value to validation ──
+  const realBool = await api.createStudy("Context probe", false, false, { flag: true });
+  ok(seen.at(-1).inputs.flag === true, "a real boolean input reaches compute()");
+  ok(chartWidget.save().studies.find((study) => study.id === String(realBool)).inputs.flag === true, "save() stores the real boolean");
+  for (const bad of [{ flag: {} }, { flag: [1] }, { mode: { value: "slow" } }]) {
+    rejection = null;
+    await api.createStudy("Context probe", false, false, bad).catch((error) => { rejection = error; });
+    ok(rejection?.name === "StudyInputError" && rejection.code === "invalid-value", `${JSON.stringify(bad)} rejects with invalid-value instead of being dropped`);
+  }
+
+  // TradingView's legacy positional form maps onto the declared inputs.
+  const positionalId = await api.createStudy("Positional probe", false, false, [20]);
+  ok(positionalId && positionalSeen.at(-1).length === 20 && positionalSeen.at(-1).src === "close", "a positional array sets the first declared input");
+  await api.createStudy("Positional probe", false, false, [30, "hl2"]);
+  ok(positionalSeen.at(-1).length === 30 && positionalSeen.at(-1).src === "hl2", "positional values map in declaration order");
+  rejection = null;
+  await api.createStudy("Positional probe", false, false, [1, "close", 3]).catch((error) => { rejection = error; });
+  ok(rejection?.code === "unknown-input" && rejection.message.includes("received 3 positional inputs but the study declares 2 (length, src)"), "longer positional arrays reject with the declared inputs");
+  rejection = null;
+  await api.createStudy("Positional probe", false, false, ["x"]).catch((error) => { rejection = error; });
+  ok(rejection?.code === "invalid-value" && rejection.input === "length", "positional values are validated like named ones");
+
+  // The length/colour shorthand is used or rejected, never silently dropped.
+  const emaId = await api.createStudy("EMA", false, false, { length: "21" });
+  ok(chartWidget.save().studies.find((study) => study.id === String(emaId)).length === 21, "a numeric-string length is used");
+  for (const [bad, input] of [[{ length: "long" }, "length"], [{ Length: true }, "Length"], [{ color: 0xff0000 }, "color"]]) {
+    rejection = null;
+    await api.createStudy("EMA", false, false, bad).catch((error) => { rejection = error; });
+    ok(rejection?.code === "invalid-value" && rejection.input === input, `${JSON.stringify(bad)} rejects instead of using the default`);
+  }
+
+  // Definitions without a schema get booleans and reject objects.
+  await api.createStudy("Loose v1", false, false, { flag: true, offset: 4 });
+  ok(looseSeen.at(-1).flag === true && looseSeen.at(-1).offset === 4, "definitions without a schema receive boolean inputs");
+  rejection = null;
+  await api.createStudy("Loose v1", false, false, { offset: { by: 2 } }).catch((error) => { rejection = error; });
+  ok(rejection?.code === "invalid-value" && rejection.input === "offset", "objects reject for definitions without a schema");
+
+  // ── A visible-range study recomputes when the user pans (gesture path) ──
+  await api.createStudy("Gesture range");
+  await wait(150);
+  const beforePan = gestureComputes;
+  const canvas = host.querySelector("canvas");
+  canvas.focus();
+  for (let i = 0; i < 3; i++) {
+    canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+  }
+  ok(gestureComputes === beforePan, "keyboard pans schedule the recompute");
+  await Promise.resolve();
+  ok(host.querySelector('[role="status"]')?.textContent === "Panned left.", "the keyboard pan ran through the gesture handlers");
+  await wait(150);
+  ok(gestureComputes === beforePan + 1, `a burst of keyboard pans recomputes the visible-range study once (got ${gestureComputes - beforePan})`);
+
+  // ── load() restores what it can when saved inputs went stale ──
+  const drawingId = await api.createShape({ time: Math.floor(feedBars[20].time / 1000), price: 101 }, { shape: "horizontal_line" });
+  const layout = JSON.parse(JSON.stringify(chartWidget.save()));
+  const savedCount = layout.studies.length;
+  const staleStudy = layout.studies.find((study) => study.id === String(realBool));
+  // The plugin since removed an input and a select option.
+  staleStudy.inputs = { ...staleStudy.inputs, removedInput: 5, mode: "medium" };
+  // A hand-written entry without an id.
+  layout.studies.push({ name: "Context probe", length: 0, color: "", inputs: { flag: "sometimes", len: 30 } });
+  const { warnings: loadWarnings } = await captureWarningsAsync(() => chartWidget.load(layout));
+  const reloadedLayout = chartWidget.save();
+  ok(reloadedLayout.studies.length === savedCount + 1, `load() restores every saved study (${reloadedLayout.studies.length}/${savedCount + 1})`);
+  ok(reloadedLayout.drawings.some((drawing) => drawing.id === String(drawingId)), "drawings survive a layout with stale study inputs");
+  assert.deepEqual(
+    reloadedLayout.studies.find((study) => study.id === String(realBool)).inputs,
+    { flag: true, mode: "fast", len: 10 },
+    "stale inputs fall back to their defaults and valid ones are kept",
+  );
+  const idless = reloadedLayout.studies.at(-1);
+  ok(idless.name === "Context probe" && idless.inputs.flag === false && idless.inputs.len === 30, "saved studies without an id restore leniently too");
+  ok(
+    loadWarnings.some((line) => line.includes(`(${realBool})`) && line.includes('input "removedInput" dropped') && line.includes('input "mode" reset to its default')),
+    "load() warns once per stale study, naming the inputs",
+  );
+  ok(loadWarnings.some((line) => line.includes('input "flag" reset to its default')), "the id-less study's reset input is reported");
+  api.executeActionById("undo");
+  ok(chartWidget.save().studies.length === savedCount + 1, "load() finished: its history was cleared, so undo changes nothing");
+  checks += 1;
 
   chartWidget.remove();
 
