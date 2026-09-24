@@ -46,8 +46,8 @@ export const tradingHandler: InteractionHandler = {
       const tick = (info?.minmov ?? 1) / (info?.pricescale ?? 100);
       const direction = e.key === "ArrowUp" ? 1 : -1;
       const price = line.price + direction * tick * (e.shiftKey ? 10 : 1);
-      h.trading.move(line.id, price, "moved", "keyboard");
-      h.engine.announce(`${line.text} moved to ${h.context.formatPrice(price, info?.pricescale ?? 100)}.`);
+      const committed = h.trading.move(line.id, price, "moved", "keyboard");
+      h.engine.announce(`${line.text} moved to ${h.context.formatPrice(committed, info?.pricescale ?? 100)}.`);
       e.preventDefault();
     }
     return true;

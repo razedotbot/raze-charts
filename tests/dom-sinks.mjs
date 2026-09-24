@@ -124,7 +124,8 @@ assert.equal(scanSource("setMarkup(row, trustedMarkup(content));\n", "src/ui/pop
   "the popupRow allowance covers only the trustedHtml statement");
 assert.equal(scanSource(popupRowSink, "src/ui/ContextMenu.ts").findings.length, 1, "trustedMarkup allowances are file-scoped");
 assert.deepEqual(scanSource('if (typeof icon === "string") setMarkup(b, trustedMarkup(icon));\n', "src/ui/LeftSidebar.ts").findings, []);
-assert.deepEqual(scanSource("setMarkup(icon, trustedMarkup(s.svg));\n", "src/ui/LeftSidebar.ts").findings, []);
+assert.equal(scanSource("setMarkup(icon, trustedMarkup(s.svg));\n", "src/ui/LeftSidebar.ts").findings.length, 1,
+  "built-in sidebar icons are DOM-built (src/ui/icons.ts); an icon markup table is no longer allowed");
 assert.equal(scanSource("setMarkup(b, trustedMarkup(item.title));\n", "src/ui/LeftSidebar.ts").findings.length, 1,
   "a new trustedMarkup() argument in the sidebar still fails");
 for (const file of ["src/chart/render.ts", "src/chart/render/mount.ts"]) {

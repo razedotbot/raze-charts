@@ -2,8 +2,9 @@
 
 import { chartPalette } from "../theme";
 import type { MarkCompileContext } from "./context";
-import { formatNum } from "./format";
+import { pieSliceIds, seriesKeys, type LegendRowDraft, type MarkSeries, type SeriesInfo } from "./legend";
 import { isBuiltinKind, type ChartMark, type PieChartMark, type RadarChartMark } from "./marks";
+import { sceneSample } from "./cartesian";
 import { asNumber, readChannel } from "./shared";
 
 function niceCeil(v: number): number {
@@ -14,30 +15,93 @@ function niceCeil(v: number): number {
   return nice * mag;
 }
 
-export function compilePie(ctx: MarkCompileContext, m: PieChartMark, name: string): void {
+interface PieSlice {
+  row: unknown;
+  index: number;
+  label: string;
+  value: number;
+  color: string;
+  id: string;
+  hidden: boolean;
+}
+
+/** Slices in data order. Colours and ids follow the data index, so hiding a slice never recolours another. */
+function pieSlices(ctx: MarkCompileContext, m: PieChartMark, s: SeriesInfo, isHidden: (key: string) => boolean): PieSlice[] {
+  const palette = chartPalette(ctx.theme);
+  const labels = m.data.map((row, index) => String(readChannel(row as never, m.labelKey as never) ?? index));
+  const ids = pieSliceIds(s.id, labels);
+  return m.data.map((row, index) => {
+    const value = asNumber(readChannel(row as never, m.valueKey as never));
+    const id = ids[index]!;
+    const label = labels[index]!;
+    return {
+      row,
+      index,
+      label,
+      value: Number.isFinite(value) ? Math.max(0, value) : 0,
+      color: palette[index % palette.length]!,
+      id,
+      hidden: s.hidden || isHidden(id) || isHidden(label),
+    };
+  });
+}
+
+function sliceRows(ctx: MarkCompileContext, slices: readonly PieSlice[], s: SeriesInfo): LegendRowDraft[] {
+  const total = slices.reduce((sum, slice) => sum + (slice.hidden ? 0 : slice.value), 0);
+  return slices.map((slice) => {
+    let detail: string;
+    let shortDetail: string;
+    if (slice.hidden) {
+      detail = shortDetail = ctx.formatY(slice.value);
+    } else {
+      const pct = total > 0 ? Math.round((slice.value / total) * 100) : 0;
+      const same = Math.abs(slice.value - pct) < 0.51 && Math.abs(total - 100) < 0.51;
+      shortDetail = `${pct}%`;
+      detail = total <= 0 || same ? shortDetail : `${pct}%  ·  ${ctx.formatY(slice.value)}`;
+    }
+    return {
+      id: slice.id,
+      name: slice.label,
+      color: slice.color,
+      detail,
+      shortDetail,
+      hidden: slice.hidden,
+      markIndex: s.markIndex,
+      symbol: "rect",
+      // A slice is hidden by its id or label, or by hiding the whole pie.
+      keys: [slice.id, slice.label, ...seriesKeys(s)],
+    };
+  });
+}
+
+/** Legend rows of a pie whose mark is hidden: every slice, flagged hidden. */
+export function pieLegendRows(ctx: MarkCompileContext, s: SeriesInfo, isHidden: (key: string) => boolean): LegendRowDraft[] {
+  const mark = s.mark as PieChartMark;
+  return sliceRows(ctx, pieSlices(ctx, mark, s, isHidden), s);
+}
+
+export function compilePie(
+  ctx: MarkCompileContext,
+  m: PieChartMark,
+  s: MarkSeries,
+  isHidden: (key: string) => boolean,
+): void {
   const { plot, theme, nodes, legend } = ctx;
   const cx = plot.x + Math.round(plot.w / 2);
   const cy = plot.y + Math.round(plot.h / 2);
   const R = Math.max(1, Math.min(plot.w, plot.h) / 2 - 6);
   const outer = Math.min(R, m.outerRadius ?? R);
   const inner = Math.min(outer, m.innerRadius ?? outer * 0.66);
-  const vals = m.data.map((row) => {
-    const value = asNumber(readChannel(row as never, m.valueKey as never));
-    return Number.isFinite(value) ? Math.max(0, value) : 0;
-  });
-  const total = vals.reduce((a, b) => a + b, 0);
+  const slices = pieSlices(ctx, m, s, isHidden);
+  for (const row of sliceRows(ctx, slices, s)) legend.push(row);
+  const shown = slices.filter((slice) => !slice.hidden);
+  const total = shown.reduce((sum, slice) => sum + slice.value, 0);
   if (total <= 0) {
-    for (let index = 0; index < m.data.length; index++) {
-      const row = m.data[index];
-      const label = String(readChannel(row as never, m.labelKey as never) ?? index);
-      const palette = chartPalette(theme);
-      legend.push({ name: label, color: palette[index % palette.length]!, detail: "0%" });
-    }
     nodes.push({
       type: "text",
       x: cx,
       y: cy,
-      label: "No data",
+      label: slices.some((slice) => slice.hidden && slice.value > 0) ? "All slices hidden" : "No data",
       fill: theme.muted,
       fontSize: 11,
       anchor: "middle",
@@ -47,55 +111,47 @@ export function compilePie(ctx: MarkCompileContext, m: PieChartMark, name: strin
     return;
   }
   let a0 = -Math.PI / 2;
-  let topI = 0;
-  vals.forEach((val, i) => { if (val > vals[topI]!) topI = i; });
-  vals.forEach((val, i) => {
-    const span = (val / total) * Math.PI * 2;
+  let top = shown[0]!;
+  for (const slice of shown) if (slice.value > top.value) top = slice;
+  for (const slice of shown) {
+    const span = (slice.value / total) * Math.PI * 2;
     const a1 = a0 + span;
     const half = Math.min(0.036, span * 0.4);
-    const row = m.data[i];
-    const label = String(readChannel(row as never, m.labelKey as never) ?? i);
-    const palette = chartPalette(theme);
-    const sliceColor = palette[i % palette.length]!;
-    const pct = Math.round((val / total) * 100);
-    const same = Math.abs(val - pct) < 0.51 && Math.abs(total - 100) < 0.51;
-    legend.push({ name: label, color: sliceColor, detail: same ? `${pct}%` : `${pct}%  ·  ${formatNum(val)}` });
+    const pct = Math.round((slice.value / total) * 100);
     if (span <= 0) {
       a0 = a1;
-      return;
+      continue;
     }
     nodes.push({
       type: "arc",
       x: cx, y: cy, r: outer, innerR: inner,
       startAngle: a0 + half, endAngle: a1 - half,
-      fill: sliceColor,
+      fill: slice.color,
       stroke: "none",
-      datum: row,
-      series: label,
-      label: `${label}  ${pct}%`,
-      tip: `${label}\n${pct}%`,
+      datum: slice.row,
+      series: slice.label,
+      label: `${slice.label}  ${pct}%`,
+      tip: `${slice.label}\n${pct}%`,
       role: "slice",
-      idx: i,
+      idx: slice.index,
     });
     a0 = a1;
-  });
-  const topLabel = String(readChannel(m.data[topI] as never, m.labelKey as never) ?? topI);
-  const topPct = Math.round((vals[topI]! / total) * 100);
+  }
   nodes.push({
     type: "text",
     x: cx, y: cy - 7,
-    label: `${topPct}%`,
+    label: `${Math.round((top.value / total) * 100)}%`,
     fill: theme.text,
     fontSize: 20,
     anchor: "middle",
-    series: name,
+    series: s.name,
     hit: false,
     role: "hole",
   });
   nodes.push({
     type: "text",
     x: cx, y: cy + 12,
-    label: topLabel,
+    label: top.label,
     fill: theme.muted,
     fontSize: 10,
     anchor: "middle",
@@ -124,11 +180,11 @@ export function createRadarState(marks: readonly ChartMark[]): RadarState {
 export function compileRadar(
   ctx: MarkCompileContext,
   m: RadarChartMark,
-  name: string,
-  color: string,
+  s: MarkSeries,
   radar: RadarState,
 ): void {
-  const { plot, theme, nodes, samples } = ctx;
+  const { plot, theme, nodes, samples, formatY, formatYValue } = ctx;
+  const { name, color } = s;
   const cx = plot.x + plot.w / 2;
   const cy = plot.y + plot.h / 2;
   const R = Math.max(1, Math.min(plot.w, plot.h) / 2 - 22);
@@ -184,7 +240,7 @@ export function compileRadar(
         type: "text",
         x: cx + 5,
         y: cy - R * frac,
-        label: formatNum(maxY * frac),
+        label: formatYValue(maxY * frac),
         fill: theme.muted,
         fontSize: 8,
         anchor: "start",
@@ -213,9 +269,9 @@ export function compileRadar(
   });
   m.data.forEach((row, i) => {
     const p = pts[i]!;
-    const axis = String(readChannel(row as never, m.x as never) ?? i);
+    const axis = readChannel(row as never, m.x as never);
     const yv = asNumber(readChannel(row as never, m.y as never));
-    const tip = `${name}\n${axis}   ${formatNum(yv)}`;
+    const tip = `${name}\n${String(axis ?? i)}   ${formatY(yv)}`;
     nodes.push({
       type: "circle",
       x: p.x, y: p.y, r: 2.85,
@@ -226,6 +282,6 @@ export function compileRadar(
       tip,
       role: "vertex",
     });
-    samples.push({ x: p.x, y: p.y, series: name, color, tip, kind: "radar" });
+    samples.push(sceneSample(s, "radar", p, color, tip, { index: i, datum: row, xValue: axis ?? i, yValue: yv }));
   });
 }

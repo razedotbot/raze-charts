@@ -4,7 +4,8 @@
 // with aria-describedby while visible. A target without an accessible name
 // gets the tooltip text as its aria-label. A visible tooltip hides itself when
 // its target leaves the DOM (chrome re-render, widget destroy), which fires
-// neither pointerleave nor blur reliably.
+// neither pointerleave nor blur reliably. destroy() puts back the `title`
+// and removes the `aria-label` the tooltip replaced or added.
 
 import { defineStyles, type StyleChunk } from "../styles";
 import { uid } from "./dom";
@@ -57,9 +58,12 @@ export function attachTooltip(target: HTMLElement, text: string, options: Toolti
   let destroyed = false;
   const id = uid("tooltip");
 
+  const replacedTitle = target.getAttribute("title");
   target.removeAttribute("title");
   const labels = !accessibleName(target) && !target.hasAttribute("aria-labelledby");
   if (labels) target.setAttribute("aria-label", content);
+  /** The aria-label this tooltip last wrote (so destroy() leaves a host's own label alone). */
+  let ownLabel = labels ? content : null;
 
   const describe = (on: boolean): void => {
     const ids = (target.getAttribute("aria-describedby") ?? "").split(/\s+/).filter((value) => value && value !== id);
@@ -164,7 +168,10 @@ export function attachTooltip(target: HTMLElement, text: string, options: Toolti
   return {
     update(next) {
       content = next;
-      if (labels) target.setAttribute("aria-label", next);
+      if (labels) {
+        target.setAttribute("aria-label", next);
+        ownLabel = next;
+      }
       if (bubble) {
         bubble.textContent = next;
         position();
@@ -182,6 +189,10 @@ export function attachTooltip(target: HTMLElement, text: string, options: Toolti
       target.removeEventListener("pointerdown", hide);
       target.removeEventListener("focus", onFocus);
       target.removeEventListener("blur", hide);
+      // Hand the target back as it was: its own title again, and no label
+      // that only this tooltip provided (a host that relabelled it keeps its label).
+      if (ownLabel !== null && target.getAttribute("aria-label") === ownLabel) target.removeAttribute("aria-label");
+      if (replacedTitle !== null && !target.hasAttribute("title")) target.setAttribute("title", replacedTitle);
     },
   };
 }

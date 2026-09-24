@@ -56,7 +56,8 @@ const MIRRORED = [
   "--tv-color-popup-shadow",
 ];
 
-function fullscreenElementOf(root: Document | ShadowRoot): Element | null {
+/** The fullscreen element of a document or shadow root (prefixed WebKit too). */
+export function fullscreenElementOf(root: Document | ShadowRoot): Element | null {
   const withPrefix = root as (Document | ShadowRoot) & { webkitFullscreenElement?: Element | null };
   return root.fullscreenElement ?? withPrefix.webkitFullscreenElement ?? null;
 }

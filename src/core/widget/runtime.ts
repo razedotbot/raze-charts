@@ -9,19 +9,39 @@ import { ChartRenderer } from "../../engine/ChartRenderer";
 import { StudyRegistry } from "../../studies/registry";
 import { StudyStore } from "../../studies/StudyStore";
 import { createPriceFormatter } from "../../util/format";
+import { canonicalResolutions, normalizeResolution, RESOLUTION_FORMS } from "../../util/resolution";
 import { Delegate } from "../../util/delegate";
 import { CommandStack } from "../CommandStack";
-import { buildFeatureSet, createChartContext, type ChartContext } from "../context";
+import { createChartContext, type ChartContext } from "../context";
 import { ShapeStore } from "../ShapeStore";
 import { buildTheme } from "../theme";
 import { TradingStore } from "../TradingStore";
+import { ensureBaseStyles } from "../../ui/popup";
 import { WIDGET_CONTROLLERS } from "./controllers";
 import type { ChildWidget, WidgetController, WidgetControllerMap, WidgetHost } from "./host";
 import { LifecycleController } from "./LifecycleController";
+import { buildWidgetFeatureSet } from "./options";
 
 const DEFAULT_FONT = "'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
-export function createWidgetContext(options: ChartingLibraryWidgetOptions): ChartContext {
+/**
+ * Canonicalise `favorites.intervals` ("D" -> "1D") so the header matches them
+ * against the chart's canonical resolution. Invalid entries are dropped with
+ * one warning (from the primary chart, not each layout child) instead of
+ * throwing later, inside the header build.
+ */
+function withCanonicalFavorites(options: ChartingLibraryWidgetOptions): ChartingLibraryWidgetOptions {
+  const intervals: unknown = options.favorites?.intervals;
+  if (intervals == null) return options;
+  const { valid, invalid } = canonicalResolutions(Array.isArray(intervals) ? intervals : [intervals]);
+  if (invalid.length && !options.raze?.layout_child) {
+    console.warn(`[raze-charts] ignored invalid favorites.intervals ${invalid.join(", ")}. Accepted forms: ${RESOLUTION_FORMS}.`);
+  }
+  return { ...options, favorites: { ...options.favorites, intervals: valid } };
+}
+
+export function createWidgetContext(input: ChartingLibraryWidgetOptions): ChartContext {
+  const options = withCanonicalFavorites(input);
   const raze = options.raze;
   return createChartContext({
     options,
@@ -29,11 +49,12 @@ export function createWidgetContext(options: ChartingLibraryWidgetOptions): Char
     locale: options.locale ?? "en",
     fontFamily: options.custom_font_family || DEFAULT_FONT,
     symbol: options.symbol,
-    resolution: options.interval,
+    // Strict: an invalid interval throws a RangeError before any DOM work.
+    resolution: normalizeResolution(options.interval),
     symbolInfo: null,
     formatPrice: createPriceFormatter(options, null),
     theme: buildTheme(options),
-    features: buildFeatureSet(options),
+    features: buildWidgetFeatureSet(options),
     bars: [],
     marks: [],
     timescaleMarks: [],
@@ -64,7 +85,7 @@ export function createWidgetContext(options: ChartingLibraryWidgetOptions): Char
 export class WidgetRuntime implements WidgetHost {
   readonly container: HTMLElement;
   readonly context: ChartContext;
-  readonly commands = new CommandStack();
+  readonly commands: CommandStack;
   readonly lifecycle: LifecycleController;
   readonly controllers = {} as WidgetControllerMap;
   readonly data: DataManager;
@@ -82,8 +103,18 @@ export class WidgetRuntime implements WidgetHost {
     const container = typeof options.container === "string"
       ? document.getElementById(options.container)
       : options.container;
-    if (!container) throw new Error("[raze-charts] widget container not found");
+    if (!container) {
+      throw new Error(typeof options.container === "string"
+        ? `[raze-charts] widget container "#${options.container}" not found in the document. ` +
+          "A string container is looked up with document.getElementById; inside a shadow root, pass the element itself."
+        : "[raze-charts] widget container not found");
+    }
     this.container = container;
+    this.commands = new CommandStack({ limit: options.raze?.undo_limit });
+    // Chrome styles go to the root that renders the widget: the document, or
+    // the shadow root it is mounted in. The nonce also covers overlays that
+    // later render in other roots of this document.
+    ensureBaseStyles(container, { nonce: options.raze?.style_nonce });
     this.context = createWidgetContext(options);
     this.lifecycle = new LifecycleController(this);
 

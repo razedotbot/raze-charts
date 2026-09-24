@@ -8,7 +8,8 @@ import type { DataManager } from "../../data/DataManager";
 import type { ChartEngine } from "../ChartEngine";
 import type { SubPaneGeom } from "../layout";
 import type { PlotScale } from "../plotScale";
-import type { Crosshair, DraftShape, FinanceView, MarkHit, ShapeHit, TradingHit } from "../paint/view";
+import type { TimescaleMark } from "../../types/charting_library";
+import type { Crosshair, DraftShape, FinanceView, MarkHit, ShapeHit, TimescaleMarkHit, TradingHit } from "../paint/view";
 
 /** Renderer state the interaction layer reads and writes (implemented by ChartRenderer). */
 export interface GestureHost {
@@ -32,7 +33,11 @@ export interface GestureHost {
   hoverShapeId: string | null;
   hoverTradingLineId: string | null;
   hoverTradingHit: TradingHit["hit"] | null;
+  /** Timescale-mark badge under the pointer (painted by chrome.ts, read by the tooltip). */
+  hoverTimescaleMark: TimescaleMark | null;
   markScreen: MarkHit[];
+  /** Badge hit targets filled by the timescale-mark painter each frame. */
+  timescaleMarkScreen: TimescaleMarkHit[];
   shapeScreen: ShapeHit[];
   tradingScreen: TradingHit[];
   draft: DraftShape | null;
@@ -68,7 +73,8 @@ export interface PointerInput {
 /**
  * A gesture claimed by a handler on pointer down. The coordinator routes
  * every later move to it, commits on the final pointer up and cancels it on
- * pointer cancel or when a second contact turns the gesture into a pinch.
+ * pointer cancel, on Escape, or when a second contact turns the gesture into
+ * a pinch. After a cancel, moves are ignored until every pointer is up.
  */
 export interface DragSession {
   /** Stable name for diagnostics and tests (`pan`, `shape`, `priceScale`, ...). */
@@ -76,8 +82,13 @@ export interface DragSession {
   move(x: number, y: number): void;
   /** The gesture ended normally. */
   commit?(): void;
-  /** Roll every partial change back so no lifecycle is left half-applied. */
-  cancel?(): void;
+  /**
+   * Roll every partial change back so no lifecycle is left half-applied.
+   * Return false when the gesture had not changed anything yet (a press that
+   * never left the drag slop): Escape then keeps its normal meaning instead
+   * of being consumed as a cancelled drag.
+   */
+  cancel?(): boolean | void;
 }
 
 /**

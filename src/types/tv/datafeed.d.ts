@@ -6,7 +6,10 @@ import type { ResolutionString, SeriesFormat, Timezone } from "./common";
 
 // ── Datafeed: bars & symbols ────────────────────────────────────────────────
 export interface Bar {
-  /** Milliseconds since Unix epoch (UTC). */
+  /**
+   * Milliseconds since Unix epoch (UTC). Values below 1e11 look like seconds
+   * and are reported (or multiplied by 1000 with `raze.coerce_bars`).
+   */
   time: number;
   open: number;
   high: number;
@@ -66,11 +69,19 @@ export interface DatafeedSymbolType {
 
 export interface DatafeedConfiguration {
   exchanges?: Exchange[];
+  /** Invalid entries are dropped with a warning that lists the accepted forms. */
   supported_resolutions?: ResolutionString[];
   units?: Record<string, unknown>;
   currency_codes?: string[];
+  /** `getMarks` is called (and bar marks render) only when this is true. */
   supports_marks?: boolean;
+  /** `getTimescaleMarks` is called only when this is true. */
   supports_timescale_marks?: boolean;
+  /**
+   * When true, `getServerTime` is called at boot and every five minutes. The
+   * offset moves the end of the first history window and `options.timeframe`
+   * to the server clock.
+   */
   supports_time?: boolean;
   symbols_types?: DatafeedSymbolType[];
   [key: string]: unknown;
@@ -110,7 +121,13 @@ export type OnReadyCallback = (configuration: DatafeedConfiguration) => void;
 export type ResolveCallback = (symbolInfo: LibrarySymbolInfo) => void;
 export type DatafeedErrorCallback = (reason: string) => void;
 export interface HistoryMetadata {
+  /** No bars exist before the requested window (unless `nextTime` is set). */
   noData?: boolean;
+  /**
+   * With an empty result: older data exists and ends at this time, so the
+   * window was a gap. Raze re-requests with `to = nextTime` (bounded). Unix
+   * seconds; millisecond values are converted.
+   */
   nextTime?: number | null;
 }
 export type HistoryCallback = (bars: Bar[], meta?: HistoryMetadata) => void;
@@ -171,6 +188,32 @@ export interface IDatafeedChartApi {
     onDataCallback: GetMarksCallback<TimescaleMark>,
     resolution: ResolutionString,
   ): void;
+  /** Called only when `DatafeedConfiguration.supports_time` is true. Unix seconds. */
   getServerTime?(callback: (unixTime: number) => void): void;
 }
 export type IBasicDataFeed = IExternalDatafeed & IDatafeedChartApi;
+
+// ── Interval change payload ─────────────────────────────────────────────────
+/** A time window in Unix seconds. */
+export interface TimeFrameTimeRange {
+  type: "time-range";
+  from: number;
+  to: number;
+}
+/** A window ending now, such as `"12M"`, `"5D"`, `"YTD"` or `"ALL"`. */
+export interface TimeFramePeriodBack {
+  type: "period-back";
+  value: string;
+}
+export type TimeFrameValue = TimeFrameTimeRange | TimeFramePeriodBack;
+/**
+ * Second argument of `onIntervalChanged` listeners. `timeframe` holds the
+ * range the new interval will open on (the `timeframe` widget option, or the
+ * default view); assign another `TimeFrameValue` (or edit `from`/`to`) inside
+ * the listener to choose the range applied before the new interval's first
+ * paint. A range older than the loaded history is shown at once and fills in
+ * as its pages load.
+ */
+export interface IntervalChangedParameters {
+  timeframe: TimeFrameValue;
+}

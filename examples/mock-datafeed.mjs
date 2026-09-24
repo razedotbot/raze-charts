@@ -9,12 +9,14 @@
  * @param {number} [opts.startPrice=1000]
  * @param {number} [opts.now]  Unix ms used as the last-bar time. Defaults to Date.now().
  * @param {boolean} [opts.live=true]  When false, subscribeBars is a no-op (visual tests).
+ * @param {number} [opts.pricescale=1]  Symbol pricescale (1e8 for sub-cent tokens).
  */
 export function makeMockDatafeed({
   bars = 2000,
   startPrice = 1000,
   now = Date.now(),
   live = true,
+  pricescale = 1,
 } = {}) {
   const RES_MS = { "1S": 1000, "5S": 5000, "1": 60000, "5": 300000, "15": 900000, "60": 3600000, "1D": 86400000 };
   const seriesCache = new Map();
@@ -31,7 +33,7 @@ export function makeMockDatafeed({
       const t = end - i * resMs;
       const drift = (rnd() - 0.48) * price * 0.02;
       const open = price;
-      const close = Math.max(0.0001, price + drift);
+      const close = Math.max(Math.min(0.0001, startPrice / 100), price + drift);
       const high = Math.max(open, close) * (1 + rnd() * 0.01);
       const low = Math.min(open, close) * (1 - rnd() * 0.01);
       const volume = Math.floor(rnd() * 100000);
@@ -52,7 +54,10 @@ export function makeMockDatafeed({
 
   return {
     onReady(cb) {
-      setTimeout(() => cb({ supported_resolutions: ["1S", "5S", "1", "5", "15", "60", "1D"] }), 0);
+      setTimeout(() => cb({
+        supported_resolutions: ["1S", "5S", "1", "5", "15", "60", "1D"],
+        supports_marks: true,
+      }), 0);
     },
     searchSymbols(_a, _b, _c, cb) { cb([]); },
     resolveSymbol(symbol, onResolve) {
@@ -60,7 +65,7 @@ export function makeMockDatafeed({
         name: symbol, ticker: symbol, description: symbol,
         type: "crypto", session: "24x7", timezone: "Etc/UTC",
         exchange: "Mock", listed_exchange: "Mock", format: "price",
-        minmov: 1, pricescale: 1, has_intraday: true, has_seconds: true,
+        minmov: 1, pricescale, has_intraday: true, has_seconds: true,
         seconds_multipliers: ["1", "5"], intraday_multipliers: ["1", "5", "15", "60"],
         has_daily: true, daily_multipliers: ["1"],
         supported_resolutions: ["1S", "5S", "1", "5", "15", "60", "1D"],

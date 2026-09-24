@@ -15,6 +15,8 @@ import type {
   IChartingLibraryWidget,
   IChartWidgetApi,
   ResolutionString,
+  WidgetEventMap,
+  WidgetEventName,
 } from "../types/charting_library";
 import { WidgetRuntime } from "./widget/runtime";
 
@@ -52,11 +54,11 @@ export class Widget implements IChartingLibraryWidget {
     this.#runtime.controllers.chrome.root.style.setProperty(name, value);
   }
 
-  subscribe(event: string, callback: (...args: never[]) => void): void {
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void {
     this.#runtime.controllers.events.subscribe(event, callback);
   }
 
-  unsubscribe(event: string, callback: (...args: never[]) => void): void {
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void {
     this.#runtime.controllers.events.unsubscribe(event, callback);
   }
 

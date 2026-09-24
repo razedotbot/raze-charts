@@ -2,7 +2,7 @@
 // Raze-specific `raze` chrome configuration.
 
 import type { ResolutionString, ThemeName, Timezone } from "./common";
-import type { IBasicDataFeed, LibrarySymbolInfo } from "./datafeed";
+import type { IBasicDataFeed, LibrarySymbolInfo, TimeFrameValue } from "./datafeed";
 import type { IndicatorPreset, StudyDefinition } from "./studies";
 
 // ── Loading screen & overrides ──────────────────────────────────────────────
@@ -68,10 +68,75 @@ export type PriceFormatterFactory = (
   minTick: string,
 ) => CustomSymbolValueFormatter | null;
 
-/** Subset of TradingView `custom_formatters`. Only price formatting is wired. */
+/** TradingView time-axis label kinds passed to `tickMarkFormatter`. */
+export type TickMarkType = "Year" | "Month" | "DayOfMonth" | "Time" | "TimeWithSeconds";
+
+/**
+ * TradingView date/time formatter. `date` carries the displayed local time
+ * in its UTC fields: read it with `getUTCHours()` and friends.
+ */
+export interface ISymbolDateTimeFormatter {
+  /** Return `null` for the default text. */
+  format(date: Date): string | null;
+}
+
+/** Subset of TradingView `custom_formatters`: price, tick-mark and crosshair date/time labels. */
 export interface CustomFormatters {
   priceFormatterFactory?: PriceFormatterFactory;
+  /**
+   * Time-axis tick label. Return `null` for the default label; a throw or any
+   * other non-string return warns once and uses the default label too.
+   */
+  tickMarkFormatter?: (date: Date, tickMarkType: TickMarkType) => string | null;
+  /** Date half of the crosshair time label. */
+  dateFormatter?: ISymbolDateTimeFormatter;
+  /** Clock half of the crosshair time label (intraday resolutions). */
+  timeFormatter?: ISymbolDateTimeFormatter;
   [key: string]: unknown;
+}
+
+/** TradingView `custom_timezones` entry: an extra timezone id that displays as an IANA zone. */
+export interface CustomAliasedTimezone {
+  /** Id accepted by `timezone` and `setTimezone()`. */
+  id: string;
+  /** IANA zone the id displays as. */
+  alias: string;
+  /** Name for timezone menus; defaults to the alias city. */
+  title?: string;
+}
+
+// ── Timeframe ───────────────────────────────────────────────────────────────
+// TimeFramePeriodBack, TimeFrameTimeRange and TimeFrameValue (TradingView's
+// shapes) are declared with the onIntervalChanged payload in ./datafeed.
+/**
+ * The earlier Raze range shape, `{ type: "time-range", value: "from,to" }`.
+ * @deprecated Use `{ from, to }` or `{ type: "time-range", from, to }`.
+ */
+export interface LegacyTimeFrameRange {
+  type: "time-range";
+  value: string;
+}
+/**
+ * Initial visible range: a period string (`"3M"`), a comma-separated range
+ * (`"1700000000,1700086400"`), `{ from, to }` in unix seconds (TradingView's
+ * `VisibleTimeRange`) or a `TimeFrameValue`. An unusable value is ignored
+ * with a console warning; it never fails the initial load.
+ */
+export type WidgetTimeframe = string | { from: number; to: number } | TimeFrameValue | LegacyTimeFrameRange;
+
+// ── Multi-chart layout sync ─────────────────────────────────────────────────
+/** What a `raze.layout` multi-chart grid keeps in step across its panes. */
+export interface LayoutSyncOptions {
+  /**
+   * An interval change on any pane (header or `setResolution`) applies to
+   * every pane, each firing its own `onIntervalChanged`. Default `true`, like
+   * TradingView's layout interval sync.
+   */
+  interval?: boolean;
+  /** Scrolling or zooming one pane moves the others to the same time window. Default `true`. */
+  time?: boolean;
+  /** The crosshair is mirrored to the other panes. Default `true`. */
+  crosshair?: boolean;
 }
 
 // ── Options ─────────────────────────────────────────────────────────────────
@@ -106,9 +171,50 @@ export interface RazeChartsOptions {
   format_price?: (value: number, pricescale: number) => string;
   layout?: "1" | "2x1" | "2x2";
   layout_symbols?: string[];
+  /** Which state the `layout` panes share. Defaults to interval, time and crosshair sync. */
+  layout_sync?: LayoutSyncOptions;
   layout_child?: boolean;
   volume_mode?: VolumeMode;
   magnet?: boolean;
+  /**
+   * CSP nonce for the chrome stylesheet. Only needed where the browser lacks
+   * constructable stylesheets and the page's `style-src` forbids
+   * `'unsafe-inline'`: the fallback `<style>` elements (in the document, the
+   * widget's shadow root and fullscreen overlays) then carry this nonce.
+   */
+  style_nonce?: string;
+  /**
+   * Undo steps kept per widget (default 100). The oldest step is dropped
+   * beyond it; `Infinity` keeps every step. Other values below 1 and
+   * fractions throw.
+   */
+  undo_limit?: number;
+  /**
+   * Repair common datafeed mistakes instead of only reporting them: numeric
+   * strings become numbers, `Bar.time` below 1e11 (seconds) is multiplied by
+   * 1000, and an inverted high/low is swapped. Default false.
+   */
+  coerce_bars?: boolean;
+  /**
+   * Snap drawing anchors placed or dragged on the chart to bar centres
+   * (default true), so they sit on a candle instead of between two. Set false
+   * for free placement. `magnet` additionally snaps the price to the bar's OHLC.
+   */
+  snap_drawings_to_bars?: boolean;
+}
+
+/**
+ * Interactive time-scale limits for pan, zoom, pinch and keyboard navigation.
+ * `min_bar_spacing` matches TradingView's `time_scale`; the edge pins follow
+ * lightweight-charts' fixLeftEdge / fixRightEdge. Invalid values warn once.
+ */
+export interface TimeScaleOptions {
+  /** Narrowest bar spacing (CSS px) zooming out may reach. Default 1.5, at most 64. */
+  min_bar_spacing?: number;
+  /** Keep the first bar at the left edge: no empty space before the data. */
+  fix_left_edge?: boolean;
+  /** Keep the last bar at the right edge: no empty space after the data. */
+  fix_right_edge?: boolean;
 }
 
 export interface ChartingLibraryWidgetOptions {
@@ -121,16 +227,28 @@ export interface ChartingLibraryWidgetOptions {
   disabled_features?: string[];
   enabled_features?: string[];
   theme?: ThemeName;
+  /**
+   * `true` makes the chart fill its container and follow its size, ignoring
+   * `width`/`height`. `false` uses `width` x `height` pixels (TradingView's
+   * 800 x 500 when omitted). When unset, a given `width`/`height` is used and
+   * any missing dimension fills the container.
+   */
   autosize?: boolean;
+  /** `true` sizes the chart to the browser viewport (`position: fixed`), overriding the other size options. */
   fullscreen?: boolean;
   timezone?: Timezone | "exchange";
+  /** Extra timezone ids (aliases of IANA zones) accepted by `timezone` and `setTimezone()`. */
+  custom_timezones?: CustomAliasedTimezone[];
   custom_font_family?: string;
   loading_screen?: LoadingScreenOptions;
   overrides?: ChartOverrides;
   studies_overrides?: ChartOverrides;
-  timeframe?: string | { value: string; type: "period-back" | "time-range" };
+  timeframe?: WidgetTimeframe;
+  /** Log developer diagnostics, such as deprecated featureset names, to the console. */
   debug?: boolean;
+  /** Chart width in CSS pixels when `autosize` is not `true`. */
   width?: number;
+  /** Chart height in CSS pixels when `autosize` is not `true`. */
   height?: number;
   toolbar_bg?: string;
   /** TV-compatible favorites; `intervals` lead the inline header interval row. */
@@ -139,9 +257,12 @@ export interface ChartingLibraryWidgetOptions {
    * TradingView drop-in custom formatters. Raze honours
    * `priceFormatterFactory` for every on-canvas price label (axis, last price,
    * OHLC legend, crosshair, shape tags). Return `null` from the factory to use
-   * `raze.format_price` or the built-in formatter.
+   * `raze.format_price` or the built-in formatter. `tickMarkFormatter`,
+   * `dateFormatter` and `timeFormatter` shape the time-axis and crosshair labels.
    */
   custom_formatters?: CustomFormatters;
+  /** Pan and zoom limits. Without it, panning keeps at least 3 bars in view. */
+  time_scale?: TimeScaleOptions;
   /** Raze-charts chrome configuration (ignored by the real TradingView library). */
   raze?: RazeChartsOptions;
   [key: string]: unknown;

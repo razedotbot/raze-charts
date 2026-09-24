@@ -7,7 +7,11 @@ import type { IndicatorPreset, RazeChartsOptions } from "../types/charting_libra
 import type { ChartContext } from "../core/context";
 import type { StudyStore } from "../studies/StudyStore";
 import type { StudyRegistry } from "../studies/registry";
+import { formatStudyLabel } from "../studies/label";
+import { t } from "../i18n";
+import { fillMenuRow, ICON_TRASH, MENU_ROW_STYLES, menuSeparator } from "./icons";
 import { openPopup, popupRow, type PopupHandle } from "./popup";
+import { adoptStyles } from "./styles";
 
 /** A preset with every field resolved against its study definition. */
 export interface ResolvedIndicatorPreset {
@@ -22,7 +26,7 @@ export const DEFAULT_INDICATOR_PRESETS: IndicatorPreset[] = [
   { label: "EMA 21", name: "EMA", length: 21, color: "#26a69a" },
   { label: "SMA 20", name: "SMA", length: 20, color: "#2962ff" },
   { label: "SMA 50", name: "SMA", length: 50, color: "#e040fb" },
-    { label: "RSI 14", name: "RSI", length: 14, color: "#7E57C2" },
+  { label: "RSI 14", name: "RSI", length: 14, color: "#7E57C2" },
   { label: "VWAP", name: "VWAP", color: "#e040fb" },
   { label: "Bollinger 20", name: "Bollinger Bands", length: 20, color: "#2962ff" },
   { label: "MACD", name: "MACD", length: 26, color: "#2962ff" },
@@ -47,7 +51,7 @@ export function resolveIndicatorPresets(
     }
     const length = Math.max(1, Math.floor(p.length ?? def.defaults?.length ?? 14));
     out.push({
-      label: p.label ?? `${def.name} ${length}`,
+      label: p.label ?? formatStudyLabel(def, { length }),
       name: def.name,
       length,
       color: p.color ?? def.defaults?.color ?? "#f5a623",
@@ -87,11 +91,10 @@ export class IndicatorsMenu {
       fontFamily: this.context.fontFamily,
       className: "raze-chart-indicators-menu",
       minWidth: 168,
-      padding: "6px 0",
       anchor,
       place: "right-start",
       role: "menu",
-      label: "Indicators",
+      label: t("sidebar.indicators", "Indicators"),
       onClose: () => {
         if (this.popup === popup) {
           this.popup = null;
@@ -100,6 +103,7 @@ export class IndicatorsMenu {
       },
     });
     this.popup = popup;
+    adoptStyles(popup.el, MENU_ROW_STYLES);
     this.renderRows(popup.el);
     popup.reposition();
   }
@@ -122,20 +126,22 @@ export class IndicatorsMenu {
         }
         this.renderRows(panel, index);
       }, { role: "menuitemcheckbox", checked: on, label: p.label });
-      row.style.fontWeight = on ? "600" : "400";
       const swatch = document.createElement("span");
-      swatch.setAttribute("aria-hidden", "true");
-      swatch.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};flex:0 0 auto;`;
-      row.append(swatch, document.createTextNode(on ? `✓ ${p.label}` : p.label));
-      panel.appendChild(row);
+      swatch.className = "raze-menu-swatch";
+      swatch.style.background = p.color;
+      panel.appendChild(fillMenuRow(row, { checked: on, icon: swatch, label: p.label }));
     }
 
-    const clear = popupRow("Clear all", () => {
+    // A separated, secondary action in the muted text token, which keeps AA
+    // contrast on light and dark popups.
+    const clear = popupRow("", () => {
       this.studies.clear();
       this.close();
-    }, { role: "menuitem", label: "Clear all indicators" });
-    clear.style.cssText += "border-top:1px solid var(--tv-color-toolbar-divider-background, #363a45);border-radius:0;color:#8b887e;margin-top:4px;padding:8px 12px;";
-    panel.appendChild(clear);
+    }, { role: "menuitem", label: t("indicators.clearAllLabel", "Clear all indicators") });
+    panel.append(
+      menuSeparator(),
+      fillMenuRow(clear, { icon: ICON_TRASH, label: t("indicators.clearAll", "Clear all"), muted: true }),
+    );
     if (focusIndex !== undefined) this.popup?.focusItem(focusIndex);
   }
 

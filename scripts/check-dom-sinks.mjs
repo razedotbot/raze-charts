@@ -103,13 +103,7 @@ export const ALLOW = [
     file: "src/ui/LeftSidebar.ts",
     sink: "trustedMarkup",
     match: /^if \(typeof icon === "string"\) setMarkup\(b, trustedMarkup\(icon\)\);$/,
-    reason: "Built-in icons from the library-owned ICONS table, and SidebarCustomItem.icon strings: host-authored markup (documented). Hosts enforcing Trusted Types can pass an Element instead.",
-  },
-  {
-    file: "src/ui/LeftSidebar.ts",
-    sink: "trustedMarkup",
-    match: /^setMarkup\((?:this\.styleBtn|icon), trustedMarkup\((?:def|s)\.svg\)\);$/,
-    reason: "Chart-type icons from the library-owned ALL_CHART_STYLES table.",
+    reason: "SidebarCustomItem.icon strings: host-authored markup (documented). Hosts enforcing Trusted Types can pass an Element instead. Built-in icons are built with DOM APIs (src/ui/icons.ts).",
   },
   {
     file: /^src\/chart\/render(?:\.ts$|\/)/,

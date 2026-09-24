@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts - time axis and crosshair fixture</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; }
+    #wrap { position: absolute; inset: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="wrap"></div>
+  <script type="module">
+    // Browser fixture for tests/time-axis.spec.ts.
+    //   ?case=layout  a 2x2 layout of four symbols at very different prices
+    //   ?case=volume  one chart with volume in its own pane
+    //   ?case=single&tz=<zone>  one chart in a display zone (time-axis goldens)
+    import { widget } from "../../dist/charting_library.esm.js";
+    import { makeMockDatafeed, VISUAL_NOW } from "../../examples/mock-datafeed.mjs";
+
+    const params = new URLSearchParams(location.search);
+    const testCase = params.get("case") || "layout";
+    const SYMBOLS = { BTC: [60000, 100], ETH: [3000, 100], MEME: [0.5, 10000], PENNY: [0.01, 100000] };
+    const feeds = Object.fromEntries(Object.entries(SYMBOLS).map(([symbol, [startPrice]]) => [
+      symbol,
+      makeMockDatafeed({ bars: 400, startPrice, now: VISUAL_NOW, live: false }),
+    ]));
+    const feedFor = (name) => feeds[name] ?? feeds.BTC;
+    const datafeed = {
+      ...feeds.BTC,
+      resolveSymbol(symbol, onResolve, onError) {
+        feedFor(symbol).resolveSymbol(symbol, (info) => onResolve({ ...info, pricescale: SYMBOLS[symbol]?.[1] ?? 100 }), onError);
+      },
+      getBars(info, resolution, periodParams, onResult, onError) {
+        feedFor(info.name).getBars(info, resolution, periodParams, onResult, onError);
+      },
+      getMarks: undefined,
+    };
+
+    const w = new widget({
+      symbol: "BTC",
+      datafeed,
+      interval: "1",
+      container: document.getElementById("wrap"),
+      library_path: "/",
+      locale: "en",
+      theme: "dark",
+      autosize: true,
+      timezone: params.get("tz") || "America/New_York",
+      custom_font_family: "Arial, Helvetica, sans-serif",
+      // The corner timezone label belongs to the axis chrome; keep it out of the time-axis goldens.
+      disabled_features: ["header_symbol_search", "popup_hints", "countdown", "left_toolbar", ...(testCase === "single" ? ["timezone_display"] : [])],
+      raze: testCase === "layout"
+        ? { layout: "2x2", layout_symbols: ["BTC", "ETH", "MEME", "PENNY"] }
+        : testCase === "volume" ? { volume_mode: "pane" } : {},
+    });
+    w.onChartReady(() => {
+      window.__razeChart = w;
+      window.__razeReady = true;
+    });
+  </script>
+</body>
+</html>

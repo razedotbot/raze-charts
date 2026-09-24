@@ -4,10 +4,13 @@ import { extent, scaleBand, type AnyScale, type BandScale } from "../scales";
 import { heatFill, heatLabelColor } from "../theme";
 import type { MarkCompileContext } from "./context";
 import { ChartCompileError } from "./errors";
-import { formatSigned } from "./format";
+import { measureText } from "./axes";
+import { HEATMAP_VALUE_FORMATS, heatmapValueFormatter, type NumberFormatter } from "./format";
 import type { HeatmapChartMark } from "./marks";
 import { asNumber, isBandCategory, readChannel, snapRect, unique } from "./shared";
 import type { ChartSpec, Margin, PlotRect } from "./types";
+
+const CELL_FONT_SIZE = 9;
 
 export interface HeatmapLayout {
   /** Centered square-cell grid; replaces the margin-derived plot. */
@@ -37,11 +40,16 @@ export function heatmapLayout(spec: ChartSpec, hm: HeatmapChartMark, margin: Mar
   }
   const nX = Math.max(1, xs.length);
   const nY = Math.max(1, ys.length);
-  const gap = 2;
-  const cell = Math.max(1, Math.min(
-    Math.floor((plot.w - (nX - 1) * gap) / nX),
-    Math.floor((plot.h - (nY - 1) * gap) / nY),
-  ));
+  const fit = (gap: number): number => Math.min((plot.w - (nX - 1) * gap) / nX, (plot.h - (nY - 1) * gap) / nY);
+  let gap = 2;
+  let cell = Math.floor(fit(gap));
+  if (cell < 1) {
+    // More cells than whole pixels with gaps (a year of days by hours): drop
+    // the gaps and let cells go fractional, so the grid still fits its plot
+    // instead of spilling past the chart.
+    gap = 0;
+    cell = fit(0);
+  }
   const gridW = nX * (cell + gap);
   const gridH = nY * (cell + gap);
   const grid: PlotRect = {
@@ -64,7 +72,47 @@ export function heatmapLayout(spec: ChartSpec, hm: HeatmapChartMark, margin: Mar
   return { plot: grid, xScale, yScale };
 }
 
-export function compileHeatmap(ctx: MarkCompileContext, m: HeatmapChartMark): void {
+/** Colour-scale domain and value formatter of one heatmap mark. */
+export interface HeatmapValues {
+  /** Colour domain: the value extent, symmetric around zero when values change sign. */
+  min: number;
+  max: number;
+  format: NumberFormatter;
+}
+
+/**
+ * Colour domain and value formatter for a heatmap mark. compileChart computes
+ * it once per compile and hands it to the layout and the mark, so data
+ * mutated in place is re-read on every compile (update, resize).
+ */
+export function heatmapValues(m: HeatmapChartMark): HeatmapValues {
+  const format = m.valueFormat;
+  if (format !== undefined && typeof format !== "function" && !HEATMAP_VALUE_FORMATS.includes(format)) {
+    throw new ChartCompileError(
+      "E_MARK_OPTION",
+      `heatmap valueFormat must be "${HEATMAP_VALUE_FORMATS.join('", "')}", or a function; received ${String(format)}.`,
+    );
+  }
+  const zs: number[] = [];
+  for (const row of m.data) {
+    const z = asNumber(readChannel(row as never, m.valueKey as never));
+    if (Number.isFinite(z)) zs.push(z);
+  }
+  let [min, max] = extent(zs);
+  if (min < 0 && max > 0) {
+    const mag = Math.max(Math.abs(min), max);
+    min = -mag;
+    max = mag;
+  }
+  return { min, max, format: heatmapValueFormatter(format, zs) };
+}
+
+/** Colour-bar labels (max, zero, min) for margin measurement. */
+export function heatmapColorLabels({ min, max, format }: HeatmapValues): string[] {
+  return [format(max), format(min), ...(min < 0 && max > 0 ? [format(0)] : [])];
+}
+
+export function compileHeatmap(ctx: MarkCompileContext, m: HeatmapChartMark, { min: zLo, max: zHi, format }: HeatmapValues): void {
   const { theme, nodes } = ctx;
   const xb = ctx.xScale as BandScale<string | number>;
   const yb = ctx.yScale as BandScale<string | number>;
@@ -74,13 +122,6 @@ export function compileHeatmap(ctx: MarkCompileContext, m: HeatmapChartMark): vo
     y: yb.start(readChannel(row as never, m.y as never) as string | number),
     z: asNumber(readChannel(row as never, m.valueKey as never)),
   })).filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.y) && Number.isFinite(entry.z));
-  const zs = validRows.map((entry) => entry.z);
-  let [zLo, zHi] = extent(zs);
-  if (zLo < 0 && zHi > 0) {
-    const mag = Math.max(Math.abs(zLo), zHi);
-    zLo = -mag;
-    zHi = mag;
-  }
   ctx.colorBar = { min: zLo, max: zHi };
   for (const entry of validRows) {
     const { row, x, y, z: zv } = entry;
@@ -88,7 +129,8 @@ export function compileHeatmap(ctx: MarkCompileContext, m: HeatmapChartMark): vo
     const yv = readChannel(row as never, m.y as never);
     const snapped = snapRect(x, y, xb.bandwidth(), yb.bandwidth());
     const fill = heatFill(zv, zLo, zHi, theme);
-    const tip = `${String(yv)}  ·  ${String(xv)}\n${formatSigned(zv)}%`;
+    const label = format(zv);
+    const tip = `${String(yv)}  ·  ${String(xv)}\n${label}`;
     nodes.push({
       type: "rect",
       ...snapped,
@@ -97,18 +139,19 @@ export function compileHeatmap(ctx: MarkCompileContext, m: HeatmapChartMark): vo
       corner: "none",
       datum: row,
       series: String(yv),
-      label: formatSigned(zv),
+      label,
       tip,
       role: "heat",
     });
-    if (snapped.w >= 34 && snapped.h >= 18) {
+    // Cell labels only where the whole value fits with a little padding.
+    if (snapped.h >= 18 && measureText(label, CELL_FONT_SIZE, theme.font) <= snapped.w - 6) {
       nodes.push({
         type: "text",
         x: snapped.x + snapped.w / 2,
         y: snapped.y + snapped.h / 2,
-        label: formatSigned(zv),
+        label,
         fill: heatLabelColor(fill, theme),
-        fontSize: 9,
+        fontSize: CELL_FONT_SIZE,
         anchor: "middle",
         hit: false,
       });

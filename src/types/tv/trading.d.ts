@@ -31,6 +31,15 @@ export interface TradingLineOptions {
   side?: TradingSide;
   /** Defaults to the latest close, allowing TradingView-style create-then-configure usage. */
   price?: number;
+  /**
+   * Price grid for drag and keyboard moves, for example `0.25` for a futures
+   * contract or `1e-10` for a sub-cent token. Defaults to the symbol tick
+   * (`minmov / pricescale`). Must be a positive decimal (at most 22 decimal
+   * places) or a simple fraction such as `1 / 3`; a value carrying
+   * floating-point noise (`0.1 + 0.2`) throws a RangeError naming the intended
+   * step. Prices set through the API are never rounded.
+   */
+  priceStep?: number;
   quantity?: string | number;
   text?: string;
   status?: TradingLineStatus;
@@ -76,11 +85,25 @@ export interface ITradingLineAdapter {
   setTooltip(text: string): this;
   setModifyTooltip(text: string): this;
   setCancelTooltip(text: string): this;
-  onMoving(callback: (line: ITradingLineAdapter) => void): this;
-  onMove(callback: (line: ITradingLineAdapter) => void): this;
-  onModify(callback: (line: ITradingLineAdapter) => void): this;
-  onCancel(callback: (line: ITradingLineAdapter) => void): this;
+  /** Runs on every drag step; `this` and the argument are the adapter. */
+  onMoving(callback: TradingLineCallback): this;
+  /** TradingView form: the callback runs with `this === data` and receives `data`. */
+  onMoving<TData>(data: TData, callback: TradingLineDataCallback<TData>): this;
+  /** Runs when a move is committed (drag release, keyboard nudge, setPrice). */
+  onMove(callback: TradingLineCallback): this;
+  onMove<TData>(data: TData, callback: TradingLineDataCallback<TData>): this;
+  /** Runs when the line is clicked (read-only lines) or double-clicked. */
+  onModify(callback: TradingLineCallback): this;
+  onModify<TData>(data: TData, callback: TradingLineDataCallback<TData>): this;
+  /** Runs before the line is cancelled from its × control, Delete, or cancel(). */
+  onCancel(callback: TradingLineCallback): this;
+  onCancel<TData>(data: TData, callback: TradingLineDataCallback<TData>): this;
 }
+
+/** One-argument trading callback: `this` and the argument are the line adapter. */
+export type TradingLineCallback = (this: ITradingLineAdapter, line: ITradingLineAdapter) => void;
+/** Two-argument (TradingView) trading callback: `this` and the argument are the registered data. */
+export type TradingLineDataCallback<TData> = (this: TData, data: TData) => void;
 
 export interface BracketOrderOptions {
   id?: string;
@@ -92,6 +115,8 @@ export interface BracketOrderOptions {
   currency?: string;
   editable?: boolean;
   includeInAutoScale?: boolean;
+  /** Price grid for dragging or nudging every leg; defaults to the symbol tick. Same rules as `TradingLineOptions.priceStep`. */
+  priceStep?: number;
   entryText?: string;
   stopLossText?: string;
   takeProfitText?: string;

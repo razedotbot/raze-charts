@@ -1,9 +1,9 @@
 // Axis drags: vertical drag on the price axis stretches the price range around
-// its centre; horizontal drag on the time axis stretches the bar span.
+// its centre; horizontal drag on the time axis stretches the bar span with the
+// same zoom limits as the wheel (./limits.ts).
 
-import { MAX_BAR_SPACING, MIN_BAR_SPACING } from "../layout";
 import { fromDisplay } from "../plotScale";
-import { emitViewport } from "./coords";
+import { applyRange, zoomSpan } from "./limits";
 import type { InteractionHandler } from "./types";
 
 export const priceAxisHandler: InteractionHandler = {
@@ -15,11 +15,9 @@ export const priceAxisHandler: InteractionHandler = {
     const startY = y;
     const startMin = h.priceMin;
     const startMax = h.priceMax;
-    const previousAutoScale = ctx.autoScalePrice;
-    const previousPriceRange = ctx.priceRange ? { ...ctx.priceRange } : null;
-    ctx.autoScalePrice = false;
+    const previous = ctx.scaleState();
     const s = h.plotScale();
-    ctx.priceRange = { min: fromDisplay(s, startMin), max: fromDisplay(s, startMax) };
+    ctx.setScaleMode({ priceRange: { min: fromDisplay(s, startMin), max: fromDisplay(s, startMax) } }, "axis-drag");
     return {
       kind: "priceScale",
       move(_x, y) {
@@ -27,12 +25,13 @@ export const priceAxisHandler: InteractionHandler = {
         const center = (startMin + startMax) / 2;
         const half = ((startMax - startMin) / 2) * factor;
         const scale = h.plotScale();
-        ctx.autoScalePrice = false;
-        ctx.priceRange = { min: fromDisplay(scale, center - half), max: fromDisplay(scale, center + half) };
+        ctx.setScaleMode({ priceRange: { min: fromDisplay(scale, center - half), max: fromDisplay(scale, center + half) } }, "axis-drag");
       },
       cancel() {
-        ctx.autoScalePrice = previousAutoScale;
-        ctx.priceRange = previousPriceRange ? { ...previousPriceRange } : null;
+        ctx.setScaleMode(
+          previous.autoScale ? { autoScale: true } : { autoScale: false, priceRange: previous.priceRange && { ...previous.priceRange } },
+          "cancel",
+        );
       },
     };
   },
@@ -43,24 +42,16 @@ export const timeAxisHandler: InteractionHandler = {
   priority: 500,
   pointerDown(h, { x, zone }) {
     if (!zone.inTimeAxis) return;
-    const ctx = h.context;
     const startX = x;
-    const { from: startFrom, to: startTo } = ctx.visibleRange;
+    const start = { ...h.context.visibleRange };
     return {
       kind: "timeScale",
       move(x) {
         const factor = Math.min(20, Math.max(0.05, 1 - (x - startX) / (h.plotW * 0.5)));
-        const minSpan = h.plotW / MAX_BAR_SPACING;
-        const maxSpan = h.plotW / MIN_BAR_SPACING;
-        const newSpan = Math.min(maxSpan, Math.max(minSpan, (startTo - startFrom) * factor));
-        ctx.visibleRange = { from: startTo - newSpan, to: startTo };
-        void h.data.maybeLoadMoreHistory();
-        emitViewport(h);
+        const span = zoomSpan(h, start.to - start.from, factor);
+        applyRange(h, { from: start.to - span, to: start.to }, "zoom", start);
       },
-      cancel() {
-        ctx.visibleRange = { from: startFrom, to: startTo };
-        emitViewport(h);
-      },
+      cancel: () => applyRange(h, start, "cancel"),
     };
   },
 };

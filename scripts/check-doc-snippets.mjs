@@ -76,6 +76,18 @@ type MountChartOptions = import("@razedotbot/charts/chart").MountChartOptions;
 declare const data: { date: string; value: number }[];
 declare const points: { time: number; value: number }[];
 declare const revenue: { month: string; value: number }[];
+declare const returns: { month: string; asset: string; change: number }[];
+`,
+  indicator: `// The Envelope indicator from the first docs/indicators.md example, and an
+// active chart to create it on.
+declare const Envelope: {
+  readonly inputs: {
+    readonly length: import("@razedotbot/charts").StudyIntInput;
+    readonly percent: import("@razedotbot/charts").StudyFloatInput;
+    readonly src: import("@razedotbot/charts").StudySourceInput;
+  };
+};
+declare const chart: import("@razedotbot/charts").IChartWidgetApi;
 `,
 });
 

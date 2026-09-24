@@ -69,9 +69,11 @@ export type ChartStyle = ChartStyleName;
 // ── Seam vocabularies ───────────────────────────────────────────────────────
 
 /**
- * Why the visible range changed. `rebase` re-anchors indices after bars were
- * prepended or replaced while the visible *time* window stays the same, so it
- * does not fire the public time-space `viewportChanged` by default.
+ * Why the visible range changed. Two reasons stay local to the pane and do not
+ * fire the public time-space `viewportChanged` by default (see
+ * LOCAL_VIEWPORT_REASONS): `rebase` re-anchors indices after bars were
+ * prepended or replaced while the visible *time* window stays the same, and
+ * `resize` keeps a pane's bar spacing when its width changes.
  */
 export const VIEWPORT_CHANGE_REASONS = Object.freeze([
   "initial",
@@ -93,6 +95,16 @@ export const VIEWPORT_CHANGE_REASONS = Object.freeze([
 ] as const);
 export type ViewportChangeReason = (typeof VIEWPORT_CHANGE_REASONS)[number];
 
+/**
+ * Reasons whose range changes stay local to one pane: `setViewport` does not
+ * fire `viewportChanged` for them unless `notify: true` is passed, while
+ * `rangeChanged` still fires with the reason. A `resize` adjustment must not
+ * reach layout sync: every pane rescales by its own width ratio, and relaying
+ * one pane's rescaled range to a sibling that is about to rescale too would
+ * apply the ratio twice.
+ */
+export const LOCAL_VIEWPORT_REASONS: ReadonlySet<ViewportChangeReason> = new Set<ViewportChangeReason>(["rebase", "resize"]);
+
 /** Why price-scale state (mode, autoscale, manual range) changed. */
 export const SCALE_CHANGE_REASONS = Object.freeze([
   "initial",
@@ -108,6 +120,7 @@ export const SCALE_CHANGE_REASONS = Object.freeze([
   "api",
   "cancel",
   "context-menu",
+  "reset",
 ] as const);
 export type ScaleChangeReason = (typeof SCALE_CHANGE_REASONS)[number];
 
@@ -176,13 +189,21 @@ export interface ChartTypeChange {
 export interface SetViewportOptions {
   /**
    * Fire the public time-space `viewportChanged` delegate (visible-range API
-   * events, layout sync). Defaults to true for every reason except `rebase`.
+   * events, layout sync). Defaults to true for every reason except the local
+   * ones, `rebase` and `resize` (LOCAL_VIEWPORT_REASONS).
    */
   notify?: boolean;
 }
 
-/** Bars shown by the initial view and by "reset view" until a width-aware provider is installed. */
+/** Bars shown by the initial view and by "reset view" while the plot width is unknown. */
 export const DEFAULT_VISIBLE_BARS = 120;
+
+/**
+ * Target bar spacing (CSS px per bar) of the initial and reset view, as in
+ * TradingView and lightweight-charts. The render loop's defaultVisibleBars()
+ * provider turns it into a bar count for the current plot width.
+ */
+export const DEFAULT_BAR_SPACING = 6;
 
 const CHART_STYLE_SET: Record<ChartStyle, true> = {
   candles: true,
@@ -239,6 +260,17 @@ export interface ChartContextState {
   volumeMode: VolumeMode;
   magnet: boolean;
   stayInDrawingMode: boolean;
+  /**
+   * View toggle of the `hideAllDrawingTools` action: when true no drawing is
+   * painted or hit-tested. Each drawing's own `hidden` flag is untouched.
+   */
+  drawingsHidden?: boolean;
+  /**
+   * True while DOM chrome (the `scale_bar` price-scale toggles) covers the
+   * price-axis x time-axis corner cell; the timezone caption then paints in
+   * the time-axis row beside it instead.
+   */
+  axisCornerTaken?: boolean;
   /**
    * Compare overlays. `resolution` is a seam for W1B-19: the resolution the
    * bars were loaded at, so a stale series can be detected and reloaded.
@@ -321,14 +353,15 @@ export interface ChartContextSeams {
   readonly setServerTimeOffset: (offsetMs: number) => void;
 
   /**
-   * Request a repaint of the overlay layer only (crosshair, hover, countdown,
-   * draft). Installed by ChartEngine; until the engine splits layers (W1B-07)
-   * it repaints the whole frame. Defaults to requestPaint().
+   * Request a repaint of the overlay layer only (crosshair, legend values,
+   * hover, countdown, draft). Installed by ChartEngine, which keeps the main
+   * scene bitmap untouched. Defaults to requestPaint() without an engine.
    */
   requestOverlayPaint(): void;
   /**
-   * Bars shown by the initial and reset view. A width-aware provider is
-   * installed by the render loop (W1B-07); defaults to DEFAULT_VISIBLE_BARS.
+   * Bars shown by the initial and reset view. The renderer installs a
+   * width-aware provider that keeps DEFAULT_BAR_SPACING px per bar; without
+   * one (or while the plot width is unknown) it is DEFAULT_VISIBLE_BARS.
    */
   defaultVisibleBars(): number;
   /**
@@ -457,7 +490,7 @@ export function createChartContext(init: ChartContextInit, options: CreateChartC
       previous: previous ? { from: previous.from, to: previous.to } : { ...next },
       reason,
     });
-    if (opts.notify ?? reason !== "rebase") {
+    if (opts.notify ?? !LOCAL_VIEWPORT_REASONS.has(reason)) {
       ctx.viewportChanged.fire(visibleUnixRange(ctx.bars, next));
     }
     ctx.requestPaint();
@@ -572,6 +605,14 @@ function assertScalePatch(patch: ScaleModePatch): void {
   }
   if (patch.priceRange) {
     assertInterval("setScaleMode", patch.priceRange.min, patch.priceRange.max);
+    if (patch.priceRange.min === patch.priceRange.max) {
+      // A zero-height window maps every price to one pixel row and divides by
+      // zero in the price-to-pixel mapping.
+      throw new RangeError(
+        `[raze-charts] setScaleMode() priceRange is empty (min === max === ${patch.priceRange.min}); `
+        + "pass a window with max > min, or { autoScale: true } to fit the visible bars",
+      );
+    }
     if (patch.autoScale) {
       throw new TypeError("[raze-charts] setScaleMode() cannot pin a priceRange with autoScale: true; autoscale replaces the manual range");
     }

@@ -23,9 +23,12 @@
     if (testCase === "compact") wrap.classList.add("compact");
 
     const light = testCase === "light";
+    // lowprice: a sub-cent token (pricescale 1e8) whose MACD lives around 1e-6.
+    const lowPrice = testCase === "lowprice";
     const datafeed = makeMockDatafeed({
       bars: 400,
-      startPrice: 6400,
+      startPrice: lowPrice ? 0.00012 : 6400,
+      pricescale: lowPrice ? 100000000 : 1,
       now: VISUAL_NOW,
       live: false,
     });
@@ -58,7 +61,7 @@
       timezone: "Etc/UTC",
       custom_font_family: "Arial, Helvetica, sans-serif",
       loading_screen: { backgroundColor: light ? "#ffffff" : "#181615", foregroundColor: "#d8aa5b" },
-      enabled_features: ["seconds_resolution", "mark_on_bars"],
+      enabled_features: ["seconds_resolution"],
       disabled_features: ["header_symbol_search", "popup_hints", "countdown"],
       overrides: light ? {} : darkOverrides,
       favorites: { intervals: ["1S", "1", "5", "15"] },
@@ -73,6 +76,17 @@
       if (testCase === "rsi") {
         await chart.createStudy("EMA", false, false, { length: 21 });
         await chart.createStudy("RSI", false, false, { length: 14 });
+      }
+      if (testCase === "bb") {
+        await chart.createStudy("Bollinger Bands", false, false, { length: 20, mult: 2 });
+      }
+      if (testCase === "macd" || testCase === "lowprice") {
+        await chart.createStudy("MACD", false, false, { fast: 12, slow: 26, signal: 9 });
+      }
+      if (testCase === "panes") {
+        await chart.createStudy("VWAP");
+        await chart.createStudy("RSI", false, false, { length: 14 });
+        await chart.createStudy("MACD", false, false, { in_0: 8, in_1: 21, in_2: 5 });
       }
       if (testCase === "drawings") {
         await chart.createShape({ time: t0, price: 7000 }, {

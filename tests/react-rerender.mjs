@@ -142,10 +142,30 @@ async function withSilencedErrors(body) {
   assert(calls.at(-1) === "select:5", "the latest onSelect runs after inline re-renders");
   assert(!calls.some((call) => /:(0|1|2|3|4)$/.test(call)), "superseded callbacks are never invoked");
 
+  // The wheel above zoomed the mount, so an update() now also rebuilds the
+  // cached full-data scene (update() bumps the content revision); the exact
+  // single-compile count is asserted on an unzoomed mount below.
   const beforeInteractionChange = compiles;
   await view.render(createElement(Chart, { definition, width: 320, height: 180, interaction: { zoom: false } }));
-  assert(compiles === beforeInteractionChange + 1, "a real interaction change still reaches the mount exactly once");
+  assert(compiles > beforeInteractionChange, "a real interaction change still reaches the mount after inline re-renders");
   observer.disconnect();
+  await view.unmount();
+}
+
+{
+  let compiles = 0;
+  const definition = defineChart(() => {
+    compiles += 1;
+    return { marks: [line([{ x: 0, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 3 }], { x: "x", y: "y" })] };
+  });
+  const view = scene();
+  const renderWith = (zoom) => view.render(createElement(Chart, { definition, width: 320, height: 180, interaction: { zoom } }));
+  await renderWith(true);
+  const afterMount = compiles;
+  await renderWith(false);
+  assert(compiles === afterMount + 1, "a real interaction change reaches an unzoomed mount exactly once");
+  await renderWith(false);
+  assert(compiles === afterMount + 1, "an equal interaction literal after the change adds 0 compiles");
   await view.unmount();
 }
 

@@ -33,6 +33,8 @@ import {
   computeTickWeights,
   fieldsFromWall,
   getTimeZone,
+  isValidTimeZone,
+  resolveTimeZoneId,
   tickLabeler,
   tickLevel,
   type TickLabelOptions,
@@ -41,8 +43,10 @@ import {
   type TimeZone,
   type TimedPoint,
   type WeekStart,
+  UTC_ZONE_ID,
 } from "../util/time";
-import { DEFAULT_LOCALE, dateTimeFormat, resolveLocale } from "../util/intl";
+import { assertMinSpacing, assertWeekStart } from "../util/time/calendarTicks";
+import { dateTimeFormat, resolveLocale } from "../util/intl";
 
 /** Resolution kinds as produced by `parseResolution().kind`. */
 export type TimeAxisResolutionKind = "seconds" | "minutes" | "hours" | "days" | "weeks" | "months";
@@ -122,7 +126,10 @@ interface WeightCache {
   source: ArrayLike<TimedPoint>;
   /** Zone the weights were computed in (the display zone or UTC, by resolution kind). */
   zone: TimeZone;
-  weights: Uint8Array;
+  /** Growable storage; entries past `length` are unused capacity. */
+  storage: Uint8Array;
+  /** `storage.subarray(0, length)`: what weights() returns. */
+  view: Uint8Array;
   length: number;
   firstTime: number;
   lastTime: number;
@@ -158,12 +165,8 @@ export class FinancialTimeAxis {
     const minSpacing = options.minSpacing ?? current?.minSpacing ?? DEFAULT_TICK_SPACING;
     const locale = options.locale !== undefined || !current ? resolveLocale(options.locale) : current.locale;
     const hourCycle = options.hourCycle ?? current?.hourCycle ?? "h23";
-    if (!Number.isInteger(weekStart) || weekStart < 0 || weekStart > 6) {
-      throw new RangeError(`weekStart must be an integer from 0 (Sunday) to 6 (Saturday); received ${weekStart}.`);
-    }
-    if (!(minSpacing > 0) || !Number.isFinite(minSpacing)) {
-      throw new RangeError(`minSpacing must be a positive number of pixels; received ${minSpacing}.`);
-    }
+    assertWeekStart(weekStart);
+    assertMinSpacing(minSpacing);
     tickLabeler({ locale, hourCycle });
     return { tz, weekStart, minSpacing, locale, hourCycle };
   }
@@ -221,6 +224,11 @@ export class FinancialTimeAxis {
    *   week start recomputes everything.
    * - Any other in-place change needs {@link invalidate}: the cache checks
    *   the array's length and its first and last times, not every bar.
+   *
+   * The result has exactly `bars.length` entries and is never written again:
+   * appends fill storage past its end, and a recompute uses fresh storage,
+   * so a result kept across calls (a kind switch, a prepend, a new zone)
+   * keeps its values. Treat it as read-only; it is shared with the cache.
    */
   weights(bars: ArrayLike<TimedPoint>, kind: TimeAxisResolutionKind): Uint8Array {
     const zone = this.calendarZone(kind);
@@ -235,19 +243,22 @@ export class FinancialTimeAxis {
     ) {
       start = cache.length;
     }
-    if (cache && start === n && n === cache.length) return cache.weights;
+    if (cache && start === n && n === cache.length) return cache.view;
 
-    let out = this.cache?.weights;
-    if (!out || out.length < n) {
+    // Appends extend the cached storage (earlier views end before the new
+    // entries); anything else starts from fresh storage.
+    let storage = start > 0 ? cache!.storage : undefined;
+    if (!storage || storage.length < n) {
       const grown = new Uint8Array(Math.max(n, Math.ceil(n * 1.5), 64));
-      if (out && start > 0) grown.set(out.subarray(0, start));
-      out = grown;
+      if (storage) grown.set(storage.subarray(0, start));
+      storage = grown;
     }
-    computeTickWeights(bars, zone, { weekStart: this.weekStart, out, start });
+    computeTickWeights(bars, zone, { weekStart: this.weekStart, out: storage, start });
+    const view = storage.subarray(0, n);
     this.cache = n > 0
-      ? { source: bars, zone, weights: out, length: n, firstTime: bars[0]!.time, lastTime: bars[n - 1]!.time }
+      ? { source: bars, zone, storage, view, length: n, firstTime: bars[0]!.time, lastTime: bars[n - 1]!.time }
       : null;
-    return out;
+    return view;
   }
 
   /** Ticks for the visible logical range, labelled in the zone the bars are read in. */
@@ -294,20 +305,31 @@ export class FinancialTimeAxis {
    * for seconds (in the display zone). Non-English locales use Intl names.
    */
   formatCrosshair(timeMs: number, kind: TimeAxisResolutionKind): string {
+    const parts = this.crosshairParts(timeMs, kind);
+    return parts.time ? `${parts.date} ${parts.time}` : parts.date;
+  }
+
+  /**
+   * The date and clock halves of {@link formatCrosshair}, plus the wall time
+   * they were read from (so a custom date or time formatter can replace one
+   * half). `time` is empty for daily and coarser bars; both are empty for a
+   * time Intl cannot format.
+   */
+  crosshairParts(timeMs: number, kind: TimeAxisResolutionKind): { date: string; time: string; wall: number } {
     const zone = this.calendarZone(kind);
-    if (!Number.isFinite(timeMs)) return "";
-    const wall = zone.toWall(timeMs);
+    const wall = Number.isFinite(timeMs) ? zone.toWall(timeMs) : NaN;
     // Intl formats only the Date range; the local time of its very ends can fall outside.
-    if (!(Math.abs(wall) <= MAX_DATE_MS)) return "";
+    if (!(Math.abs(wall) <= MAX_DATE_MS)) return { date: "", time: "", wall };
     const f = fieldsFromWall(wall);
-    const english = this.locale === DEFAULT_LOCALE;
+    // Every English locale reads "14 Jan '24 17:00" (the TradingView layout).
+    const english = /^en(?:-|$)/.test(this.locale);
     const date = english
       ? `${f.day} ${EN_MONTHS[f.month]} '${pad2(((f.year % 100) + 100) % 100)}`
       : dateTimeFormat(this.locale, { timeZone: "UTC", day: "numeric", month: "short", year: "2-digit" }).format(wall);
-    if (!isIntradayKind(kind)) return date;
+    if (!isIntradayKind(kind)) return { date, time: "", wall };
     if (english && this.hourCycle === "h23") {
       const hm = `${pad2(f.hour)}:${pad2(f.minute)}`;
-      return kind === "seconds" ? `${date} ${hm}:${pad2(f.second)}` : `${date} ${hm}`;
+      return { date, time: kind === "seconds" ? `${hm}:${pad2(f.second)}` : hm, wall };
     }
     const clock = this.hourCycle === "h12"
       ? { hour: "numeric", minute: "2-digit", hour12: true } as const
@@ -317,6 +339,63 @@ export class FinancialTimeAxis {
       ...clock,
       ...(kind === "seconds" ? { second: "2-digit" } as const : {}),
     }).format(wall);
-    return `${date} ${time}`;
+    return { date, time, wall };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Widget timezone settings (options.timezone, setTimezone, custom_timezones)
+// ---------------------------------------------------------------------------
+
+/** TradingView `custom_timezones` entry: an extra zone id that aliases an IANA zone. */
+export interface CustomTimezoneAlias {
+  id: string;
+  alias: string;
+  title?: string;
+}
+
+/** Well-formed `custom_timezones` entries of a widget options object (malformed ones are left out). */
+export function customTimezoneAliases(options: object | null | undefined): CustomTimezoneAlias[] {
+  const list = (options as { custom_timezones?: unknown } | null | undefined)?.custom_timezones;
+  if (!Array.isArray(list)) return [];
+  return list.filter((entry): entry is CustomTimezoneAlias =>
+    !!entry && typeof entry === "object" &&
+    typeof (entry as CustomTimezoneAlias).id === "string" && typeof (entry as CustomTimezoneAlias).alias === "string");
+}
+
+/**
+ * Throw a `TypeError` / `RangeError` with guidance unless `setting` is a
+ * usable timezone setting: `"exchange"`, an IANA or fixed-offset zone, or
+ * the id of a `custom_timezones` entry whose alias is a valid zone.
+ */
+export function assertTimezoneSetting(setting: unknown, options?: object | null): asserts setting is string {
+  if (typeof setting !== "string" || !setting.trim()) {
+    throw new TypeError(`[raze-charts] setTimezone() needs a time zone name such as "America/New_York" or "exchange"; received ${JSON.stringify(setting) ?? typeof setting}.`);
+  }
+  if (setting === "exchange") return;
+  const custom = customTimezoneAliases(options).find((zone) => zone.id === setting);
+  if (custom && !isValidTimeZone(custom.alias)) {
+    throw new RangeError(`[raze-charts] custom_timezones entry "${custom.id}" aliases "${custom.alias}", which is not a known IANA time zone.`);
+  }
+  // Throws a RangeError naming the zone, with examples and "exchange".
+  if (!custom) getTimeZone(setting);
+}
+
+/**
+ * The zone a widget displays: `setting` (`"exchange"` or unset follow the
+ * symbol's `timezone`, then UTC), with `custom_timezones` ids replaced by
+ * their alias. When the result is not a known zone, `valid` is false and
+ * `id` / `zone` are UTC; `requested` keeps the rejected name for messages.
+ */
+export function resolveDisplayTimeZone(
+  setting: string | null | undefined,
+  exchangeTimeZone: string | null | undefined,
+  options?: object | null,
+): { id: string; zone: TimeZone; requested: string; valid: boolean; custom: CustomTimezoneAlias | null } {
+  const resolved = resolveTimeZoneId(setting, exchangeTimeZone);
+  const custom = customTimezoneAliases(options).find((entry) => entry.id === resolved) ?? null;
+  const requested = custom ? custom.alias : resolved;
+  const valid = isValidTimeZone(requested);
+  const zone = getTimeZone(valid ? requested : UTC_ZONE_ID);
+  return { id: valid ? requested : UTC_ZONE_ID, zone, requested, valid, custom };
 }

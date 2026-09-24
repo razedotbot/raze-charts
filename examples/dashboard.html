@@ -309,7 +309,7 @@
     ];
     mountChart(document.getElementById("scatter"), defineChart({
       marks: [
-        point(dots, { x: "x", y: "y", name: "fill" }),
+        point(dots, { x: "x", y: "y", name: "Samples" }),
         line(fit, { x: "x", y: "y", stroke: "rgba(216,170,91,0.7)", name: "Fit", dashed: true, lastValue: false, strokeWidth: 1.2 }),
       ],
       scales: { x: { type: "linear" }, y: { type: "linear" } },
@@ -343,7 +343,7 @@
       }
     }
     mountChart(document.getElementById("heatmap"), defineChart({
-      marks: [heatmap(heat, { x: "h", y: "token", valueKey: "value", name: "return %" })],
+      marks: [heatmap(heat, { x: "h", y: "token", valueKey: "value", valueFormat: "signed-percent", name: "return %" })],
       ariaLabel: "Token returns",
     }));
     nativeReady = true;

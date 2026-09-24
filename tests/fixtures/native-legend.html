@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Native legend fixture</title>
+  <style>
+    html, body { margin: 0; background: #0f0e0d; }
+    #host { width: 480px; height: 300px; }
+  </style>
+</head>
+<body>
+  <div id="host"></div>
+  <script type="module">
+    // Visual fixture for tests/native-legend.spec.ts: 12 series and 12 pie
+    // slices at 480x300 (?case=series|pie|hidden, &renderer=svg|canvas).
+    import { defineChart, line, mountChart, pie } from "/dist/chart.esm.js";
+
+    const params = new URLSearchParams(location.search);
+    const kind = params.get("case") ?? "series";
+    const renderer = params.get("renderer") === "canvas" ? "canvas" : "svg";
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"];
+    const series = Array.from({ length: 12 }, (_, s) => line(
+      months.map((month, i) => ({ month, value: 20 + s * 6 + Math.round(Math.sin((i + s) / 1.7) * 5) })),
+      { x: "month", y: "value", name: `Portfolio ${s + 1}`, lastValue: false },
+    ));
+    const slices = Array.from({ length: 12 }, (_, i) => ({ name: `Segment ${i + 1}`, value: 30 - i * 2 }));
+    const definition = kind === "pie"
+      ? defineChart({ marks: [pie(slices, { valueKey: "value", labelKey: "name" })], ariaLabel: "Segments" })
+      : defineChart({ marks: series, ariaLabel: "Portfolios" });
+    window.__razeHandle = mountChart(document.getElementById("host"), definition, {
+      renderer,
+      width: 480,
+      height: 300,
+      ...(kind === "hidden" ? { hiddenSeries: ["mark-1", "mark-4"] } : {}),
+    });
+    window.__razeLegendReady = true;
+  </script>
+</body>
+</html>

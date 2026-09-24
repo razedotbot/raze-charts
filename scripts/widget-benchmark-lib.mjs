@@ -18,6 +18,8 @@ export const SCENARIOS = [
   { id: "frame-all", kind: "time", description: "Repaint after a one-bar viewport change with the whole history visible" },
   { id: "crosshair-move", kind: "time", description: "Mouse move sweeping the crosshair across the default view" },
   { id: "crosshair-move-all", kind: "time", description: "Mouse move sweeping the crosshair with the whole history visible" },
+  { id: "overlay-frame", kind: "time", description: "Overlay-layer frame (animation-frame JS only) during crosshair moves at the default view; the main layer must not repaint" },
+  { id: "overlay-frame-all", kind: "time", description: "Overlay-layer frame (animation-frame JS only) during crosshair moves with the whole history visible" },
   { id: "pan", kind: "time", description: "Pointer drag step while panning the default view" },
   { id: "wheel-zoom", kind: "time", description: "Alternating wheel zoom out/in at the default view" },
   { id: "frame-studies", kind: "time", description: "Default-view repaint with six studies (EMA, SMA, RSI, VWAP, BB, MACD)" },
@@ -33,10 +35,12 @@ export const SCENARIO_IDS = SCENARIOS.map((scenario) => scenario.id);
  * Portable-budget policy used when a scenario has no checked-in budget yet.
  * Budgets must catch algorithmic regressions on slow shared runners, not
  * encode one workstation, so they are generous multiples with a floor.
+ * Retained heap is deterministic enough for a low floor: a 16 MB floor left
+ * the 1k and 10k sizes (0.4 and 1.4 MB) unguarded against a 10x regression.
  */
 export const BUDGET_POLICY = {
   time: { multiplier: 6, floor: 10 },
-  heap: { multiplier: 2, floor: 16 },
+  heap: { multiplier: 2, floor: 2 },
 };
 
 /** Nearest-rank percentile (matches scripts/benchmark.mjs). */
@@ -155,8 +159,10 @@ export function portableBudget(kind, value) {
   }
   const scaled = value * policy.multiplier;
   // Round up to a coarse, readable step so a budget is never mistaken for a
-  // measurement and neighbouring sizes share the same limit.
-  const step = scaled < 20 ? 5 : scaled < 200 ? 10 : scaled < 2_000 ? 100 : 500;
+  // measurement and neighbouring sizes share the same limit. Small heaps use
+  // 1 MB steps so the floor, not the rounding, sets their limit.
+  const small = kind === "heap" ? 1 : 5;
+  const step = scaled < 20 ? small : scaled < 200 ? 10 : scaled < 2_000 ? 100 : 500;
   return Math.max(policy.floor, Math.ceil(scaled / step) * step);
 }
 

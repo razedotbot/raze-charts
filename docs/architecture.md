@@ -92,7 +92,15 @@ The financial widget owns the host DOM and wires five responsibilities:
    runtime.
 3. `ShapeStore` and `StudyStore` own annotations and active indicators.
 4. `ChartEngine`, gestures, layout, and paint modules turn state into a
-   device-pixel-ratio-aware Canvas frame.
+   device-pixel-ratio-aware Canvas frame of two layers: the scene canvas,
+   repainted on data and viewport changes, and the interactive overlay
+   canvas above it (crosshair, legend values, hover, draft, countdown),
+   repainted on pointer and timer events alone. Axis-aligned geometry (grid,
+   separators, candles, bars, volume, series lines, price lines) goes through
+   `engine/paint/pixel.ts`, which switches the context to device pixels, rounds
+   every edge there and sizes hairlines as `max(1, floor(dpr))` pixels, so
+   lines stay full-intensity at fractional DPRs. Candle bodies take the wick's
+   parity so the wick is always the body's centre column.
 5. Toolbar, sidebar, interval selector, scale bar, menus, and loading state are
    optional chrome around the plot.
 
@@ -133,6 +141,83 @@ by ascending `priority`: drawing draft 100, trading lines 200, drawing edit
 return a truthy result consumes the event. A handler that returns a session
 owns the drag: the session commits on the last pointer up, and it rolls back
 on pointer cancel or when a second finger turns the gesture into a pinch.
+
+### Chrome styling and tokens
+
+The header (`Toolbar`, `IntervalSelector`, `TimeframeBar`, `SymbolSearch`)
+and the price-scale toggles (`ScaleBar`) carry no inline presentation and no
+JavaScript hover handlers. Each module declares its rules as a `defineStyles()`
+chunk and adopts it, together with the token chunk, into whichever Document or
+ShadowRoot renders it (`adoptStylesOnConnect()` also covers a shadow root
+joined after construction; [the UI kit guide](./ui-kit.md#stylesheet-and-design-tokens)
+lists the cases it covers).
+Hover, pressed, focus and touch sizing come from `:hover` (inside
+`@media (hover: hover)`), `[aria-pressed="true"]`, `:focus-visible` and
+`@media (pointer: coarse)`, so a pointer change on a hybrid device resizes
+controls live and forced-colors rules can target state.
+
+Library-owned controls are matched as element plus class
+(`button.raze-chart-header-btn`, `input.raze-chart-symbol-search-input`,
+`button.raze-chart-scale-btn`). Page-wide resets such as Bootstrap's reboot or
+Tailwind's preflight (`button { padding: 0; … }`) therefore leave them alone.
+To restyle one on purpose, add a class: `.raze-chart-root
+.raze-chart-header-btn { padding: 0 10px }` overrides the base rule, and
+`.raze-chart-root .raze-chart-header-btn[aria-pressed="true"] { … }` overrides
+the pressed state. Tokens (below) are the lighter route for colours and sizes.
+The `createButton()` reset is `button:where(.raze-chart-toolbar-btn)`: it
+beats element selectors (the adopted sheet comes last in the cascade), and any
+class the host puts on its own button wins. The header font is the widget's
+`custom_font_family`, which each header module carries as `--raze-font`, so a
+module mounted outside the widget root keeps it too.
+
+| Class | Element |
+| --- | --- |
+| `.raze-chart-toolbar`, `.raze-chart-toolbar-rail`, `.raze-chart-toolbar-slot` | Header bar, its scrolling rail and the button groups |
+| `.raze-chart-toolbar-btn` | Every `createButton()` element: a neutral reset (no native chrome), so host code may replace `style.cssText` |
+| `.raze-chart-header-btn` | Shared header control: interval, range, overflow and `useTradingViewStyle` custom buttons |
+| `.raze-chart-symbol-search-input` | Header symbol search field |
+| `.raze-chart-interval-menu` | "More intervals" menu (`menuitemradio` rows) |
+| `.raze-chart-scale-bar`, `.raze-chart-scale-btn` | % / L / A toggles in the corner cell under the price axis |
+| `.raze-chart-scale-hit`, `.raze-chart-scale-menu` | Coarse pointers only: the whole bar as one target, 24px tall, and the "Price scale" menu it opens |
+
+Tokens are custom properties on `.raze-chart-root` (and kit portals). They
+default to the TradingView `--tv-color-*` variables, so
+`setCSSCustomProperty()` and existing overrides keep working, and a host rule
+such as `.raze-chart-root { --raze-accent: red }` recolours every pressed
+control. Every token read in the header and scale-toggle rules also carries
+the token's default as its fallback (`var(--raze-accent, var(--tv-color-…, #2962ff))`).
+So a header module mounted outside the widget root (they are public exports)
+keeps the same height, type size, radius and pressed colours, and there a
+token set on any ancestor, `body` included, still applies.
+
+| Token | Default | Used for |
+| --- | --- | --- |
+| `--raze-font-size` | `12px` | Header controls and menus |
+| `--raze-font-size-sm` | `11px` | Axis-adjacent chrome (scale toggles), matching the axis labels |
+| `--raze-control-height` / `--raze-touch-control-height` | `26px` / `32px` | Header control height for fine / coarse pointers |
+| `--raze-row-height` / `--raze-touch-row-height` | `32px` / `48px` | Menu and sheet rows |
+| `--raze-radius-sm` / `--raze-radius` / `--raze-radius-lg` | `4px` / `6px` / `12px` | Controls / popups / sheets |
+| `--raze-toolbar-text` | `--tv-color-toolbar-button-text` | Header text |
+| `--raze-toolbar-hover` | `--tv-color-toolbar-button-background-hover` | Header hover and press |
+| `--raze-active` | `--tv-color-toolbar-button-background-active` | Pressed background |
+| `--raze-accent` | `--tv-color-toolbar-button-text-hover` | Pressed text, checked marks, focus |
+| `--raze-border` | `--tv-color-toolbar-divider-background` | Header divider, field border |
+| `--raze-scale-bar-background` / `--raze-scale-bar-text` | the price-axis colours (`scalesProperties.backgroundColor` / `textColor`) | Scale toggles. The library never sets these tokens (the theme colours arrive through internal `--_raze-axis-*` properties), so a host rule on `.raze-chart-root` or `.raze-chart-scale-bar` wins |
+
+The kit's own tokens (surface, text, hover, focus, danger, shadow, duration,
+z-index) are listed in [the UI kit guide](./ui-kit.md#stylesheet-and-design-tokens).
+Programmatic motion (`scrollIntoView`) checks `prefersReducedMotion()` and
+jumps instead of animating when the user asked for reduced motion.
+
+The corner cell is 22px tall (`TIME_AXIS_H`), and its top few pixels belong
+to the lowest price label, so the toggles are at most 18px tall. With a mouse
+they are three direct toggles. Three separate 24×24 touch targets
+(WCAG 2.2 2.5.8) would not fit without covering the time axis. So under
+`@media (pointer: coarse)` the whole bar becomes one target, as wide as the
+bar and 24px tall, that opens a "Price scale" menu. The menu is a bottom sheet
+with full-size `menuitemcheckbox` rows. The extra height reaches up into the
+label clearance, never into the plot. Keyboard and screen-reader users keep
+the three toggles, and the glyphs still show the current state.
 
 ### Time is a logical bar axis
 
@@ -196,8 +281,9 @@ one is told apart from a duplicate by its UTC time and is weighted like the
 first, so the hour is labelled twice, as on a continuous axis. It never
 weighs a day, so the date is not repeated.
 
-The core is not wired into either runtime yet, so it costs nothing today.
-Adopting it will. Measured with the `build.mjs` settings and gzip level 9,
+The financial widget draws its time axis, crosshair time and session breaks
+through the core (see below); native `/chart` adopts `calendarTicks` in
+W1B-01. The cost of adopting it, measured with the `build.mjs` settings and gzip level 9,
 and net of the legacy tick code each runtime removes (about 0.4 KiB):
 
 | Entry | Core it pulls in | As shipped | Fully minified |
@@ -212,6 +298,36 @@ part of its tree-shaking contract. Those budgets therefore have to rise when
 the core is adopted: native to at least 49 KiB and the root widget to at
 least 60 KiB, before any other growth in those packages.
 
+Native `/chart` has not adopted `calendarTicks` (W1B-01): with measured axes
+its 50 KiB cap leaves no room for the selector's 7.5 KiB, so
+`src/chart/compile/axes.ts` keeps a compact UTC ladder (about 0.9 KiB) with
+the same label scheme. It can switch once the core builds its rung tables
+lazily and UTC-only callers can skip `zone.ts` (see docs/performance.md).
+
+#### The widget's time axis
+
+`src/engine/paint/axes.ts` binds one `FinancialTimeAxis` to each chart
+context. Every frame it resolves the display zone from the live
+`context.timezone` seam (`chart.setTimezone()`, seeded from
+`options.timezone`): `"exchange"` or no setting follows
+`symbolInfo.timezone`, and `custom_timezones` ids map to their IANA alias. An
+unknown zone from options or the datafeed warns once and shows UTC instead of
+throwing mid-paint; `setTimezone()` rejects it with a `RangeError` up front.
+Ticks come from `computeTimeAxisTicks()`: pixels per bar decide the density
+(an 80 px minimum between labels, never the wall-clock span, so overnight and
+weekend gaps do not thin the axis), labels are measured so they never
+overlap, and label centres stay inside the plot so no text reaches the corner
+cell (`axisChromeRect`). Dates among times, months among days and years are
+drawn semi-bold, and every label is measured at that weight. The ticks are
+cached until the bars, the view, the zone, the locale, the tick-mark formatter
+or the measured font metrics change, so pointer-only repaints reuse them. The
+crosshair time label, the `custom_formatters` time formatters
+(`tickMarkFormatter`, `dateFormatter`, `timeFormatter`),
+`TimeIndex.sessionBreaks({ timeZone })` and the corner caption use the same
+zone. Session breaks split a session at local midnights only when it runs
+round the clock (a gap-free run of bars longer than a day, such as a forex
+week); shorter sessions break only at their open.
+
 ### Async ownership
 
 A symbol/resolution change starts a new data generation. History, marks,
@@ -221,6 +337,19 @@ pending readiness work.
 
 This rule is more important than transport cancellation: a callback API may
 not offer `AbortSignal`, but an obsolete callback still cannot commit.
+
+Compare series follow the same rule. `CompareController` watches the main
+series (`dataChanged` and viewport changes) and, through `CompareLoader`,
+refetches each compare after a symbol or resolution commit, pages it over the
+range the main series just added, and gives it its own live subscription and
+reset callback. `resetData()` refetches compares once the main series has
+committed its reset, over the reloaded window, so a stale main window is never
+copied. Every compare request belongs to a cancellable group, so a
+newer reload, `removeEntity()` or `remove()` drops pending callbacks, and a
+compare never keeps bars of another resolution on the axis while it reloads.
+A failed reload leaves the compare on the failed target (empty, or with its
+still-valid bars live after a symbol-only change), so the next move of the
+main series, back to the previous target included, or a reset refetches it.
 
 For new code, `defineDataSource` describes a Promise-first data source and
 `createDatafeed` adapts it to the callback contract consumed by the widget.
@@ -234,18 +363,33 @@ case where unsubscribe happens before async setup completes. Existing
 Built-in EMA, SMA, and RSI recognize append and replace-last mutations and
 update the newest sample incrementally. VWAP, Bollinger Bands, and MACD use
 the multi-series `compute` contract (`{ series }`) and recompute in full after
-a structural data change. VWAP also resets on UTC day boundaries. A new array
-reference, a backfill, a historical correction, or a custom study uses the
-public full-array `compute` contract. Custom code must not assume incremental
-calls.
+a structural data change. VWAP resets at the start of each trading day of the
+symbol's session, measured in the symbol's time zone through the shared time
+core (UTC days for `24x7` symbols). Every kernel treats a non-finite sample as
+a gap: it emits `null` and is skipped by windows and recurrences, and the
+incremental path falls back to a full recompute around such a bar. A new array
+reference, a backfill, a historical correction, or a v1 custom study uses the
+public full-array `compute` contract; v1 code must not assume incremental
+calls. Indicators registered through `defineIndicator()` with `init()`/`update()`
+advance by one pure `update()` call per appended or replaced bar: the store
+keeps the state committed before the forming bar and replays from `init()` only
+after structural changes. The executing code travels with the handle, so the
+root bundle carries only the protocol. Every contract receives a frozen compute
+context (symbol, symbol info, resolution, timezone, formatter, clock and, on
+request, the visible range). See [indicators.md](./indicators.md).
 
 `widget.save()` / `widget.load()` serialize a versioned JSON snapshot: symbol,
 interval, visible range, style/scale flags, drawings with stable IDs and behavior
-flags, study specs (not derived values), and compare symbols. The host owns
+flags, study specs (not derived values), and compare symbols. `load()` switches
+the symbol and interval, then fetches every compare before it replaces
+drawings, studies and compares. A compare that no longer resolves or loads is
+reported with a `[raze-charts]` console error and skipped, so the rest of the
+layout still loads. The host owns
 storage. A drawing with `disableSave` remains live but is omitted from the
 snapshot. `executeActionById("undo"|"redo")`
 walks a command stack for drawings and studies. `disableUndo` on a shape skips
-that create. There is no cloud layout.
+that create. Study commands keep specs, never computed arrays, and the stack
+keeps the newest `raze.undo_limit` steps (default 100). There is no cloud layout.
 
 Trading overlays use a separate `TradingStore` because broker state has a
 different lifecycle from drawings. `ChartApi` creates fluent line adapters;
@@ -258,7 +402,9 @@ backend.
 
 Native `viewport` windows source rows in `compileChart` before geometry and
 decimation. `mountChart` can brush (Shift-drag), wheel-zoom, and pan that
-window; `createViewportGroup()` keeps several mounts on the same X range.
+window within the zoom limits and data bounds (`interaction.zoom`,
+`interaction.panBounds`); `createViewportGroup()` keeps several mounts on the
+same X range.
 React `<Brush>` maps `startIndex`/`endIndex` onto that viewport. Coordinated
 panes stay host-owned: the compiler does not layout multiple plots.
 
@@ -317,11 +463,16 @@ src/chart/compile/
   marks.ts      mark shapes, options, builders, defineMarkPlugin/customMark
   define.ts     defineChart() and typed composition rules
   validate.ts   runtime ChartSpec, scale, mark, and composition validation
-  legend.ts     series names/colours, hidden series, legend rows and placement
+  legend.ts     series ids/names/colours, hidden series, legend rows, measured
+                legend layout (wrapping rows, compact side column, +N more)
   domain.ts     viewport windowing, X-type inference, domain checks, X/Y scales
-  axes.ts       margins, plot rectangle, time/band/linear ticks
-  format.ts     number, date, and signed formatting; axis formatters
+  axes.ts       label measurement, measured margins, calendar/band/linear ticks,
+                thinning, rotation and ellipsis
+  format.ts     step- and data-precision numbers, compact notation, en-US
+                grouping without per-value Intl, dates, heatmap value formats
   cartesian.ts  line/area, point, ruleY/ruleX, grouped and stacked bars
+  curve.ts      monotone tangents (also used by the renderers) and the
+                monotone/step flattening behind ranged-area fills
   decimate.ts   extrema decimation and per-series budget allocation
   polar.ts      pie and radar
   heatmap.ts    square-cell layout and colour cells
@@ -333,14 +484,18 @@ src/chart/compile/
 src/chart/render/
   svg.ts        SVG nodes, grid, axes, colour bar, document assembly
   canvas.ts     Canvas painter for the same scene
-  legend.ts     top/right legend for both renderers
-  chips.ts      last-value chip layout and crosshair chip labels
+  legend.ts     paints the compiled legend layout for both renderers; its row boxes drive hit tests and toggle buttons
+  chips.ts      bounded last-value chip stacking and crosshair chip labels
+  ticks.ts      x tick label placement (edge anchoring, v2 anchor/rotation)
   hit.ts        hit testing, hover-sample index, tooltip text
+  pointer.ts    pointer targets with data-space values; onTooltip/onSelect payloads
+  frame.ts      stage frame: where the scene sits on screen, for pointer mapping
+  zoom.ts       interaction option validation, zoom limits in axis space (decades on log axes), shared window maths
   primitives.ts shared paths, arcs, rounded bars, shading, escaping
-  mount.ts      mountChart() lifecycle, compile/paint, resize, handle
-  overlay.ts    mount DOM, hover crosshair/tooltip overlay
-  gestures.ts   select, wheel zoom, pan preview, brush, legend toggles
-  chrome.ts     range presets and navigator
+  mount.ts      mountChart() lifecycle, compile/paint, rAF resize, cached full scene, handle
+  overlay.ts    mount DOM, hover crosshair/tooltip overlay, legend toggle buttons
+  gestures.ts   select, rAF-coalesced wheel zoom/pan, pan preview, brush, legend toggles
+  chrome.ts     themed range presets and navigator
   types.ts      mount options/handle/event types and shared runtime state
 ```
 

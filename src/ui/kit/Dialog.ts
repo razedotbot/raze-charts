@@ -9,7 +9,10 @@
 // - OK / Cancel and an optional "Reset to defaults" action; Enter in a field
 //   submits; `onSubmit` may veto or run asynchronously.
 // - Desktop: centred and draggable by its header. Coarse pointers or
-//   viewports under 520px: a bottom sheet with a drag handle.
+//   viewports under 520px: a bottom sheet with a drag handle. With the
+//   default `auto` presentation an open dialog switches between the two
+//   when the viewport or primary pointer changes (a window resized across
+//   520px, a tablet docked), keeping its content, state and focus.
 // - Portalled into the fullscreen element or the chart's shadow root.
 
 import { t } from "../../i18n";
@@ -17,6 +20,7 @@ import { defineStyles, type StyleChunk } from "../styles";
 import { composedContains, deepActiveElement, focusWithoutScroll, uid } from "./dom";
 import { lockScroll, tabbables, trapFocus, type FocusTrap } from "./focus";
 import { pushLayer, type Layer } from "./layers";
+import { watchSheetPreference } from "./media";
 import { createPortal, type Portal } from "./portal";
 import { resolvePresentation, type Presentation } from "./Popover";
 import { createSheetFrame, SHEET_STYLES, type SheetFrame } from "./Sheet";
@@ -91,7 +95,10 @@ export interface DialogOptions {
   onCancel?(reason: DialogCloseReason): void;
   /** Called after the dialog has closed, with the reason. */
   onClose?(reason: DialogCloseReason): void;
-  /** `auto` (default): bottom sheet on coarse pointers or viewports < 520px. */
+  /**
+   * `auto` (default): bottom sheet on coarse pointers or viewports < 520px,
+   * re-evaluated while open. `dialog`/`anchored` or `sheet` fix it.
+   */
   presentation?: Presentation | "dialog";
   /** CSS width of the desktop dialog (default 420px). */
   width?: string;
@@ -119,6 +126,7 @@ export interface DialogHandle {
   readonly el: HTMLElement;
   /** Content element of the active tab (or the body without tabs). */
   readonly body: HTMLElement;
+  /** Current presentation; with `auto` it follows viewport and pointer changes. */
   readonly presentation: "dialog" | "sheet";
   /** Resolves with the close reason. */
   readonly result: Promise<DialogCloseReason>;
@@ -158,6 +166,7 @@ export function openDialog(options: DialogOptions): DialogHandle {
   } catch (error) {
     const focusWasInside = composedContains(portal.el, deepActiveElement(doc));
     held.trap?.release({ restoreFocus: false });
+    held.stopWatching?.();
     held.popLayer?.();
     held.unlockScroll?.();
     portal.destroy();
@@ -174,6 +183,7 @@ export function openDialog(options: DialogOptions): DialogHandle {
 /** Page-wide state an opening dialog has taken (released if opening fails). */
 interface HeldState {
   trap: FocusTrap | null;
+  stopWatching?: (() => void) | null;
   popLayer: (() => void) | null;
   unlockScroll: (() => void) | null;
 }
@@ -186,7 +196,8 @@ interface MountContext {
   held: HeldState;
 }
 
-function mountDialog(options: DialogOptions, { doc, presentation, returnFocus, portal, held }: MountContext): DialogHandle {
+function mountDialog(options: DialogOptions, { doc, presentation: initialPresentation, returnFocus, portal, held }: MountContext): DialogHandle {
+  let presentation = initialPresentation;
   // ARIA in HTML does not allow role="dialog" on <form>, so the dialog is a
   // div and a layout-neutral form inside it provides Enter-to-submit. The
   // submit event bubbles to the dialog, where it is handled.
@@ -356,7 +367,8 @@ function mountDialog(options: DialogOptions, { doc, presentation, returnFocus, p
   const popLayer = (held.popLayer = pushLayer(layer));
   const unlockScroll = (held.unlockScroll = lockScroll(doc));
   let frame: SheetFrame | null = null;
-  let backdrop: HTMLElement;
+  let backdrop: HTMLElement | null = null;
+  let resetDrag: (() => void) | null = null;
   let closed = false;
   let submitting = false;
   let resolveResult!: (reason: DialogCloseReason) => void;
@@ -367,6 +379,7 @@ function mountDialog(options: DialogOptions, { doc, presentation, returnFocus, p
   const finish = (reason: DialogCloseReason): void => {
     if (closed) return;
     closed = true;
+    held.stopWatching?.();
     trap.release({ restoreFocus: false });
     frame?.destroy();
     popLayer();
@@ -432,26 +445,58 @@ function mountDialog(options: DialogOptions, { doc, presentation, returnFocus, p
   });
   closeButton.addEventListener("click", () => dismiss("close-button"));
 
-  if (presentation === "sheet") {
-    frame = createSheetFrame(portal.el, {
-      content: dialog,
-      scroller: body,
-      onDismiss: (reason) => dismiss(reason === "handle" ? "close-button" : reason),
-    });
-    backdrop = frame.backdrop;
-    if (options.closeOnBackdrop === false) {
-      backdrop.addEventListener("click", (event) => event.stopImmediatePropagation(), true);
+  // Presentation: the same dialog element (content, tab state, fields) is
+  // framed either as a centred dialog over a backdrop or as a bottom sheet.
+  const present = (mode: "dialog" | "sheet"): void => {
+    presentation = mode;
+    dialog.dataset.presentation = mode;
+    if (mode === "sheet") {
+      frame = createSheetFrame(portal.el, {
+        content: dialog,
+        scroller: body,
+        onDismiss: (reason) => dismiss(reason === "handle" ? "close-button" : reason),
+      });
+      backdrop = frame.backdrop;
+      if (options.closeOnBackdrop === false) {
+        backdrop.addEventListener("click", (event) => event.stopImmediatePropagation(), true);
+      }
+      return;
     }
-  } else {
-    backdrop = doc.createElement("div");
-    backdrop.className = "raze-kit-backdrop";
-    backdrop.dataset.kind = "dialog";
-    backdrop.addEventListener("mousedown", (event) => event.preventDefault());
-    backdrop.addEventListener("click", () => {
+    const scrim = doc.createElement("div");
+    scrim.className = "raze-kit-backdrop";
+    scrim.dataset.kind = "dialog";
+    scrim.addEventListener("mousedown", (event) => event.preventDefault());
+    scrim.addEventListener("click", () => {
       if (options.closeOnBackdrop === true) dismiss("backdrop");
     });
-    portal.el.append(backdrop, dialog);
-    if (options.draggable !== false) enableDrag(dialog, header);
+    backdrop = scrim;
+    portal.el.append(scrim, dialog);
+  };
+  const unpresent = (): void => {
+    frame?.destroy();
+    frame = null;
+    backdrop?.remove();
+    backdrop = null;
+  };
+  present(presentation);
+  if (options.draggable !== false) resetDrag = enableDrag(dialog, header);
+
+  // `auto` follows the environment while open: re-frame in place and keep
+  // focus where it was (moving the element out of the DOM would drop it).
+  const adaptive = options.presentation === undefined || options.presentation === "auto";
+  if (adaptive) {
+    held.stopWatching = watchSheetPreference((wantsSheet) => {
+      const next = wantsSheet ? "sheet" : "dialog";
+      if (closed || next === presentation) return;
+      const active = deepActiveElement(doc);
+      const hadFocus = !!active && composedContains(dialog, active);
+      unpresent();
+      resetDrag?.();
+      present(next);
+      portal.update();
+      if (!hadFocus) return;
+      focusWithoutScroll(active instanceof HTMLElement && active.isConnected ? active : tabbables(dialog)[0] ?? dialog);
+    }, doc.defaultView ?? undefined);
   }
 
   portal.update();
@@ -464,7 +509,9 @@ function mountDialog(options: DialogOptions, { doc, presentation, returnFocus, p
     get body() {
       return content;
     },
-    presentation,
+    get presentation() {
+      return presentation;
+    },
     result,
     get closed() {
       return closed;
@@ -482,8 +529,11 @@ function mountDialog(options: DialogOptions, { doc, presentation, returnFocus, p
   };
 }
 
-/** Drag a centred dialog by its header, keeping the header on screen. */
-function enableDrag(dialog: HTMLElement, header: HTMLElement): void {
+/**
+ * Drag a centred dialog by its header, keeping the header on screen. Only the
+ * dialog presentation drags; the returned function re-centres it.
+ */
+function enableDrag(dialog: HTMLElement, header: HTMLElement): () => void {
   dialog.dataset.draggable = "";
   let pointerId: number | null = null;
   let startX = 0;
@@ -495,7 +545,8 @@ function enableDrag(dialog: HTMLElement, header: HTMLElement): void {
   let bounds: DOMRect | null = null;
 
   header.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || (event.target as Element).closest("button,input,select,textarea,a")) return;
+    if (event.button !== 0 || dialog.dataset.presentation !== "dialog") return;
+    if ((event.target as Element).closest("button,input,select,textarea,a")) return;
     pointerId = event.pointerId;
     startX = event.clientX;
     startY = event.clientY;
@@ -535,4 +586,12 @@ function enableDrag(dialog: HTMLElement, header: HTMLElement): void {
   };
   header.addEventListener("pointerup", end);
   header.addEventListener("pointercancel", end);
+  return () => {
+    pointerId = null;
+    bounds = null;
+    dx = 0;
+    dy = 0;
+    dialog.style.removeProperty("--raze-dialog-dx");
+    dialog.style.removeProperty("--raze-dialog-dy");
+  };
 }

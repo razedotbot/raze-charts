@@ -79,7 +79,7 @@ const w = new widget({
   theme: "dark",
   autosize: true,
   disabled_features: ["header_symbol_search"],
-  enabled_features: ["seconds_resolution", "mark_on_bars"],
+  enabled_features: ["seconds_resolution"],
   overrides: {
     "paneProperties.background": "#181615",
     "mainSeriesProperties.candleStyle.upColor": "#66d89e",
@@ -252,7 +252,7 @@ assert(customBtn !== null, "custom sidebar button present");
 customBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 assert(customClicked, "custom sidebar button onClick fired");
 
-const styleBtn2 = [...sb2.querySelectorAll("button")].find((b) => b.title.startsWith("Chart type"));
+const styleBtn2 = sb2.querySelector('[data-raze-item="chart_type"]');
 styleBtn2?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 const styleRows = [...window.document.querySelectorAll(".raze-chart-style-menu button")]
   .filter((b) => /Candles|Line|Area|Heikin/.test(b.textContent));
@@ -263,16 +263,15 @@ assert(window.document.querySelector(".raze-chart-style-menu") === null, "Esc cl
 
 assert(container2.querySelector(".raze-chart-scale-bar") === null, "disabled_features scale_bar hides the scale bar");
 
-// every supported interval sits in the header row, ordered by duration
-const favBtns = [...container2.querySelectorAll('.raze-chart-toolbar button[aria-label^="Interval "]')]
-  .filter((d) => ["1s", "5s", "1m", "5m", "15m", "1h", "1D"].includes(d.textContent));
+// favorites become the header buttons; the other supported intervals live in the menu
+const favBtns = [...container2.querySelectorAll('.raze-chart-toolbar button[aria-label^="Interval "]')];
 assert(
-  favBtns.map((d) => d.textContent).join(",") === "1s,5s,1m,5m,15m,1h,1D",
-  `interval row is inline (${favBtns.map((d) => d.textContent).join(",")})`,
+  favBtns.map((d) => d.textContent).join(",") === "1m,5m",
+  `favorite intervals render as header buttons (${favBtns.map((d) => d.textContent).join(",")})`,
 );
 assert(
-  container2.querySelector('[aria-label="More intervals"]') === null,
-  "the interval row has no overflow dropdown",
+  container2.querySelector('[aria-label="More intervals"]') !== null,
+  "the remaining supported intervals are reachable from the interval menu",
 );
 
 // custom study: createStudy by name + pane rendering path
@@ -289,7 +288,7 @@ await chart2.createStudy("NOPE").catch(() => { unknownRejected = true; });
 assert(unknownRejected, "createStudy unknown name rejects");
 
 // indicators panel shows exactly the configured presets (2 rows + Clear all)
-const indBtn2 = [...sb2.querySelectorAll("button")].find((b) => b.title === "Indicators");
+const indBtn2 = sb2.querySelector('[data-raze-item="indicators"]');
 indBtn2?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 const menu2 = window.document.querySelector(".raze-chart-indicators-menu");
 assert(menu2 !== null, "indicators panel opens from custom sidebar");

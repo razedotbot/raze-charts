@@ -79,10 +79,11 @@ try {
       resolveDir: root,
       loader: "ts",
       contents: `
-        export { studySpecFromArgs } from "./src/core/widget/StudyArgs";
+        export { parseCreateStudyArgs } from "./src/core/widget/StudyArgs";
         export { validateSnapshot } from "./src/core/widget/PersistenceController";
         export { EventHub } from "./src/core/widget/EventHub";
         export { CompareController } from "./src/core/widget/CompareController";
+        export { IdAllocator } from "./src/core/ids";
         export { ActionController } from "./src/core/widget/ActionController";
         export { LifecycleController } from "./src/core/widget/LifecycleController";
         export { LayoutController } from "./src/core/widget/LayoutController";
@@ -93,7 +94,7 @@ try {
         export { orderHandlers, HANDLERS } from "./src/engine/interaction/registry";
         export { INTERACTION_HANDLERS } from "./src/engine/interaction/handlers";
         export { GestureController } from "./src/engine/gestures";
-        export { buildFeatureSet } from "./src/core/context";
+        export { buildFeatureSet, createChartContext } from "./src/core/context";
         export { buildTheme } from "./src/core/theme";
         export { Delegate } from "./src/util/delegate";
       `,
@@ -117,6 +118,7 @@ const {
   Delegate,
   EventHub,
   GestureController,
+  IdAllocator,
   HANDLERS,
   INTERACTION_HANDLERS,
   LayoutController,
@@ -125,28 +127,30 @@ const {
   apiScope,
   buildFeatureSet,
   buildTheme,
+  createChartContext,
   installApiModules,
   orderHandlers,
-  studySpecFromArgs,
+  parseCreateStudyArgs,
   validateSnapshot,
 } = internals;
 
 // ── Controller registry ─────────────────────────────────────────────────────
 assert(
   WIDGET_CONTROLLERS.map((definition) => definition.id).join(",")
-    === "chrome,layout,api,events,actions,compare,persistence,contextMenu",
+    === "chrome,layout,api,events,actions,compare,persistence,contextMenu,drawingEvents,legend",
   "built-in widget controllers are registered in dependency order",
 );
 
 // ── StudyArgs ───────────────────────────────────────────────────────────────
-const spec = studySpecFromArgs("EMA", 1, 0, { Length: 21, color: "#fff", source: "hl2", smooth: 2, flag: true });
+const studyEnv = (name) => ({ definition: { name, defaults: { length: 9 } }, warn: () => {} });
+const { spec } = parseCreateStudyArgs(studyEnv("EMA"), "EMA", 1, 0, { Length: 21, color: "#fff", source: "hl2", smooth: 2, flag: true });
 assert(
   spec.name === "EMA" && spec.length === 21 && spec.color === "#fff"
     && spec.forceOverlay === true && spec.lock === false
-    && sameList(Object.keys(spec.inputs), ["source", "smooth"]),
+    && sameList(Object.keys(spec.inputs), ["source", "smooth", "flag"]),
   "createStudy arguments map to a StudyStore spec (length alias, colour, primitive extra inputs)",
 );
-const bare = studySpecFromArgs("RSI");
+const { spec: bare } = parseCreateStudyArgs(studyEnv("RSI"), "RSI");
 assert(bare.length === 0 && bare.color === "" && Object.keys(bare.inputs).length === 0, "missing study inputs fall back to definition defaults");
 
 // ── PersistenceController snapshot validation ──────────────────────────────
@@ -193,17 +197,33 @@ assert(
 // ── CompareController ──────────────────────────────────────────────────────
 {
   let paints = 0;
-  const context = { compare: [], requestPaint: () => { paints += 1; } };
+  const datafeed = {
+    resolveSymbol: (name, onResolve) => onResolve({ name }),
+    getBars: (info, _resolution, _period, onResult) => onResult([{ time: 1, open: 1, high: 1, low: 1, close: info.name.length }]),
+    subscribeBars() {},
+    unsubscribeBars() {},
+  };
+  const context = {
+    compare: [],
+    bars: [],
+    symbol: "BASE",
+    resolution: "1",
+    datafeed,
+    ids: new IdAllocator(),
+    now: () => 1_700_000_000_000,
+    scaleState: () => ({ mode: "percent" }),
+    requestPaint: () => { paints += 1; },
+  };
   const lifecycle = { destroyed: false };
-  const data = { loadCompare: async (symbol) => [{ time: 1, open: 1, high: 1, low: 1, close: symbol.length }] };
-  const compare = new CompareController({ context, lifecycle, data });
-  const first = compare.add("ETH", []);
+  const compare = new CompareController({ context, lifecycle, data: { ready: async () => {} } });
+  const first = await compare.create("ETH");
   const second = await compare.create("SOL");
   assert(
     first === "compare_ETH_1" && second === "compare_SOL_2" && context.compare[0].color !== context.compare[1].color,
     "compare ids are sequential per widget and colours rotate",
   );
-  assert(compare.remove(first) && context.compare.length === 1 && paints === 3, "removing a compare series repaints");
+  paints = 0;
+  assert(compare.remove(first) && context.compare.length === 1 && paints === 1, "removing a compare series repaints");
   assert(!compare.remove("study_1"), "remove reports ids that are not compare series");
   lifecycle.destroyed = true;
   let rejected = false;
@@ -369,8 +389,9 @@ const makeHost = () => {
   const canvas = document.createElement("canvas");
   document.body.appendChild(canvas);
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0 });
-  const context = {
+  const context = createChartContext({
     bars: [],
+    requestPaint: () => {},
     resolution: "1",
     magnet: false,
     drawingTool: "cursor",
@@ -383,7 +404,7 @@ const makeHost = () => {
     theme: { scaleText: "#fff" },
     viewportChanged: { fire: (range) => events.push(["viewport", range]) },
     crosshairMoved: { fire: (ev) => events.push(["crosshair", ev.active]) },
-  };
+  });
   const host = {
     canvas,
     context,
@@ -540,7 +561,14 @@ const CHART_API_METHODS = [
   "setSymbol",
   "symbol",
   "executeActionById",
+  "getCheckableActionState",
   "createCompare",
+  "timezone",
+  "setTimezone",
+  "onTimezoneChanged",
+  "getTimezoneApi",
+  "fitContent",
+  "resetView",
 ];
 assert(
   sameList(Object.getOwnPropertyNames(widget.prototype), WIDGET_METHODS),

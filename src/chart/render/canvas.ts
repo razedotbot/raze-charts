@@ -4,6 +4,7 @@ import type { CompiledChart, SceneNode } from "../compile/types";
 import { chartColorWithOpacity, heatFill, type DashboardTheme } from "../theme";
 import { paintLastValuesCanvas, valueAxisWidth } from "./chips";
 import { paintLegendCanvas } from "./legend";
+import { X_TICK_FONT_SIZE, placeXTickLabels } from "./ticks";
 import {
   AREA_GRADIENT_STOPS,
   TAU,
@@ -220,11 +221,21 @@ function paintAxesCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void 
   ctx.lineTo(c.heatmap ? plot.x + plot.w : width, hair(plot.y + plot.h));
   ctx.strokeStyle = theme.axis;
   ctx.stroke();
-  ctx.font = `9px ${theme.font}`;
+  ctx.font = `${X_TICK_FONT_SIZE}px ${theme.font}`;
   ctx.fillStyle = theme.muted;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  for (const tick of c.xTicks) ctx.fillText(tick.label, tick.px, plot.y + plot.h + 14);
+  for (const tick of placeXTickLabels(c)) {
+    ctx.textAlign = tick.anchor === "start" ? "left" : tick.anchor === "end" ? "right" : "center";
+    ctx.textBaseline = tick.baseline;
+    if (tick.rotation) {
+      ctx.save();
+      ctx.translate(tick.x, tick.y);
+      ctx.rotate((tick.rotation * Math.PI) / 180);
+      ctx.fillText(tick.label, 0, 0);
+      ctx.restore();
+    } else {
+      ctx.fillText(tick.label, tick.x, tick.y);
+    }
+  }
 }
 
 function paintColorBarCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void {
@@ -244,7 +255,8 @@ function paintColorBarCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): v
   traceRoundRect(ctx, x, y, w, h, 1);
   ctx.fillStyle = gradient;
   ctx.fill();
-  const format = (value: number): string => value.toFixed(Math.abs(value) < 10 ? 1 : 0);
+  // Scene v2: the heatmap's valueFormat, as measured for the margin.
+  const format = c.formatters?.color ?? ((value: number): string => value.toFixed(Math.abs(value) < 10 ? 1 : 0));
   ctx.font = `9px ${theme.font}`;
   ctx.fillStyle = theme.muted;
   ctx.textAlign = "start";

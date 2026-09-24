@@ -95,6 +95,11 @@ chart.update(definition, { height: 360 });
 chart.destroy();
 ```
 
+Wheel zoom, pan, and brush stay within `interaction.zoom: { minSpan, maxSpan }`
+and `interaction.panBounds` (`"data"` by default); `onTooltip`/`onSelect`
+payloads carry data-space `x`/`y`, `datum`, and `index`. See the
+[capability matrix](./docs/capabilities.md) for the defaults.
+
 Built-in marks are `line`, `area`, `bar`, `point`, `ruleY`, `pie`, `radar`,
 and `heatmap`. Scales are `linear`, `band`, `time`, and `log`. The compiler
 produces a renderer-neutral scene that can be inspected with `getScene()` or
@@ -108,6 +113,13 @@ Pie and heatmap are standalone compositions. Multiple radar layers may be
 overlaid when they share the same axes; Cartesian scales cannot be mixed into
 a polar chart.
 
+Every mark is a series with a stable id (its `id` option, else `mark-<index>`).
+Legend clicks and `hiddenSeries` use that id, and a hidden series stays in the
+legend, dimmed, so it can be shown again. Series that share a name get numbered
+legend rows (`Revenue (2)`) unless they also share a colour, which groups them
+into one row. `scales.y.tickFormat` formats tooltips, value chips and rule
+labels as well as ticks.
+
 Dense line and area geometry is reduced by a pixel-aware extrema envelope by
 default. Tune it with `performance.maxRenderedPoints`, opt out with
 `performance.decimation: "none"`, and inspect `CompiledChart.diagnostics`.
@@ -115,6 +127,14 @@ While decimation is enabled, the configured maximum is a hard per-series cap
 on source-derived path samples (minimum `1`; area closure vertices are extra).
 The compiler still scans source rows, so this bounds render complexity without
 pretending input processing is free.
+
+Axes are measured at compile time: tick decimals follow the tick step,
+large values switch to compact notation (1.2T), the value axis widens to fit
+its labels and last-value chips, category labels thin or rotate instead of
+overlapping (`scales.x.labels: { rotate, maxWidth, interval }`), and time
+scales tick on calendar boundaries from seconds to decades. Heatmap values are
+plain numbers unless the mark sets `valueFormat` (`"percent"`, `"signed"`,
+`"signed-percent"`, or a function).
 
 Product-specific layers can use the typed `defineMarkPlugin` + `customMark`
 extension point without forking the compiler. Plugins receive isolated,
@@ -143,7 +163,6 @@ const financialChart = new widget({
   datafeed,
   autosize: true,
   theme: "dark",
-  enabled_features: ["mark_on_bars"],
   raze: {
     chart_types: ["candles", "line"],
     compact_breakpoint: 520,
@@ -324,6 +343,16 @@ SMA, and RSI update incrementally for an appended or replaced live bar;
 backfills and custom studies recompute. This distinction matters for high-rate
 feeds and is intentionally documented rather than hidden.
 
+For typed plugins, `defineIndicator()` from `@razedotbot/charts/studies` adds a
+validated input schema (`int`, `source`, `select`, …), plot/fill/level
+descriptors, a read-only compute context (symbol info, resolution, timezone,
+visible range) and incremental `init()`/`update()` steps that run once per live
+tick. Invalid inputs reject `createStudy()` with a `StudyInputError`. See
+[docs/indicators.md](docs/indicators.md).
+The legend, objects tree and Indicators menu label a study from its definition:
+`MOM 10` above, `EMA 9`, `BB 20 2`, `MACD 12 26 9` or `VWAP` for the built-ins.
+Set `shortTitle` or `formatLabel(inputs)` on the definition to change it.
+
 ### Price formatting
 
 One formatter controls the price axis, last-price tag, OHLC legend, crosshair,
@@ -350,6 +379,39 @@ new widget({
 
 Percent-scale ticks keep percent notation. Overlay studies may still own their
 legend value through `StudyDefinition.formatValue`.
+
+### Time zones and time labels
+
+`timezone` sets the zone of the time-axis labels, the crosshair time and the
+session breaks: an IANA zone, a fixed offset such as `"+05:30"`, `"exchange"`
+for the symbol's `timezone`, or an id from `custom_timezones`. Labels are
+DST-correct and calendar-aligned, and their density follows the pixels per
+bar, so gapped equity sessions stay readable. Daily and coarser bars keep
+their trading date in every zone.
+
+<!-- prelude: financial -->
+```ts
+const tzChart = new widget({
+  ...requiredWidgetOptions, // container, symbol, interval, datafeed
+  timezone: "America/New_York",
+  custom_timezones: [{ id: "desk", alias: "Europe/London", title: "Trading desk" }],
+  custom_formatters: {
+    // `date` carries the local time in its UTC fields; null keeps the default label.
+    tickMarkFormatter: (date, type) =>
+      type === "Year" ? `'${String(date.getUTCFullYear()).slice(2)}` : null,
+  },
+});
+
+tzChart.onChartReady(() => {
+  const chart = tzChart.activeChart();
+  chart.onTimezoneChanged().subscribe(null, (zone) => console.log("timezone", zone));
+  chart.setTimezone("Asia/Tokyo"); // throws a RangeError for an unknown zone
+});
+```
+
+`dateFormatter` and `timeFormatter` replace the two halves of the crosshair
+time label the same way. An unknown zone in the options or in
+`symbolInfo.timezone` warns once and shows UTC.
 
 The root also exports `DataManager`, `TimeIndex`, `ChartEngine`,
 `ChartRenderer`, `ShapeStore`, `TradingStore`, `StudyStore`, indicator math, formatting and
@@ -446,7 +508,10 @@ components ([details](./docs/migration.md#nextjs-app-router-and-server-component
 
 Dark and light themes ship with cohesive pane, grid, axis, tooltip, status,
 and series colors. Every native chart also accepts a partial theme, so a
-product can own its visual language without replacing the renderer.
+product can own its visual language without replacing the renderer. Default
+series palettes stay distinguishable under colour-vision deficiencies, and
+`COLORBLIND_CHART_THEME` / `COLORBLIND_LIGHT_CHART_THEME` switch up/down
+and heatmap colours from green/red to blue/orange.
 
 Good visual defaults do not make every integration accessible automatically.
 Supply a specific `ariaLabel`, add `ariaDescription` when the trend needs

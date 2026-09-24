@@ -3,12 +3,52 @@ export interface Command {
   redo(): void;
 }
 
+/** Undo steps kept by default; older steps are dropped first. */
+export const DEFAULT_UNDO_LIMIT = 100;
+
+export interface CommandStackOptions {
+  /**
+   * Maximum number of undo steps kept (default 100). A push beyond it drops
+   * the oldest step, so long sessions do not retain every snapshot forever.
+   * `Infinity` disables the cap.
+   */
+  limit?: number;
+}
+
 export class CommandStack {
   private undoList: Command[] = [];
   private redoList: Command[] = [];
   private executing = false;
   private enabledValue = true;
   private suppressionDepth = 0;
+  private limitValue = DEFAULT_UNDO_LIMIT;
+
+  constructor(options: CommandStackOptions = {}) {
+    if (options.limit !== undefined) this.limit = options.limit;
+  }
+
+  /** Maximum undo depth. Lowering it drops the oldest steps immediately. */
+  get limit(): number {
+    return this.limitValue;
+  }
+
+  set limit(value: number) {
+    if (!(value === Infinity || (Number.isInteger(value) && value >= 1))) {
+      throw new RangeError(`[raze-charts] CommandStack limit must be a positive integer or Infinity, got ${String(value)}`);
+    }
+    this.limitValue = value;
+    this.trim();
+  }
+
+  /** Steps undo() can revert. */
+  get undoDepth(): number {
+    return this.undoList.length;
+  }
+
+  /** Steps redo() can re-apply. */
+  get redoDepth(): number {
+    return this.redoList.length;
+  }
 
   get enabled(): boolean {
     return this.enabledValue && this.suppressionDepth === 0;
@@ -36,6 +76,7 @@ export class CommandStack {
     if (!this.enabled || this.executing) return;
     this.undoList.push(command);
     this.redoList.length = 0;
+    this.trim();
   }
 
   undo(): boolean {
@@ -69,6 +110,11 @@ export class CommandStack {
     } finally {
       this.executing = false;
     }
+  }
+
+  private trim(): void {
+    const excess = this.undoList.length - this.limitValue;
+    if (excess > 0) this.undoList.splice(0, excess);
   }
 
   clear(): void {

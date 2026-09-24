@@ -21,7 +21,10 @@ export type SceneValueFormatter = (value: unknown) => string;
 export interface SceneFormatters {
   readonly x: SceneValueFormatter;
   readonly y: SceneValueFormatter;
-  /** Heatmap colour-bar values; defaults to `y`. */
+  /**
+   * Heatmap colour-bar values. A heatmap's `y` formats its category axis, so
+   * renderers fall back to a plain number format, not `y`, when this is absent.
+   */
   readonly color?: SceneValueFormatter;
 }
 
@@ -68,6 +71,18 @@ export interface SceneLegendRow {
   readonly markIndex: number;
   /** Swatch shape matching the painted mark. */
   readonly symbol: "line" | "area" | "rect" | "circle";
+  /** Row box in scene pixels: where renderers paint it and where a toggle hit-tests. */
+  readonly box?: SceneLegendBox;
+  /** Painted name after ellipsis truncation; `name` stays complete. */
+  readonly label?: string;
+}
+
+/** An axis-aligned rectangle in scene pixels. */
+export interface SceneLegendBox {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
 }
 
 /** Legend layout measured by the compiler (wrapping rows, `+N more`). */
@@ -78,6 +93,18 @@ export interface SceneLegendLayout {
   readonly size: number;
   /** Rows that did not fit and are summarised as `+N more`. */
   readonly overflow: number;
+  /**
+   * How a row paints inside its box: `inline` (swatch, name, then detail on
+   * one line), `stacked` (detail on a second line), or `compact` (one line
+   * with the detail right-aligned).
+   */
+  readonly rowStyle?: "inline" | "stacked" | "compact";
+  /** The `+N more` summary for rows that did not fit; `names` feeds its tooltip. */
+  readonly more?: {
+    readonly box: SceneLegendBox;
+    readonly label: string;
+    readonly names: readonly string[];
+  };
 }
 
 /**
@@ -87,7 +114,7 @@ export interface SceneLegendLayout {
 export interface SceneHoverSample extends HoverSample {
   readonly seriesId: string;
   readonly markIndex: number;
-  /** Source row index within the mark's data. */
+  /** Source row index within the mark's data; -1 when unknown (plugin samples report no row). */
   readonly index: number;
   readonly datum: unknown;
   /** Data-space x (a category for band scales). */

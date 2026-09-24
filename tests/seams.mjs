@@ -373,7 +373,7 @@ function makeContext(overrides = {}, factoryOptions = {}) {
   a.reset();
   assert(a.next("shape") === "shape_1", "reset() forgets every counter");
   assert(ID_NAMESPACES.includes("trading") && Object.isFrozen(ID_NAMESPACES), "namespaces are a frozen list");
-  assert(idSlug("  ") === "item" && idSlug("MACD (12, 26)") === "macd_12_26", "idSlug normalises free-form names");
+  assert(idSlug("") === "item" && idSlug("MACD (12, 26)") === "macd_12_26_", "idSlug normalises free-form names exactly like historical study ids");
 }
 
 // ── StateSlice contract ─────────────────────────────────────────────────────
@@ -421,7 +421,10 @@ function makeContext(overrides = {}, factoryOptions = {}) {
 {
   const definition = defineChart({ marks: [line([{ x: 1, y: 2 }, { x: 2, y: 3 }], { x: "x", y: "y" })] });
   const scene = compileChart(definition, { width: 320, height: 200 });
-  assert(!isSceneV2(scene), "today's scenes are v1, so renderers keep their fallbacks");
+  // Wave 1B fills every v2 field: contractVersion, formatters and axes (W1B-01),
+  // legendLayout and hoverSamples (W1B-02).
+  assert(isSceneV2(scene), "compiled scenes carry the full v2 contract");
+  assert(!isSceneV2({ ...scene, legendLayout: undefined }), "a hand-built scene missing a v2 field falls back to v1");
   const axis = { position: "bottom", size: 20, labelExtent: 12, ticks: [] };
   const upgraded = {
     ...scene,

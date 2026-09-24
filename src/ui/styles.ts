@@ -177,6 +177,47 @@ export function adoptStyles(
   }
   const detached = !entry.sheet && !!entry.element && !entry.element.isConnected;
   if (changed || detached) write(root, entry, options);
+  // A component framework (Lit, Stencil…) that assigns `adoptedStyleSheets`
+  // after the chart mounted drops the library sheet; put it back.
+  if (entry.sheet && !root.adoptedStyleSheets.includes(entry.sheet)) {
+    root.adoptedStyleSheets = [...root.adoptedStyleSheets, entry.sheet];
+  }
+}
+
+/**
+ * Keep `chunks` adopted into whichever root renders `el`, including a root it
+ * joins after construction (a shadow root the element is appended to later).
+ * Adopts now (a detached element inside a shadow tree already resolves to that
+ * shadow root), again on the next microtask (callers usually append
+ * synchronously), and whenever a ResizeObserver reports a new size for the
+ * connected element (it gains a box when it joins a rendered root). A
+ * synchronous move into another root at the same size fires no observer: call
+ * `adoptStyles()` after such a move. Returns a function that stops watching.
+ */
+export function adoptStylesOnConnect(
+  el: Element,
+  chunks: StyleChunk | readonly StyleChunk[],
+  options?: StyleOptions,
+): () => void {
+  if (typeof document === "undefined") return () => {};
+  let stopped = false;
+  const adopt = (): void => {
+    if (!stopped) adoptStyles(el, chunks, options);
+  };
+  adopt();
+  queueMicrotask(adopt);
+  let observer: ResizeObserver | null = null;
+  if (typeof ResizeObserver !== "undefined") {
+    observer = new ResizeObserver(() => {
+      if (el.isConnected) adopt();
+    });
+    observer.observe(el);
+  }
+  return () => {
+    stopped = true;
+    observer?.disconnect();
+    observer = null;
+  };
 }
 
 /**
@@ -194,6 +235,8 @@ export const TOKEN_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "--raze-font-size-lg:14px;" +
   "--raze-surface:var(--tv-color-popup-background,var(--tv-color-pane-background,#1e222d));" +
   "--raze-text:var(--tv-color-popup-element-text,#d1d4dc);" +
+  // Secondary text: >=4.5:1 on the dark and light popup surfaces.
+  "--raze-text-muted:color-mix(in srgb,var(--raze-text) 72%,var(--raze-surface));" +
   "--raze-border:var(--tv-color-toolbar-divider-background,#363a45);" +
   "--raze-hover:var(--tv-color-popup-element-background-hover,rgba(255,255,255,.08));" +
   "--raze-active:var(--tv-color-toolbar-button-background-active,rgba(41,98,255,.18));" +
@@ -210,6 +253,11 @@ export const TOKEN_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "--raze-radius-lg:12px;" +
   "--raze-row-height:32px;" +
   "--raze-touch-row-height:48px;" +
+  "--raze-font-size-sm:11px;" +
+  "--raze-control-height:26px;" +
+  "--raze-touch-control-height:32px;" +
+  "--raze-toolbar-text:var(--tv-color-toolbar-button-text,#d1d4dc);" +
+  "--raze-toolbar-hover:var(--tv-color-toolbar-button-background-hover,rgba(255,255,255,.06));" +
   "--raze-duration:160ms;" +
   "--raze-z:2147483640}",
 );

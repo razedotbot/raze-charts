@@ -4,6 +4,7 @@
 
 import type { ResolutionString } from "../../types/charting_library";
 import { Delegate } from "../../util/delegate";
+import { normalizeResolution } from "../../util/resolution";
 import type { WidgetHost } from "./host";
 
 export class LifecycleController {
@@ -45,6 +46,8 @@ export class LifecycleController {
   }
 
   changeSymbol(symbol: string, interval?: ResolutionString, callback?: () => void): void {
+    // Invalid intervals throw a RangeError to the caller instead of loading 1m.
+    if (interval !== undefined) normalizeResolution(interval);
     this.runDataChange(
       `change symbol to ${symbol}`,
       () => this.host.data.changeSymbol(symbol, interval),
@@ -54,6 +57,7 @@ export class LifecycleController {
   }
 
   changeResolution(resolution: ResolutionString, callback?: () => void): void {
+    normalizeResolution(resolution);
     this.runDataChange(
       `change resolution to ${resolution}`,
       () => this.host.data.changeResolution(resolution),

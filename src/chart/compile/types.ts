@@ -5,6 +5,7 @@
 import type { AnyScale } from "../scales";
 import type { ChartThemeInput, DashboardTheme } from "../theme";
 import type { ChartMark } from "./marks";
+import type { CompiledSceneV2Fields } from "../sceneTypes";
 
 export type Accessor<T> = keyof T & string | ((row: T) => unknown);
 
@@ -84,12 +85,33 @@ export interface Margin {
   left: number;
 }
 
+/**
+ * Tick-label layout. By default the compiler measures labels and picks, in
+ * order: every label, every nth label, labels rotated -45° (reserving bottom
+ * margin), then an ellipsis at `maxWidth`.
+ */
+export interface AxisLabelOptions {
+  /**
+   * X axis only. `"auto"` (default) rotates category labels -45° when that
+   * keeps all of up to 12 categories, or when horizontal labels would show
+   * fewer than every other category and under half as many as rotated ones;
+   * `true` always rotates -45°;
+   * `false` or `0` never rotates; a number is a fixed angle from -90 to 0.
+   */
+  rotate?: "auto" | boolean | number;
+  /** Longest label, in CSS pixels, before it is cut with an ellipsis. */
+  maxWidth?: number;
+  /** Label every nth tick (1 labels all of them). `"auto"` (default) thins by measured width. */
+  interval?: number | "auto";
+}
+
 export interface LinearScaleSpec {
   type: "linear";
   nice?: boolean;
   padding?: never;
   domain?: readonly [number, number];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export interface AutoLinearScaleSpec {
@@ -98,6 +120,7 @@ export interface AutoLinearScaleSpec {
   padding?: never;
   domain?: readonly [number, number];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export interface LogScaleSpec {
@@ -106,6 +129,7 @@ export interface LogScaleSpec {
   padding?: never;
   domain?: readonly [number, number];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export interface TimeScaleSpec {
@@ -114,6 +138,7 @@ export interface TimeScaleSpec {
   padding?: never;
   domain?: readonly [number | Date, number | Date];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export interface BandScaleSpec {
@@ -122,6 +147,7 @@ export interface BandScaleSpec {
   padding?: number;
   domain?: readonly (string | number)[];
   tickFormat?: (value: unknown) => string;
+  labels?: AxisLabelOptions;
 }
 
 export type XScaleSpec = LinearScaleSpec | LogScaleSpec | TimeScaleSpec | BandScaleSpec;
@@ -149,7 +175,13 @@ export interface ChartSpec {
   theme?: ChartThemeInput;
   /** Visible X/Y window applied before geometry and decimation. */
   viewport?: ChartViewport;
-  /** Series names omitted from geometry (legend toggle). */
+  /**
+   * Series omitted from geometry (legend toggle). Each entry matches a series
+   * id (the mark's `id`, else `mark-<index>`), a legend row id (pie slices use
+   * `<seriesId>/<label>`), or a series name (a shared name such as `"value"`
+   * also hides its numbered `"value (2)"`). Hidden series keep their legend
+   * row, flagged `hidden`, so the toggle can always be reversed.
+   */
   hiddenSeries?: readonly string[];
 }
 
@@ -205,6 +237,16 @@ export interface SceneNodeBase {
   /** Plot-space endpoint representing the datum value (for example a negative bar bottom). */
   valueY?: number;
   curve?: ChartCurve;
+  /** Data-space x of the datum (a category on band scales). Set on bars. */
+  xValue?: unknown;
+  /** Data-space y of the datum (the segment value for stacked bars). Set on bars. */
+  yValue?: number;
+  /** Stable series id (the mark's `id`, otherwise `mark-<index>`). Set on bars, heatmap cells, and pie slices. */
+  seriesId?: string;
+  /** Index of the producing mark in `ChartSpec.marks`. Set on bars, heatmap cells, and pie slices. */
+  markIndex?: number;
+  /** Row index of `datum` within its mark's `data`. Set on bars, heatmap cells, and pie slices. */
+  index?: number;
 }
 
 /** Renderer-neutral geometry with required fields encoded by primitive kind. */
@@ -224,6 +266,18 @@ export interface HoverSample {
   color: string;
   tip: string;
   kind: "line" | "point" | "radar";
+  /** Stable series id: the mark's explicit `id`, otherwise `mark-<index>`. */
+  seriesId?: string;
+  /** Index of the producing mark in `ChartSpec.marks`. */
+  markIndex?: number;
+  /** Row index within the producing mark's `data`. */
+  index?: number;
+  /** Source row the sample was compiled from. */
+  datum?: unknown;
+  /** Data-space x (a category on band scales). */
+  xValue?: unknown;
+  /** Data-space y, or null when the row has no numeric value. */
+  yValue?: number | null;
 }
 
 export interface LastValue {
@@ -235,9 +289,17 @@ export interface LastValue {
 
 /** One legend row. Plugins may contribute their own rows. */
 export interface LegendEntry {
+  /**
+   * Stable row id, the value a legend toggle adds to `hiddenSeries`: the
+   * mark's `id`, else `mark-<index>`. Pie slices use `<seriesId>/<label>`.
+   * Marks sharing an explicit `name` and colour share the first mark's row.
+   */
+  id: string;
   name: string;
   color: string;
   detail?: string;
+  /** The series is hidden; its row stays so the toggle can be reversed. */
+  hidden: boolean;
 }
 
 /** One axis tick: source value, plot-space pixel, and formatted label. */
@@ -247,7 +309,7 @@ export interface AxisTick {
   label: string;
 }
 
-export interface CompiledChart {
+export interface CompiledChart extends CompiledSceneV2Fields {
   width: number;
   height: number;
   margin: Margin;
@@ -257,7 +319,8 @@ export interface CompiledChart {
   xTicks: { value: unknown; px: number; label: string }[];
   yTicks: { value: unknown; px: number; label: string }[];
   grid: boolean;
-  legend: { name: string; color: string; detail?: string }[];
+  /** Every legend row in mark order, hidden series included (`hidden: true`). */
+  legend: LegendEntry[];
   nodes: SceneNode[];
   tooltip: boolean;
   ariaLabel: string;

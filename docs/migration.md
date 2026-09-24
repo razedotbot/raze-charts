@@ -43,26 +43,54 @@ exports are the stable resolver contract.
 | `resolveSymbol`, `getBars` | Supported | Initial history and left pagination are implemented. |
 | `subscribeBars`, `unsubscribeBars` | Supported | Old subscription callbacks are ignored after a target change. |
 | `getMarks` | Supported | Async callback results are accepted and scoped to the active request. |
-| `createShape`, `createMultipointShape` | Supported subset | Use only the drawing kinds in the capability matrix. |
-| `getShapeById`, `removeEntity`, `removeAllShapes` | Supported | Shape point editing and removal are implemented. |
-| `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. `forceOverlay` / `lock` are stored but not separately enforced. |
+| `createShape`, `createMultipointShape` | Supported subset | Use the drawing kinds in the capability matrix; any other name rejects with a `ShapeError` listing them. `extended` and `date_and_price_range` are mapped for you. Point times are Unix seconds, and every point needs a `price` except on `vertical_line` (TradingView's `channel` fallback is not supported). |
+| `getShapeById`, `removeEntity`, `removeAllShapes` | Supported | Shape point editing, `setProperties({ text })`, z-order moves and removal are implemented. `getShapeById` throws for an unknown id instead of returning a no-op handle. |
+| Order-line `onMove` / `onModify` / `onCancel` | Supported | Both `(callback)` and TradingView's `(data, callback)` forms; drag and keyboard prices are rounded to the symbol tick. |
+| `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. Names match exactly (TradingView names such as `Moving Average Exponential` are aliases); an unsupported study rejects instead of resolving to a similar one. Built-in inputs accept ids, TradingView input titles (`Fast Length`), aliases (`src`, `multiplier`) and `in_N`; `load()` rejects a layout naming an unknown study with the same guidance. `forceOverlay` draws a pane study (RSI, MACD) on the price pane with its own scale; `lock` is stored but not separately enforced. Positional (`[30]`) and boolean inputs are honoured; invalid values reject with a `StudyInputError`. Overrides support `<plot>.color`, `<plot>.linewidth` and `<plot>.visible` for any plot; options support `disableUndo` and `priceScale: "as-series"`. Everything else warns once. |
+| `subscribe` / `unsubscribe` | Supported subset | `drawing_event`, `trading_event`, `error`, and the Raze events `drawing_selection_changed` and `drawing_tool_changed`. Other event names throw instead of never firing. |
+| `executeActionById`, `getCheckableActionState` | Supported subset | See the `ChartActionId` union; unsupported ids such as `chartProperties` throw. |
 | `createButton` | Supported | Use it for small host actions; own complex UI outside the widget. |
 | `save()` / `load()` | Supported | Versioned JSON snapshot of symbol, interval, range, style, shapes, and studies with stable entity IDs. `disableSave` omits a live shape. The host owns storage. |
-| `createCompare(symbol)` | Supported | Overlay another symbol on the same pane; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair across panes. |
+| `createCompare(symbol)` | Supported | Overlay another symbol on the same pane; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair across panes. It rejects with a `[raze-charts]` message when the symbol cannot be resolved or its history fails, and adds nothing. The first compare switches the price scale to percent with autoscale. Compares follow interval and symbol changes, `resetData()`, left pagination and live bars. `load()` skips a saved compare that no longer resolves or loads, reports it with a `[raze-charts]` console error, and loads the rest of the layout. |
 | unlisted TradingView option or event | Not guaranteed | A permissive compatibility type is not proof of runtime support. |
 
 ### Datafeed checklist
 
 - Emit `Bar.time` in Unix milliseconds. `PeriodParams.from` / `to` and mark
   times use Unix seconds; these units are intentionally different and typed.
+  Times below 1e11 are reported as seconds, and bars with non-finite or string
+  OHLC are dropped with one warning naming the field and index. Set
+  `raze.coerce_bars: true` to convert strings, seconds and inverted high/low
+  instead.
+- Mark gaps with `HistoryMetadata.nextTime` (Unix seconds) on an empty page;
+  the next request uses `to = nextTime`. Reserve `noData` without `nextTime`
+  for the true start of history.
+- Use TradingView resolution strings: `"1S"`, `"15"`, `"240"`, `"D"`/`"1D"`,
+  `"W"`, `"M"`/`"3M"`. The chart and your feed receive the canonical spelling
+  (`"D"` arrives as `"1D"`). Invalid values such as `"4h"` or `"1H"` throw a
+  `RangeError` instead of loading one-minute bars. The exported
+  `parseResolution`, `resolutionToMs`, `resolutionLabel` and `floorToBar`
+  helpers throw the same error instead of returning one minute; test untrusted
+  strings with `isValidResolution()`. Saved layouts whose interval is invalid
+  (for example `"4h"`, which used to load as one minute) now make `load()`
+  reject with the same `RangeError`; rewrite them with `normalizeResolution()`
+  or check them with `isValidResolution()` before loading.
 - Return bars in ascending order. The manager canonicalizes and de-duplicates,
   but a sorted feed avoids unnecessary work.
 - Treat the subscription GUID as opaque and stop producing work after
   `unsubscribeBars`.
 - Call the error callback with useful context; active failures are surfaced and
-  already committed data remains visible.
-- Implement `getMarks` only if marks are enabled. Late results from an obsolete
-  symbol or interval are intentionally discarded.
+  already committed data remains visible. A call without a reason is still a
+  failure (logged, and backed off during pagination), never a cancellation.
+- Call the `onReady` callback once; later calls are ignored with a warning.
+- Set `supports_marks` / `supports_timescale_marks` in the `onReady`
+  configuration to have `getMarks` / `getTimescaleMarks` called; bar marks
+  then render by default (the Raze-only `enabled_features: ["mark_on_bars"]`
+  no longer turns them on, and `disabled_features: ["mark_on_bars"]` hides
+  them). Late results from an obsolete symbol or interval are discarded.
+- Set `supports_time: true` with `getServerTime` (Unix seconds) to end the
+  first history window, and resolve `options.timeframe`, at the server's time
+  instead of the client clock's.
 - Always call `remove()` when the host unmounts.
 
 ### Move a callback feed to the native data source
@@ -100,13 +128,33 @@ This separation makes it obvious which configuration can travel with an
 existing widget integration and which configuration intentionally couples to
 Raze.
 
+The range bar uses TradingView's featureset name, `timeframes_toolbar`. The
+earlier `time_frames_toolbar` spelling still works as a deprecated alias and
+logs a warning when `debug: true`.
+
+### Widget size, timeframe and layouts
+
+- `width`, `height`, `autosize` and `fullscreen` are honoured. `autosize: true`
+  (and the default without dimensions) fills the container; `width`/`height`
+  without `autosize: true` size the chart in pixels; `fullscreen: true` fills
+  the browser viewport. Integrations that passed `width`/`height` into a sized
+  container and relied on them being ignored should drop them or pass
+  `autosize: true`.
+- `timeframe` accepts TradingView's `{ from, to }` and `TimeFrameValue`
+  objects. The earlier Raze `{ type: "time-range", value: "from,to" }` shape still
+  works and is typed as deprecated.
+- In `raze.layout` grids, an interval change on any pane now applies to every
+  pane, like TradingView's default interval sync. Pass
+  `raze.layout_sync: { interval: false }` to keep the previous per-pane
+  intervals.
+
 ### Content Security Policy
 
 TradingView's library renders inside an iframe. Raze renders in your page,
 so your page's CSP applies to it. The widget's chrome styles use
 constructable stylesheets and CSSOM, so `style-src 'self'` works without
 `'unsafe-inline'`. Where constructable stylesheets are unavailable, provide a
-nonce through `<meta property="csp-nonce" nonce="…">` or
+nonce through `raze.style_nonce`, `<meta property="csp-nonce" nonce="…">` or
 `ensureBaseStyles(target, { nonce })`. With Trusted Types enforced, allow the
 `raze-charts` policy (`trusted-types raze-charts`). The
 [capability matrix](./capabilities.md#ui-kit-csp-and-localization) lists the
@@ -121,6 +169,20 @@ option for pages that enforce Trusted Types. Code that only builds sidebar
 items compiles unchanged. Code that reads `item.icon` back as a string, for
 example to inspect or serialise a sidebar configuration, now needs a check
 such as `typeof item.icon === "string"` before using it as one.
+
+### Context menu items: `ContextMenuItem`
+
+`onContextMenu` follows TradingView's conventions: `{ text: "-" }` renders a
+separator (it used to render a literal "-" row) and `{ text: "-Label" }`
+removes the default item named `Label` instead of adding a row. Because a
+separator or a removal needs no handler, `ContextMenuItem.click` and
+`ContextMenuItem.position` are now optional (`position` defaults to `"top"`).
+Code that builds items compiles unchanged; code that reads `item.click` or
+`item.position` back needs an `undefined` check. Tab and Shift+Tab on a row
+now close an open menu and move on from its button instead of walking its
+rows; a field or other control a host puts inside an `openPopup()` menu keeps
+the normal Tab order. An item without `click` renders disabled: the arrow
+keys reach it, as the WAI-ARIA menu pattern recommends, but it does nothing.
 
 ### Custom financial shells
 
@@ -151,6 +213,28 @@ built-in renderer fills them, so widget users are unaffected:
 
 Spreading `renderer.financeView()` and overriding only what the shell owns is
 the least fragile way to build one.
+
+### Custom studies: study contract v2
+
+Existing `raze.custom_studies` definitions keep working. Some public types
+changed, and TypeScript code that relies on the old shapes needs small edits:
+
+- `StudyDefinition.compute` now takes a third argument,
+  `ctx: StudyComputeContext`. Implementations that ignore it compile
+  unchanged. Code that calls `definition.compute(bars, inputs)` itself must
+  pass a context, for example `createStudyContext({ symbolInfo, resolution })`
+  from `@razedotbot/charts/studies`.
+- The `StudyInputs` index signature, `StudyDefinition.defaults` and the
+  `inputs` of `ChartLayoutSnapshot` studies widened from `number | string` to
+  `number | string | boolean`. Code that reads these values as
+  `number | string` needs a `typeof` check.
+- `createStudy()` now validates inputs against a declared schema and rejects
+  with a `StudyInputError` (`code`: `unknown-input` or `invalid-value`)
+  instead of dropping or ignoring bad values. Boolean inputs are kept.
+  `load()` stays lenient and resets stale saved inputs to their defaults with
+  a warning.
+
+[Custom indicators](./indicators.md) documents the full contract.
 
 ## Recharts-shaped JSX
 
@@ -330,3 +414,24 @@ const svg = renderChartSvg(definition, { width: 720, height: 320 });
 
 The React `<Chart definition={definition}>` component accepts the same native
 definition when the application still wants React to own the lifecycle.
+
+### Native axis and value formatting changes
+
+Native charts now size and format their axes from the data, so a few labels
+read differently after upgrading:
+
+- Heatmaps no longer add a `+` sign and `%` to every value. Add
+  `valueFormat: "signed-percent"` to a heatmap mark that shows returns (values
+  in percentage points), or `"percent"`, `"signed"` or a function for other
+  data. The colour bar uses the same format.
+- Values from a million up use compact notation (`1.2T` instead of
+  `1,200,000,000,000`, `25.0004M` for 25,000,400) in ticks, chips and
+  tooltips. Pass `scales.y.tickFormat` to keep full digits.
+- Tick labels take their decimals from the tick step (`1.0850` rather than
+  `1.1`), and time axes label calendar boundaries (`2025`, `Feb`, `14 Feb`,
+  `09:30`) instead of `D Mon` at fixed day steps.
+- A numeric viewport on a Date axis keeps the time scale; numbers are no
+  longer guessed to be timestamps from their magnitude.
+- The value axis widens to fit long labels and chips, and crowded category
+  labels rotate; set `margin.right` / `margin.bottom` or `scales.x.labels` to
+  pin the previous layout.

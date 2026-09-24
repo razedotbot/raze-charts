@@ -2,6 +2,15 @@
 // `options.raze.sidebar` (builtin ids, "separator", custom buttons); the
 // chart-type picker honours `options.raze.chart_types`. Hidden entirely when
 // `left_toolbar` is in disabled_features (minimal/chrome-less).
+//
+// Styling is class-based (SIDEBAR_STYLES, adopted into the root that renders
+// the sidebar), icons come from the shared set in ./icons, and every button
+// gets a kit tooltip instead of a `title` attribute: after 500ms of hover, on
+// keyboard focus, or on a touch long-press, placed to the right of the
+// sidebar, with the keyboard shortcut when the action has one (also exposed as
+// `aria-keyshortcuts`). Built-in buttons carry `data-raze-item="<id>"`, the
+// stable selector for them now that names are translatable and there is no
+// `title`.
 
 import type {
   ChartStyleName,
@@ -9,6 +18,37 @@ import type {
   SidebarItem,
 } from "../types/charting_library";
 import type { ChartContext, DrawingTool } from "../core/context";
+import { t } from "../i18n";
+import {
+  createIcon,
+  fillMenuRow,
+  ICON_AREA,
+  ICON_BARS,
+  ICON_BASELINE,
+  ICON_CAMERA,
+  ICON_CANDLES,
+  ICON_COLUMNS,
+  ICON_CURSOR,
+  ICON_EXTENDED_LINE,
+  ICON_FIB,
+  ICON_FIT,
+  ICON_FULLSCREEN,
+  ICON_HEIKIN_ASHI,
+  ICON_HOLLOW_CANDLES,
+  ICON_HORIZONTAL_LINE,
+  ICON_INDICATORS,
+  ICON_LINE,
+  ICON_MEASURE,
+  ICON_OBJECTS,
+  ICON_RAY,
+  ICON_RECTANGLE,
+  ICON_TEXT,
+  ICON_TREND_LINE,
+  ICON_VERTICAL_LINE,
+  MENU_ROW_STYLES,
+  type IconDef,
+} from "./icons";
+import { attachTooltip, type TooltipHandle } from "./kit/Tooltip";
 import {
   enableToolbarKeyboardNavigation,
   isCoarsePointer,
@@ -17,8 +57,37 @@ import {
   type PopupHandle,
 } from "./popup";
 import { setMarkup, trustedMarkup } from "./kit/safe";
+import { adoptStyles, defineStyles, type StyleChunk } from "./styles";
 
 export const LEFT_SIDEBAR_W = 42;
+
+/** Hover (and touch long-press) delay before a sidebar tooltip shows. */
+const TOOLTIP_DELAY = 500;
+
+/**
+ * Sidebar chrome. Colours resolve through the widget's `--tv-color-*`
+ * variables (set on the widget root), so themes and overrides apply.
+ */
+export const SIDEBAR_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
+  "left-sidebar",
+  `.raze-chart-left-sidebar{display:flex;flex-direction:column;align-items:center;width:${LEFT_SIDEBAR_W}px;min-width:${LEFT_SIDEBAR_W}px;` +
+  "box-sizing:border-box;padding:6px 0;gap:2px;border-right:1px solid var(--tv-color-toolbar-divider-background,#363a45);" +
+  "background:var(--tv-color-platform-background,#181615);color:var(--tv-color-toolbar-button-text,#d1d4dc);" +
+  // Short containers scroll the toolbar instead of clipping it (the scrollbar
+  // itself is hidden by the base stylesheet).
+  "user-select:none;-webkit-user-select:none;z-index:2;overflow-y:auto;overflow-x:visible;position:relative}" +
+  ".raze-chart-sidebar-button{display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;" +
+  "flex:0 0 auto;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer;" +
+  "touch-action:manipulation;-webkit-touch-callout:none;transition:background-color var(--raze-duration,160ms)}" +
+  ".raze-chart-left-sidebar[data-coarse] .raze-chart-sidebar-button{width:38px;height:38px}" +
+  "@media (hover:hover){.raze-chart-sidebar-button:hover{background:var(--tv-color-toolbar-button-background-hover,rgba(255,255,255,.08))}}" +
+  ".raze-chart-sidebar-button[aria-expanded=true]{background:var(--tv-color-toolbar-button-background-hover,rgba(255,255,255,.08))}" +
+  ".raze-chart-sidebar-button[aria-pressed=true],.raze-chart-sidebar-button[aria-pressed=true]:hover{" +
+  "background:var(--tv-color-toolbar-button-background-active,rgba(102,216,158,.18));color:var(--tv-color-toolbar-button-text-hover,#66d89e)}" +
+  ".raze-chart-sidebar-separator{flex:0 0 auto;width:22px;height:1px;margin:4px 0;background:var(--tv-color-toolbar-divider-background,#363a45)}" +
+  "@media (prefers-reduced-motion:reduce){.raze-chart-sidebar-button{transition:none}}" +
+  "@media (forced-colors:active){.raze-chart-sidebar-button[aria-pressed=true]{outline:2px solid Highlight;outline-offset:-2px}}",
+);
 
 export interface LeftSidebarCallbacks {
   onTool(tool: DrawingTool): void;
@@ -32,48 +101,38 @@ export interface LeftSidebarCallbacks {
 
 export type ChartStyleId = ChartStyleName;
 
-const ICON = {
-  cursor: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 2.5L4 14.5L7.2 11.2L9.1 15.5L11 14.7L9.1 10.4L13.5 10.4L4 2.5Z" fill="currentColor"/></svg>`,
-  trend: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 14L8 8L11 11L15 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="15" cy="4" r="1.4" fill="currentColor"/><circle cx="3" cy="14" r="1.4" fill="currentColor"/></svg>`,
-  hline: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 9H16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M9 5V13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.35"/></svg>`,
-  fib: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 3.5H15M3 7H15M3 11H15M3 14.5H15" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M3 3.5V14.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
-  rect: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3.5" y="4.5" width="11" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/></svg>`,
-  text: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 4.5H14M9 4.5V14.5M6.5 14.5H11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
-  vline: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2V16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 9H13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.35"/></svg>`,
-  ray: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 14L15 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="3" cy="14" r="1.4" fill="currentColor"/></svg>`,
-  extended: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 15L16 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="3 2"/></svg>`,
-  measure: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 14H15M3 14V11M15 14V11M9 14V6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
-  objects: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 5H14M4 9H14M4 13H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
-  indicators: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 12.5L6.5 8.5L9.5 11L15 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 14.5H15" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/></svg>`,
-  fit: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 6V3.5H6M12 3.5H15V6M15 12V14.5H12M6 14.5H3V12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
-  camera: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2.5" y="5" width="13" height="9.5" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="9" cy="9.5" r="2.4" stroke="currentColor" stroke-width="1.4"/><path d="M6.5 5L7.5 3.5H10.5L11.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  fullscreen: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 6.5V3.5H6M12 3.5H15V6.5M15 11.5V14.5H12M6 14.5H3V11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
-  candles: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M5 3V15M5 6H7V12H3V6H5ZM13 3V15M13 5H15V11H11V5H13Z" fill="currentColor"/></svg>`,
-};
-
 const TOOL_IDS: ReadonlySet<string> = new Set([
   "cursor", "trend_line", "horizontal_line", "vertical_line", "ray", "extended_line", "measure",
   "fib_retracement", "rectangle", "text",
 ]);
 
-/** Builtin item id → button title + icon. */
-const BUILTIN: Record<string, { title: string; svg: string }> = {
-  cursor: { title: "Cursor / pan", svg: ICON.cursor },
-  trend_line: { title: "Trend line", svg: ICON.trend },
-  horizontal_line: { title: "Horizontal line", svg: ICON.hline },
-  fib_retracement: { title: "Fib retracement", svg: ICON.fib },
-  rectangle: { title: "Rectangle", svg: ICON.rect },
-  text: { title: "Text", svg: ICON.text },
-  vertical_line: { title: "Vertical line", svg: ICON.vline },
-  ray: { title: "Ray", svg: ICON.ray },
-  extended_line: { title: "Extended line", svg: ICON.extended },
-  measure: { title: "Measure", svg: ICON.measure },
-  objects_tree: { title: "Objects tree", svg: ICON.objects },
-  indicators: { title: "Indicators", svg: ICON.indicators },
-  fit: { title: "Fit content (F)", svg: ICON.fit },
-  screenshot: { title: "Screenshot", svg: ICON.camera },
-  fullscreen: { title: "Fullscreen", svg: ICON.fullscreen },
-  chart_type: { title: "Chart type", svg: ICON.candles },
+interface BuiltinItem {
+  /** Accessible name and tooltip text (translated when the button is built). */
+  label(): string;
+  icon: IconDef;
+  /** Keyboard shortcut shown after the label in the tooltip. */
+  shortcut?: string;
+}
+
+/** Builtin item id → label + icon. */
+const BUILTIN: Record<string, BuiltinItem> = {
+  cursor: { label: () => t("sidebar.cursor", "Cursor / pan"), icon: ICON_CURSOR },
+  trend_line: { label: () => t("sidebar.trendLine", "Trend line"), icon: ICON_TREND_LINE },
+  horizontal_line: { label: () => t("sidebar.horizontalLine", "Horizontal line"), icon: ICON_HORIZONTAL_LINE },
+  fib_retracement: { label: () => t("sidebar.fibRetracement", "Fib retracement"), icon: ICON_FIB },
+  rectangle: { label: () => t("sidebar.rectangle", "Rectangle"), icon: ICON_RECTANGLE },
+  text: { label: () => t("sidebar.text", "Text"), icon: ICON_TEXT },
+  vertical_line: { label: () => t("sidebar.verticalLine", "Vertical line"), icon: ICON_VERTICAL_LINE },
+  ray: { label: () => t("sidebar.ray", "Ray"), icon: ICON_RAY },
+  extended_line: { label: () => t("sidebar.extendedLine", "Extended line"), icon: ICON_EXTENDED_LINE },
+  measure: { label: () => t("sidebar.measure", "Measure"), icon: ICON_MEASURE },
+  objects_tree: { label: () => t("sidebar.objectsTree", "Objects tree"), icon: ICON_OBJECTS },
+  indicators: { label: () => t("sidebar.indicators", "Indicators"), icon: ICON_INDICATORS },
+  // F fits the chart while the chart canvas has keyboard focus.
+  fit: { label: () => t("sidebar.fit", "Fit content"), icon: ICON_FIT, shortcut: "F" },
+  screenshot: { label: () => t("sidebar.screenshot", "Screenshot"), icon: ICON_CAMERA },
+  fullscreen: { label: () => t("sidebar.fullscreen", "Fullscreen"), icon: ICON_FULLSCREEN },
+  chart_type: { label: () => t("sidebar.chartType", "Chart type"), icon: ICON_CANDLES },
 };
 
 /** The stock layout — what you get with no `raze.sidebar` option. */
@@ -88,43 +147,21 @@ export const DEFAULT_SIDEBAR_ITEMS: SidebarItem[] = [
   "chart_type",
 ];
 
-const ALL_CHART_STYLES: { id: ChartStyleId; title: string; svg: string }[] = [
-  { id: "candles", title: "Candles", svg: ICON.candles },
-  {
-    id: "line",
-    title: "Line",
-    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2.5 12.5L6.5 7.5L10 10.5L15.5 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  },
-  {
-    id: "area",
-    title: "Area",
-    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2.5 13.5L6.5 8L10 11L15.5 4.5V13.5H2.5Z" fill="currentColor" opacity="0.35"/><path d="M2.5 13.5L6.5 8L10 11L15.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  },
-  {
-    id: "heikin_ashi",
-    title: "Heikin Ashi",
-    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="4" y="5" width="4" height="8" rx="0.5" fill="currentColor"/><rect x="10" y="3" width="4" height="10" rx="0.5" fill="currentColor" opacity="0.55"/></svg>`,
-  },
-  {
-    id: "bars",
-    title: "Bars",
-    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M5 3V15M3 6H5M5 12H7M13 3V15M11 5H13M13 11H15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
-  },
-  {
-    id: "hollow_candles",
-    title: "Hollow candles",
-    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3.5" y="6" width="4" height="6" stroke="currentColor" stroke-width="1.3"/><rect x="10.5" y="5" width="4" height="7" fill="currentColor"/></svg>`,
-  },
-  {
-    id: "baseline",
-    title: "Baseline",
-    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 9H16M3 12L7 6L11 10L16 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  },
-  {
-    id: "columns",
-    title: "Columns",
-    svg: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 14V8H7V14H4ZM11 14V4H14V14H11Z" fill="currentColor"/></svg>`,
-  },
+interface ChartStyleEntry {
+  id: ChartStyleId;
+  label(): string;
+  icon: IconDef;
+}
+
+const ALL_CHART_STYLES: ChartStyleEntry[] = [
+  { id: "candles", label: () => t("chartType.candles", "Candles"), icon: ICON_CANDLES },
+  { id: "line", label: () => t("chartType.line", "Line"), icon: ICON_LINE },
+  { id: "area", label: () => t("chartType.area", "Area"), icon: ICON_AREA },
+  { id: "heikin_ashi", label: () => t("chartType.heikinAshi", "Heikin Ashi"), icon: ICON_HEIKIN_ASHI },
+  { id: "bars", label: () => t("chartType.bars", "Bars"), icon: ICON_BARS },
+  { id: "hollow_candles", label: () => t("chartType.hollowCandles", "Hollow candles"), icon: ICON_HOLLOW_CANDLES },
+  { id: "baseline", label: () => t("chartType.baseline", "Baseline"), icon: ICON_BASELINE },
+  { id: "columns", label: () => t("chartType.columns", "Columns"), icon: ICON_COLUMNS },
 ];
 
 export class LeftSidebar {
@@ -134,7 +171,8 @@ export class LeftSidebar {
   private stylePanel: PopupHandle | null = null;
   private activeTool: DrawingTool = "cursor";
   private chartStyle: ChartStyleId = "candles";
-  private readonly chartStyles: typeof ALL_CHART_STYLES;
+  private readonly chartStyles: ChartStyleEntry[];
+  private readonly tooltips = new Map<HTMLButtonElement, TooltipHandle>();
   private removeKeyboardNavigation: () => void;
 
   constructor(
@@ -150,28 +188,17 @@ export class LeftSidebar {
     this.el = document.createElement("div");
     this.el.className = "raze-chart-left-sidebar";
     this.el.setAttribute("role", "toolbar");
-    this.el.setAttribute("aria-label", "Drawing and chart tools");
+    this.el.setAttribute("aria-label", t("sidebar.label", "Drawing and chart tools"));
     this.el.setAttribute("aria-orientation", "vertical");
-    this.el.style.cssText = [
-      "display:flex",
-      "flex-direction:column",
-      "align-items:center",
-      `width:${LEFT_SIDEBAR_W}px`,
-      "min-width:" + LEFT_SIDEBAR_W + "px",
-      "box-sizing:border-box",
-      "padding:6px 0",
-      "gap:2px",
-      "border-right:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
-      "background:var(--tv-color-platform-background, #181615)",
-      "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
-      "user-select:none",
-      "z-index:2",
-      // Short containers scroll the toolbar instead of clipping it (the
-      // scrollbar itself is hidden via the injected base stylesheet).
-      "overflow-y:auto",
-      "overflow-x:visible",
-      "position:relative",
-    ].join(";");
+    // Finger-sized buttons on touch-capable devices (decided once, like the
+    // rest of the chrome's touch sizing).
+    if (isCoarsePointer()) this.el.dataset.coarse = "";
+    // Install the styles in the document now, and in the shadow root the
+    // sidebar is mounted into once the caller has appended it.
+    adoptStyles(document, SIDEBAR_STYLES);
+    queueMicrotask(() => {
+      if (this.el.isConnected) adoptStyles(this.el, SIDEBAR_STYLES);
+    });
 
     for (const item of items) {
       this.appendItem(item);
@@ -196,19 +223,24 @@ export class LeftSidebar {
       console.warn(`[raze-charts] unknown sidebar item: ${item}`);
       return;
     }
+    const label = def.label();
+    const b = this.mkBtn(label, def.shortcut);
+    // Locale-independent hook for code that needs a built-in button (the
+    // accessible name is translated, so never select by aria-label).
+    b.dataset.razeItem = item;
+    b.appendChild(createIcon(def.icon));
     if (item === "chart_type") {
-      this.styleBtn = this.mkBtn(def.title, def.svg);
-      this.styleBtn.setAttribute("aria-haspopup", "menu");
-      this.styleBtn.setAttribute("aria-expanded", "false");
-      this.styleBtn.addEventListener("click", (e) => {
+      this.styleBtn = b;
+      b.setAttribute("aria-haspopup", "menu");
+      b.setAttribute("aria-expanded", "false");
+      b.addEventListener("click", (e) => {
         e.stopPropagation();
         if (this.stylePanel) this.closeStylePanel();
         else this.openStylePanel();
       });
-      this.el.appendChild(this.styleBtn);
+      this.el.appendChild(b);
       return;
     }
-    const b = this.mkBtn(def.title, def.svg);
     this.toolBtns.set(item, b);
     if (item === "indicators") {
       b.setAttribute("aria-haspopup", "menu");
@@ -241,7 +273,15 @@ export class LeftSidebar {
   }
 
   private appendCustom(item: SidebarCustomItem): void {
-    const b = this.mkBtn(item.title, item.icon);
+    const b = this.mkBtn(item.title);
+    const icon = item.icon;
+    if (typeof icon === "string") setMarkup(b, trustedMarkup(icon));
+    else if ((icon as Node | null)?.nodeType === 1) b.appendChild(icon.cloneNode(true));
+    else console.warn(`[raze-charts] sidebar item "${item.title}": icon must be SVG/HTML markup or an Element; the button has no icon.`);
+    for (const svg of b.querySelectorAll("svg")) {
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+    }
     b.dataset.customId = item.id;
     b.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -255,51 +295,69 @@ export class LeftSidebar {
     this.el.appendChild(b);
   }
 
-  private mkBtn(title: string, icon: string | Element): HTMLButtonElement {
+  /** An icon button labelled `title`, with its tooltip (plus `shortcut`). */
+  private mkBtn(title: string, shortcut?: string): HTMLButtonElement {
     const b = document.createElement("button");
     b.type = "button";
-    b.title = title;
     b.setAttribute("aria-label", title);
-    b.className = "raze-chart-focusable";
-    if (typeof icon === "string") setMarkup(b, trustedMarkup(icon));
-    else if ((icon as Node | null)?.nodeType === 1) b.appendChild(icon.cloneNode(true));
-    else console.warn(`[raze-charts] sidebar item "${title}": icon must be SVG/HTML markup or an Element; the button has no icon.`);
-    for (const svg of b.querySelectorAll("svg")) {
-      svg.setAttribute("aria-hidden", "true");
-      svg.setAttribute("focusable", "false");
-    }
-    const size = isCoarsePointer() ? 38 : 32;
-    b.style.cssText = [
-      "display:flex",
-      "align-items:center",
-      "justify-content:center",
-      `width:${size}px`,
-      `height:${size}px`,
-      "border:0",
-      "border-radius:6px",
-      "background:transparent",
-      "color:inherit",
-      "cursor:pointer",
-      "padding:0",
-      "flex:0 0 auto",
-      "touch-action:manipulation",
-    ].join(";");
-    b.addEventListener("mouseenter", () => {
-      if (b.dataset.active !== "1") {
-        b.style.background = "var(--tv-color-toolbar-button-background-hover, rgba(255,255,255,0.06))";
-      }
-    });
-    b.addEventListener("mouseleave", () => {
-      if (b.dataset.active !== "1") b.style.background = "transparent";
-    });
+    b.className = "raze-chart-sidebar-button raze-chart-focusable";
+    // The shortcut is exposed semantically as well as in the tooltip text.
+    if (shortcut) b.setAttribute("aria-keyshortcuts", shortcut);
+    // An em space keeps the shortcut visually apart (the tooltip collapses
+    // ordinary runs of spaces); assistive technology reads "Fit content F".
+    this.addTooltip(b, shortcut ? `${title}\u2003${shortcut}` : title);
     return b;
+  }
+
+  /**
+   * Kit tooltip to the right of the sidebar. The kit covers hover (after
+   * TOOLTIP_DELAY), keyboard focus, Escape and aria-describedby; touch gets a
+   * long-press here, which shows the tooltip instead of activating the button.
+   */
+  private addTooltip(b: HTMLButtonElement, text: string): void {
+    // No tooltip on top of the button's own open menu (registered before the
+    // kit's listener so it can stop it).
+    b.addEventListener("pointerenter", (e) => {
+      if (b.getAttribute("aria-expanded") === "true") e.stopImmediatePropagation();
+    });
+    const tip = attachTooltip(b, text, { placement: "right", delay: TOOLTIP_DELAY });
+    this.tooltips.set(b, tip);
+    let timer = 0;
+    let longPressed = false;
+    const cancel = (): void => {
+      window.clearTimeout(timer);
+      timer = 0;
+    };
+    b.addEventListener("pointerdown", (e) => {
+      cancel();
+      longPressed = false;
+      if (e.pointerType !== "touch") return;
+      timer = window.setTimeout(() => {
+        timer = 0;
+        longPressed = true;
+        tip.show();
+      }, TOOLTIP_DELAY);
+    });
+    b.addEventListener("pointerup", cancel);
+    b.addEventListener("pointercancel", cancel);
+    // The press that revealed the tooltip neither opens the platform's
+    // long-press menu nor activates the button.
+    b.addEventListener("contextmenu", (e) => {
+      if (longPressed || timer) e.preventDefault();
+    });
+    b.addEventListener("click", (e) => {
+      if (!longPressed) return;
+      longPressed = false;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
   }
 
   private addSep(): void {
     const s = document.createElement("div");
+    s.className = "raze-chart-sidebar-separator";
     s.setAttribute("role", "separator");
     s.setAttribute("aria-orientation", "horizontal");
-    s.style.cssText = "width:22px;height:1px;background:var(--tv-color-toolbar-divider-background,#363a45);margin:4px 0;";
     this.el.appendChild(s);
   }
 
@@ -310,10 +368,6 @@ export class LeftSidebar {
       const on = id === tool;
       b.setAttribute("aria-pressed", String(on));
       b.dataset.active = on ? "1" : "0";
-      b.style.background = on
-        ? "var(--tv-color-toolbar-button-background-active, rgba(102,216,158,0.18))"
-        : "transparent";
-      b.style.color = on ? "var(--tv-color-toolbar-button-text-hover, #66d89e)" : "inherit";
     }
   }
 
@@ -326,13 +380,10 @@ export class LeftSidebar {
     if (!this.styleBtn) return;
     const def = this.chartStyles.find((s) => s.id === style) ?? ALL_CHART_STYLES.find((s) => s.id === style);
     if (!def) return;
-    setMarkup(this.styleBtn, trustedMarkup(def.svg));
-    this.styleBtn.title = `Chart type: ${def.title}`;
-    this.styleBtn.setAttribute("aria-label", `Chart type: ${def.title}`);
-    for (const icon of this.styleBtn.querySelectorAll("svg")) {
-      icon.setAttribute("aria-hidden", "true");
-      icon.setAttribute("focusable", "false");
-    }
+    this.styleBtn.replaceChildren(createIcon(def.icon));
+    const label = t("sidebar.chartTypeValue", "Chart type: {style}", { style: def.label() });
+    this.styleBtn.setAttribute("aria-label", label);
+    this.tooltips.get(this.styleBtn)?.update(label);
   }
 
   private openStylePanel(): void {
@@ -341,39 +392,29 @@ export class LeftSidebar {
       fontFamily: this.context.fontFamily,
       className: "raze-chart-style-menu",
       minWidth: 140,
-      padding: "6px 0",
       anchor: this.styleBtn,
       place: "right-start",
       role: "menu",
-      label: "Chart type",
+      label: t("sidebar.chartType", "Chart type"),
       onClose: () => {
         if (this.stylePanel === popup) this.stylePanel = null;
       },
     });
     this.stylePanel = popup;
+    adoptStyles(popup.el, MENU_ROW_STYLES);
     for (const s of this.chartStyles) {
       const on = s.id === this.chartStyle;
+      const label = s.label();
       const row = popupRow(
-        `${on ? "✓ " : ""}${s.title}`,
+        "",
         () => {
           this.setChartStyle(s.id);
           this.cbs.onChartType(s.id);
           this.closeStylePanel();
         },
-        { role: "menuitemradio", checked: on, label: s.title },
+        { role: "menuitemradio", checked: on, label },
       );
-      // Styled through CSSOM, not a style="" attribute in markup, so the menu
-      // renders under a strict style-src (no 'unsafe-inline').
-      const icon = document.createElement("span");
-      icon.style.cssText = `display:inline-flex;width:18px;color:${on ? "var(--tv-color-toolbar-button-text-hover, #66d89e)" : "inherit"}`;
-      // Chart-style SVGs come from the library-owned table above.
-      setMarkup(icon, trustedMarkup(s.svg));
-      for (const svg of icon.querySelectorAll("svg")) {
-        svg.setAttribute("aria-hidden", "true");
-        svg.setAttribute("focusable", "false");
-      }
-      row.prepend(icon);
-      popup.el.appendChild(row);
+      popup.el.appendChild(fillMenuRow(row, { checked: on, icon: s.icon, label }));
     }
     popup.reposition();
   }
@@ -385,6 +426,8 @@ export class LeftSidebar {
 
   destroy(): void {
     this.closeStylePanel();
+    for (const tip of this.tooltips.values()) tip.destroy();
+    this.tooltips.clear();
     this.removeKeyboardNavigation();
     this.el.remove();
   }

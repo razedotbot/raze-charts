@@ -28,11 +28,14 @@ export { ChartApi } from "./core/ChartApi";
 export type { ChartApiDeps } from "./core/ChartApi";
 export { ShapeStore } from "./core/ShapeStore";
 export type { ShapeKind, StoredShape } from "./core/ShapeStore";
+export { builtinShapeCatalog, createShapeKindCatalog, registryShapeCatalog, ShapeError } from "./core/ShapeStore";
+export type { ShapeCreateInput, ShapeKindCatalog, ShapeKindInfo, ShapeRestoreInput, ShapeToolDescriptor } from "./core/ShapeStore";
 export { TradingStore } from "./core/TradingStore";
 export type { StoredTradingLine } from "./core/TradingStore";
+export type { PriceGrid, TradingCallbackBinding, TradingCallbackSlot } from "./core/TradingStore";
 export { buildTheme, isLightColor, withAlpha } from "./core/theme";
 export { CommandStack } from "./core/CommandStack";
-export type { Command } from "./core/CommandStack";
+export type { Command, CommandStackOptions } from "./core/CommandStack";
 export { resolveTimeframe, TIMEFRAME_PRESETS } from "./core/timeframe";
 export type { ResolvedTimeframe, TimeframePreset } from "./core/timeframe";
 export type {
@@ -67,7 +70,7 @@ export type {
 // ── Data ────────────────────────────────────────────────────────────────────
 export { DataManager } from "./data/DataManager";
 export { TimeIndex } from "./data/TimeIndex";
-export type { TimePoint } from "./data/TimeIndex";
+export type { SessionBreakOptions, TimePoint, WallClockZone } from "./data/TimeIndex";
 export { createDatafeed, defineDataSource } from "./data/dataSource";
 export type {
   DefineDataSourceOptions,
@@ -84,6 +87,8 @@ export type {
 
 // ── Engine ──────────────────────────────────────────────────────────────────
 export { ChartEngine } from "./engine/ChartEngine";
+export type { EngineResize } from "./engine/ChartEngine";
+export type { LayerPaintStats } from "./engine/layers";
 export { ChartRenderer } from "./engine/ChartRenderer";
 export type { GestureHost } from "./engine/gestures";
 export type { SubPaneGeom } from "./engine/layout";
@@ -98,11 +103,48 @@ export type {
 } from "./engine/paint/view";
 export type { AxisTag, AxisTagSourceKind, Rect, ScreenPoint, TimescaleMarkHit } from "./engine/paint/view";
 
+// ── Drawing tools (registry shared by built-in and host tools) ──────────────
+export {
+  defineDrawingTool,
+  drawingToolDefaults,
+  getDrawingTool,
+  listDrawingTools,
+  onDrawingToolsChanged,
+  removeDrawingTool,
+} from "./drawings/registry";
+export type { DefineDrawingToolOptions, RegisteredDrawingTool } from "./drawings/registry";
+export { anchorsComplete, minAnchors } from "./drawings/types";
+export type {
+  BuiltinDrawingToolId,
+  DrawingAnchorSpec,
+  DrawingConstrainInput,
+  DrawingCursor,
+  DrawingEnv,
+  DrawingGeometry,
+  DrawingHit,
+  DrawingInteractionState,
+  DrawingLevel,
+  DrawingLineStyle,
+  DrawingPaintEnv,
+  DrawingPropField,
+  DrawingPropSchema,
+  DrawingState,
+  DrawingThemeTokens,
+  DrawingToolDefinition,
+  DrawingToolGroup,
+} from "./drawings/types";
+
 // ── Studies (indicator math is pure and dependency-free) ────────────────────
-export { bollinger, closesFromBars, ema, macd, rsi, sma, stdev, vwap } from "./studies/calc";
+export { bollinger, closesFromBars, ema, macd, rsi, sma, sourceValues, stdev, vwap } from "./studies/calc";
+export type { VwapAnchor, VwapOptions } from "./studies/calc";
+export type { StudySource } from "./studies/types";
 export { BUILTIN_STUDIES, StudyRegistry } from "./studies/registry";
 export { StudyStore } from "./studies/StudyStore";
 export type { StudyInstance, StudyKind, StudySpec } from "./studies/StudyStore";
+export { StudyInputError } from "./studies/inputs";
+export type { StudyInputErrorCode } from "./studies/inputs";
+export type { StudyPatch, StudyPlotOverride, StudySnapshot } from "./studies/StudyStore";
+export type { StudyChange, StudyChangeKind } from "./studies/types";
 
 // ── UI chrome ───────────────────────────────────────────────────────────────
 export { Toolbar, TOOLBAR_HEIGHT } from "./ui/Toolbar";
@@ -117,7 +159,7 @@ export { ObjectsTree } from "./ui/ObjectsTree";
 export { ScaleBar } from "./ui/ScaleBar";
 export { LoadingScreen } from "./ui/LoadingScreen";
 export { closeContextMenu, showContextMenu } from "./ui/ContextMenu";
-export { ensureBaseStyles, isCoarsePointer, openPopup, popupRow } from "./ui/popup";
+export { ensureBaseStyles, isCoarsePointer, openPopup, popupRow, popupSeparator } from "./ui/popup";
 export type { PopupHandle, PopupOptions } from "./ui/popup";
 
 // ── Utils ───────────────────────────────────────────────────────────────────
@@ -127,8 +169,11 @@ export {
   parseResolution,
   resolutionLabel,
   resolutionToMs,
+  normalizeResolution,
+  isValidResolution,
+  RESOLUTION_FORMS,
 } from "./util/resolution";
-export type { ParsedResolution } from "./util/resolution";
+export type { ParsedResolution, FloorToBarOptions } from "./util/resolution";
 export {
   createPriceFormatter,
   decimalsFromPricescale,

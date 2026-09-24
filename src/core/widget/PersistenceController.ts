@@ -1,7 +1,9 @@
 // `save()` / `load()`: the versioned layout snapshot (symbol, interval, range,
 // style and scale flags, drawings, study specs, compare symbols).
 
-import type { Bar, ChartLayoutSnapshot, EntityId, ResolutionString } from "../../types/charting_library";
+import type { ChartLayoutSnapshot, EntityId, ResolutionString } from "../../types/charting_library";
+import { CHART_STYLES } from "../context";
+import type { PreparedCompare } from "./CompareController";
 import type { WidgetController, WidgetHost } from "./host";
 
 declare module "./host" {
@@ -22,6 +24,8 @@ export function validateSnapshot(state: ChartLayoutSnapshot): void {
       || !Number.isFinite(state.visibleRange.from)
       || !Number.isFinite(state.visibleRange.to)
       || state.visibleRange.from > state.visibleRange.to
+      || (state.logScale !== undefined && typeof state.logScale !== "boolean")
+      || (state.percentScale !== undefined && typeof state.percentScale !== "boolean")
       || state.drawings.some((drawing) => !drawing
         || typeof drawing.id !== "string"
         || !Array.isArray(drawing.points)
@@ -34,6 +38,11 @@ export function validateSnapshot(state: ChartLayoutSnapshot): void {
         || !Number.isFinite(study.length))
       || state.compare?.some((symbol) => typeof symbol !== "string")) {
     throw new TypeError("[raze-charts] invalid chart layout snapshot");
+  }
+  if (!CHART_STYLES.includes(state.chartStyle)) {
+    throw new TypeError(
+      `[raze-charts] chart layout snapshot has unknown chartStyle "${String(state.chartStyle)}". Supported chart types: ${CHART_STYLES.join(", ")}`,
+    );
   }
   const drawingIds = state.drawings.map((drawing) => drawing.id);
   const studyIds = state.studies.flatMap((study) => study.id ? [study.id] : []);
@@ -83,6 +92,9 @@ export class PersistenceController implements WidgetController {
         lock: study.lock,
         forceOverlay: study.forceOverlay,
         inputs: { ...study.inputs },
+        ...(study.plotStyles && {
+          plotStyles: Object.fromEntries(Object.entries(study.plotStyles).map(([ref, style]) => [ref, { ...style }])),
+        }),
       })),
       compare: context.compare.map((item) => item.symbol),
     };
@@ -95,7 +107,7 @@ export class PersistenceController implements WidgetController {
     const { context, data, shapes, studies, commands, lifecycle, controllers } = this.host;
     const unknownStudy = state.studies.find((study) => !studies.registry.resolve(study.name));
     if (unknownStudy) {
-      throw new Error(`[raze-charts] chart layout references unknown study: ${unknownStudy.name}`);
+      throw new Error(studies.registry.unknownStudyMessage(unknownStudy.name));
     }
 
     const loadId = ++this.loadId;
@@ -107,13 +119,22 @@ export class PersistenceController implements WidgetController {
     if (!isCurrent()) return;
 
     // Fetch everything before replacing drawings/studies. This keeps the
-    // visible object model coherent if a compare/range request fails and lets
-    // a newer load supersede this one without leaving half a snapshot behind.
-    const comparisons: { symbol: string; bars: Bar[] }[] = [];
+    // visible object model coherent if a range request fails and lets a newer
+    // load supersede this one without leaving half a snapshot behind. A compare
+    // that no longer resolves or loads is reported and skipped, so the rest of
+    // the layout still loads (the symbol and interval are already committed).
+    const comparisons: PreparedCompare[] = [];
     for (const symbol of state.compare ?? []) {
-      const bars = await data.loadCompare(symbol);
+      let prepared: PreparedCompare | null;
+      try {
+        prepared = await controllers.compare.prepare(symbol);
+      } catch (error) {
+        if (!isCurrent()) return;
+        lifecycle.reportError(`restore compare "${symbol}"; the layout loads without it`, error);
+        continue;
+      }
       if (!isCurrent()) return;
-      comparisons.push({ symbol, bars });
+      if (prepared) comparisons.push(prepared);
     }
     await data.revealTimeRange(state.visibleRange.from, state.visibleRange.to);
     if (!isCurrent()) return;
@@ -121,9 +142,12 @@ export class PersistenceController implements WidgetController {
     const chrome = controllers.chrome;
     const resumeHistory = commands.suspend();
     try {
-      context.chartStyle = state.chartStyle;
-      context.logScale = state.logScale;
-      context.percentScale = state.percentScale;
+      context.setChartType(state.chartStyle, "load");
+      // Percent wins over log, matching the painters and readScaleState().
+      context.setScaleMode(
+        { mode: state.percentScale ? "percent" : state.logScale ? "log" : "normal" },
+        "load",
+      );
       if (state.volumeMode) context.volumeMode = state.volumeMode;
       if (typeof state.magnet === "boolean") context.magnet = state.magnet;
       chrome.leftSidebar?.setChartStyle(state.chartStyle);
@@ -153,10 +177,10 @@ export class PersistenceController implements WidgetController {
           lock: study.lock ?? false,
           forceOverlay: study.forceOverlay ?? false,
           inputs: study.inputs ?? {},
+          invalidInputs: "default", // Stale saved inputs fall back to their defaults with a warning.
         });
       }
-      context.compare = [];
-      for (const comparison of comparisons) controllers.compare.add(comparison.symbol, comparison.bars);
+      controllers.compare.restore(comparisons);
       chrome.symbolSearch?.setSymbol(context.symbol);
       chrome.intervalSelector?.refresh();
       chrome.syncAccessibility();

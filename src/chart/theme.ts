@@ -58,14 +58,42 @@ export const LIGHT_CHART_THEME: Readonly<DashboardTheme> = Object.freeze({
   lastChipFg: "#10100e",
 });
 
-/** Series colours used when a mark does not set stroke/fill. */
+/**
+ * Colour-vision-deficiency-safe variant of the dark theme: gains/positive
+ * cells are blue, losses/negative cells orange, and reference rules and the
+ * scatter ramp midpoint a neutral grey, so no encoding depends on telling red
+ * from green. Use it as `theme: COLORBLIND_CHART_THEME`, or spread it to
+ * override individual tokens.
+ */
+export const COLORBLIND_CHART_THEME: Readonly<DashboardTheme> = Object.freeze({
+  ...DARK_CHART_THEME,
+  accent: "#5ea8e8",
+  down: "#f08c3a",
+  gold: "#b8b0a2",
+});
+
+/** Light counterpart of {@link COLORBLIND_CHART_THEME}. */
+export const COLORBLIND_LIGHT_CHART_THEME: Readonly<DashboardTheme> = Object.freeze({
+  ...LIGHT_CHART_THEME,
+  accent: "#1f6fb2",
+  down: "#b85510",
+  gold: "#6b6b6b",
+});
+
+// Default series palettes. Every pair stays at least 15 CIELAB ΔE76 apart
+// under normal vision and under Machado (2009) full-severity protan, deutan
+// and tritan simulation, every slot has at least 4.5:1 contrast with its
+// plot background, and no slot is close to the theme's text colour
+// (tests/native-palette-cvd.mjs enforces all three).
+
+/** Series colours used on dark plots when a mark does not set stroke/fill. */
 export const CHART_PALETTE: readonly string[] = Object.freeze([
-  "#66d89e", "#d8aa5b", "#8ecae6", "#e57359", "#c4b5fd", "#f4eee1",
+  "#66d89e", "#dcae5a", "#9bcee1", "#dc6d56", "#c4b6ff", "#e283ab",
 ] as const);
 
-/** Series colours tuned to keep every slot legible on a white plot. */
+/** Series colours used on light plots when a mark does not set stroke/fill. */
 export const LIGHT_CHART_PALETTE: readonly string[] = Object.freeze([
-  "#087a55", "#8a5a00", "#1769aa", "#a23b34", "#6750a4", "#374151",
+  "#087a55", "#8a5a00", "#6273ac", "#982e2b", "#58449b", "#993474",
 ] as const);
 
 export type ChartThemeInput = "dark" | "light" | Partial<DashboardTheme>;
@@ -77,22 +105,34 @@ function heatEase(t: number): number {
   return Math.pow((u - dead) / (1 - dead), 1.62);
 }
 
+// The heat ramp runs from heatZero to the theme's accent (positive) or down
+// (negative) token, reaching 36% of the way at 42% of the eased magnitude.
+// Deriving both arms from theme tokens keeps light ramps monotonic in
+// lightness and lets a theme choose its own scheme: the colour-blind presets
+// get blue/orange heatmaps without a separate code path.
+const HEAT_KNEE_INPUT = 0.42;
+const HEAT_KNEE_MIX = 0.36;
+
+function heatRamp(zero: string, extreme: string, eased: number): string {
+  const t = eased < HEAT_KNEE_INPUT
+    ? (eased / HEAT_KNEE_INPUT) * HEAT_KNEE_MIX
+    : HEAT_KNEE_MIX + ((eased - HEAT_KNEE_INPUT) / (1 - HEAT_KNEE_INPUT)) * (1 - HEAT_KNEE_MIX);
+  return mixHex(zero, extreme, t);
+}
+
+/**
+ * Heatmap cell colour. A domain that straddles zero is diverging (accent for
+ * positive, down for negative, symmetric in magnitude); any other domain is a
+ * sequential heatZero → accent ramp.
+ */
 export function heatFill(value: number, lo: number, hi: number, theme: DashboardTheme): string {
-  const mid = theme.heatZero;
   if (lo < 0 && hi > 0) {
     const mag = Math.max(Math.abs(lo), hi) || 1;
     const e = heatEase(Math.abs(value) / mag);
-    if (value >= 0) {
-      if (e < 0.42) return mixHex(mid, "#2f5c47", e / 0.42);
-      return mixHex("#2f5c47", theme.accent, (e - 0.42) / 0.58);
-    }
-    if (e < 0.42) return mixHex(mid, "#6e3c34", e / 0.42);
-    return mixHex("#6e3c34", theme.down, (e - 0.42) / 0.58);
+    return heatRamp(theme.heatZero, value >= 0 ? theme.accent : theme.down, e);
   }
   const span = hi - lo || 1;
-  const e = heatEase((value - lo) / span);
-  if (e < 0.42) return mixHex(mid, "#2f5c47", e / 0.42);
-  return mixHex("#2f5c47", theme.accent, (e - 0.42) / 0.58);
+  return heatRamp(theme.heatZero, theme.accent, heatEase((value - lo) / span));
 }
 
 /** Sequential ramp down → gold → accent, used for scatter / unfilled points. */

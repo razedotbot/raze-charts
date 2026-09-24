@@ -27,7 +27,9 @@ const USAGE = `Usage: node scripts/benchmark-widget.mjs [options]
 
 Measures the financial widget in headless Chromium (1100x620, DPR 1) at
 1k, 10k, 100k and 500k bars: load, repaint at three zoom levels, crosshair
-moves, pan, wheel zoom, six-study repaint, live ticks, and retained heap.
+moves (and the overlay-layer frame they cost; a crosshair move that repaints
+the main layer fails the run), pan, wheel zoom, six-study repaint, live
+ticks, and retained heap.
 Build first (node build.mjs). Time values are main-thread milliseconds for
 the input handler plus every animation frame it causes, rasterisation included.
 

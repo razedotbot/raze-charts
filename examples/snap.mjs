@@ -13,7 +13,7 @@ const out = process.argv[3] || "snap.png";
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1100, height: 620 } });
 await p.goto(url, { waitUntil: "domcontentloaded" });
-await p.waitForSelector(".raze-chart-root canvas", { timeout: 30000 });
+await p.waitForSelector(".raze-chart-root canvas.raze-chart-canvas", { timeout: 30000 });
 await p.waitForTimeout(2500);
 // hover mid-chart to show crosshair
 await p.mouse.move(550, 300);

@@ -1,5 +1,6 @@
 // Serialized chart layout exchanged by widget.save() and widget.load().
 
+import type { StudyPlotStyles } from "./chart-api";
 import type { ChartStyleName, VolumeMode } from "./options";
 import type { ShapePoint } from "./shapes";
 
@@ -35,7 +36,9 @@ export interface ChartLayoutSnapshot {
     color: string;
     lock?: boolean;
     forceOverlay?: boolean;
-    inputs?: Record<string, number | string>;
+    inputs?: Record<string, number | string | boolean>;
+    /** Per-plot styles from createStudy overrides or `studies_overrides`. */
+    plotStyles?: StudyPlotStyles;
   }[];
   compare?: string[];
 }

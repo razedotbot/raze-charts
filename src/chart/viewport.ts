@@ -99,3 +99,76 @@ export function createViewportGroup(): ViewportGroup {
     },
   };
 }
+
+/**
+ * Limits for interactive X zoom and pan on a quantitative axis, in data units
+ * (milliseconds for time axes).
+ */
+export interface XWindowLimits {
+  /** Full data extent the window may cover. */
+  readonly extent: readonly [number, number];
+  /** Narrowest window; zooming in stops here. */
+  readonly minSpan: number;
+  /** Widest window; zooming out stops here. */
+  readonly maxSpan: number;
+  /** Keep the window inside `extent` (`panBounds: "data"`). */
+  readonly bounded: boolean;
+}
+
+function orderedWindow(range: readonly [number, number]): [number, number] {
+  return range[0] <= range[1] ? [range[0], range[1]] : [range[1], range[0]];
+}
+
+/**
+ * Clamp a window to the limits: its span to [minSpan, maxSpan] around its
+ * centre, then (when bounded) shifted inside the extent. A window at least as
+ * wide as a bounded extent becomes exactly the extent, so zooming out always
+ * recovers the full data.
+ */
+export function clampXWindow(range: readonly [number, number], limits: XWindowLimits): [number, number] {
+  let [lo, hi] = orderedWindow(range);
+  const minSpan = Math.max(0, limits.minSpan);
+  const maxSpan = Math.max(minSpan, limits.maxSpan);
+  const span = hi - lo;
+  if (!(span >= minSpan && span <= maxSpan)) {
+    const next = Math.min(maxSpan, Math.max(minSpan, Number.isFinite(span) ? span : maxSpan));
+    const centre = Number.isFinite(lo + hi) ? (lo + hi) / 2 : (limits.extent[0] + limits.extent[1]) / 2;
+    lo = centre - next / 2;
+    hi = centre + next / 2;
+  }
+  if (!limits.bounded) return [lo, hi];
+  const [extLo, extHi] = orderedWindow(limits.extent);
+  if (hi - lo >= extHi - extLo) return [extLo, extHi];
+  if (lo < extLo) return [extLo, extLo + (hi - lo)];
+  if (hi > extHi) return [extHi - (hi - lo), extHi];
+  return [lo, hi];
+}
+
+/**
+ * Zoom a window by `factor` (<1 zooms in) around `anchor`, which keeps its
+ * relative position unless a limit or the data bounds move it.
+ */
+export function zoomXWindow(
+  range: readonly [number, number],
+  anchor: number,
+  factor: number,
+  limits: XWindowLimits,
+): [number, number] {
+  const [lo, hi] = orderedWindow(range);
+  const span = hi - lo;
+  if (!(span > 0) || !(factor > 0) || !Number.isFinite(factor)) return clampXWindow([lo, hi], limits);
+  const minSpan = Math.max(0, limits.minSpan);
+  const maxSpan = Math.max(minSpan, limits.maxSpan);
+  const target = Math.min(maxSpan, Math.max(minSpan, span * factor));
+  const applied = target / span;
+  const pivot = Number.isFinite(anchor) ? Math.min(hi, Math.max(lo, anchor)) : (lo + hi) / 2;
+  const nextLo = pivot - (pivot - lo) * applied;
+  return clampXWindow([nextLo, nextLo + target], limits);
+}
+
+/** Shift a window by `delta` (in the limits' units), keeping its span within the limits and the data bounds. */
+export function panXWindow(range: readonly [number, number], delta: number, limits: XWindowLimits): [number, number] {
+  const [lo, hi] = orderedWindow(range);
+  const shift = Number.isFinite(delta) ? delta : 0;
+  return clampXWindow([lo + shift, hi + shift], limits);
+}
