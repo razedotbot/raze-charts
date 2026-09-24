@@ -180,36 +180,41 @@ const show = (value: unknown): string => {
   return typeof value;
 };
 
-const countBars = (n: number): string => `${n} bar${n === 1 ? "" : "s"}`;
-
 /**
  * One actionable sentence for an issue. `origin` names the datafeed call, for
  * example "getBars" or "subscribeBars".
  */
 export function describeBarIssue(issue: BarIssue, origin: string): string {
-  const at = `${origin} bar ${issue.index}`;
-  const n = countBars(issue.count);
+  const { field, repaired } = issue;
   const value = show(issue.value);
-  const repair = issue.repaired ? " (raze.coerce_bars)" : "; or set raze.coerce_bars: true";
+  const n = `${issue.count} bar${issue.count === 1 ? "" : "s"}`;
+  const coerce = repaired ? " (raze.coerce_bars)" : "; or set raze.coerce_bars: true";
+  let fact: string;
+  let outcome: string;
   switch (issue.problem) {
     case "shape":
-      return `[raze-charts] ${at} is not a Bar object; dropped ${n}.`;
+      fact = "not a Bar object";
+      outcome = `dropped ${n}`;
+      break;
     case "time":
     case "ohlc":
-      return `[raze-charts] ${at}: Bar.${issue.field} ${value} is not a finite number; dropped ${n}.`;
+    case "volume":
+      fact = `Bar.${field} ${value} is not a finite number`;
+      outcome = field === "volume" ? `removed from ${n}` : `dropped ${n}`;
+      break;
     case "string":
-      return issue.repaired
-        ? `[raze-charts] ${at}: Bar.${issue.field} is the string ${value}; converted ${n}${repair}.`
-        : `[raze-charts] ${at}: Bar.${issue.field} is the string ${value}, not a number; dropped ${n}. Use Number()${repair}.`;
+      fact = `Bar.${field} is the string ${value}`;
+      outcome = repaired ? `converted ${n}${coerce}` : `dropped ${n}. Use Number()${coerce}`;
+      break;
     case "seconds":
-      return `[raze-charts] Bar.time looks like seconds; expected milliseconds (${at}: ${value}, ${n}). `
-        + (issue.repaired ? `Multiplied by 1000${repair}.` : `Multiply by 1000${repair}.`);
+      fact = `Bar.time looks like seconds; expected milliseconds (${value})`;
+      outcome = repaired ? `multiplied ${n} by 1000${coerce}` : `kept ${n}. Multiply by 1000${coerce}`;
+      break;
     case "range": {
       const { low, high } = issue.value as { low: number; high: number };
-      return `[raze-charts] ${at}: Bar.low ${low} is above Bar.high ${high} (${n}). `
-        + (issue.repaired ? `Swapped${repair}.` : `Swap them${repair}.`);
+      fact = `Bar.low ${low} is above Bar.high ${high}`;
+      outcome = repaired ? `swapped ${n}${coerce}` : `kept ${n}. Swap them${coerce}`;
     }
-    case "volume":
-      return `[raze-charts] ${at}: Bar.volume ${value} is not a finite number; removed from ${n}.`;
   }
+  return `[raze-charts] ${origin} bar ${issue.index}: ${fact}; ${outcome}.`;
 }

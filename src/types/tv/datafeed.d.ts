@@ -79,7 +79,8 @@ export interface DatafeedConfiguration {
   supports_timescale_marks?: boolean;
   /**
    * When true, `getServerTime` is called at boot and every five minutes. The
-   * offset drives the first history window, the countdown and time presets.
+   * offset moves the end of the first history window and `options.timeframe`
+   * to the server clock.
    */
   supports_time?: boolean;
   symbols_types?: DatafeedSymbolType[];

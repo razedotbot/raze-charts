@@ -65,7 +65,10 @@ exports are the stable resolver contract.
 - Use TradingView resolution strings: `"1S"`, `"15"`, `"240"`, `"D"`/`"1D"`,
   `"W"`, `"M"`/`"3M"`. The chart and your feed receive the canonical spelling
   (`"D"` arrives as `"1D"`). Invalid values such as `"4h"` or `"1H"` throw a
-  `RangeError` instead of loading one-minute bars.
+  `RangeError` instead of loading one-minute bars. The exported
+  `parseResolution`, `resolutionToMs`, `resolutionLabel` and `floorToBar`
+  helpers throw the same error instead of returning one minute; test untrusted
+  strings with `isValidResolution()`.
 - Return bars in ascending order. The manager canonicalizes and de-duplicates,
   but a sorted feed avoids unnecessary work.
 - Treat the subscription GUID as opaque and stop producing work after
@@ -77,8 +80,9 @@ exports are the stable resolver contract.
   then render by default (the Raze-only `enabled_features: ["mark_on_bars"]`
   no longer turns them on, and `disabled_features: ["mark_on_bars"]` hides
   them). Late results from an obsolete symbol or interval are discarded.
-- Set `supports_time: true` with `getServerTime` (Unix seconds) to align the
-  first history window and countdown with the server clock.
+- Set `supports_time: true` with `getServerTime` (Unix seconds) to end the
+  first history window, and resolve `options.timeframe`, at the server's time
+  instead of the client clock's.
 - Always call `remove()` when the host unmounts.
 
 ### Move a callback feed to the native data source

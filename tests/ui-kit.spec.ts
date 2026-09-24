@@ -1012,10 +1012,15 @@ test.describe("content security", () => {
     await page.keyboard.press("Escape");
     await expect(indicators).toHaveCount(0);
 
-    // Objects tree and the chart context menu.
+    // Objects tree and the chart context menu (which needs host items).
     await sidebar.getByRole("button", { name: "Objects tree" }).click();
     await expect(page.locator('[role="menu"],[role="dialog"]').first()).toBeVisible();
     await page.keyboard.press("Escape");
+    await page.evaluate(() => (window as unknown as { __razeChart: any }).__razeChart.onContextMenu(() => [
+      { position: "top", text: "Add alert here", click: () => {} },
+      { position: "top", text: "-" },
+      { position: "top", text: "Reset chart", click: () => {} },
+    ]));
     const canvas = page.locator("canvas").first();
     const box = (await canvas.boundingBox())!;
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });

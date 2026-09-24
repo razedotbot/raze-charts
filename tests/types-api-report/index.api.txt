@@ -1149,7 +1149,7 @@ function isCoarsePointer(): boolean
 function isLightColor(color: string): boolean
 function isValidResolution(res: unknown): boolean
 function macd(closes: number[], fast?: number | undefined, slow?: number | undefined, signal?: number | undefined): { macd: (null | number)[]; signal: (null | number)[]; hist: (null | number)[]; }
-function normalizeResolution(res: string): string
+function normalizeResolution(res: string): ResolutionString
 function openPopup(opts: PopupOptions): PopupHandle
 function parseResolution(res: string): ParsedResolution
 function popupRow(content: string, onClick: (e: MouseEvent) => void, options?: undefined | { role?: 'menuitem' | 'menuitemcheckbox' | 'menuitemradio' | undefined; checked?: boolean | undefined; label?: string | undefined; trustedHtml?: boolean | undefined; }): HTMLButtonElement

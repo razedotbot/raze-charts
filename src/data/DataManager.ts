@@ -38,7 +38,7 @@ import {
   type ViewportChangeReason,
 } from "../core/context";
 import { resolveTimeframe } from "../core/timeframe";
-import { normalizeResolution, resolutionToMs, RESOLUTION_FORMS } from "../util/resolution";
+import { canonicalResolutions, normalizeResolution, resolutionToMs, RESOLUTION_FORMS } from "../util/resolution";
 import { TimeIndex } from "./TimeIndex";
 import { describeBarIssue, SECONDS_THRESHOLD, validateBars } from "./validateBars";
 
@@ -143,7 +143,7 @@ export class DataManager {
   private readonly warned = new Set<string>();
 
   constructor(private readonly context: ChartContext) {
-    this.context.resolution = normalizeResolution(this.context.resolution) as ResolutionString;
+    this.context.resolution = normalizeResolution(this.context.resolution);
     // Any user or API move toward the left edge may need older history.
     this.context.rangeChanged.subscribe(this, ((change: ViewportChange) => {
       if (!this.revealing && PAGINATION_REASONS.has(change.reason)) void this.maybeLoadMoreHistory();
@@ -230,16 +230,7 @@ export class DataManager {
     origin: string,
   ): ResolutionString[] | undefined {
     if (!Array.isArray(list)) return undefined;
-    const valid: ResolutionString[] = [];
-    const invalid: string[] = [];
-    for (const item of list) {
-      try {
-        const canonical = normalizeResolution(item as string) as ResolutionString;
-        if (!valid.includes(canonical)) valid.push(canonical);
-      } catch {
-        invalid.push(typeof item === "string" ? JSON.stringify(item) : String(item));
-      }
-    }
+    const { valid, invalid } = canonicalResolutions(list);
     if (invalid.length) {
       this.warnOnce(
         `resolutions:${origin}`,
@@ -591,7 +582,15 @@ export class DataManager {
         );
         return { ...result, nextTime: null };
       }
-      if (hop >= MAX_GAP_HOPS) return result;
+      if (hop >= MAX_GAP_HOPS) {
+        // Without this the initial load would end in a silent empty state.
+        this.warnOnce(
+          "gap-hops",
+          `[raze-charts] getBars returned ${hop + 1} empty pages in a row, each with a nextTime; stopped at nextTime ${result.nextTime}. `
+            + "Point nextTime at the newest bar before the gap.",
+        );
+        return result;
+      }
       const span = Math.max(1, params.to - params.from);
       params = {
         from: result.nextTime - span,
@@ -1064,7 +1063,7 @@ export class DataManager {
    * forms) for an invalid resolution before any request is made.
    */
   async changeResolution(resolution: ResolutionString): Promise<void> {
-    const canonical = normalizeResolution(resolution) as ResolutionString;
+    const canonical = normalizeResolution(resolution);
     const target = { symbol: this.desiredTarget.symbol, resolution: canonical };
     if (canonical === this.desiredTarget.resolution) {
       if (this.latestReload) await this.latestReload;
@@ -1078,7 +1077,7 @@ export class DataManager {
     symbol: string,
     resolution: ResolutionString = this.desiredTarget.resolution,
   ): Promise<void> {
-    const target = { symbol, resolution: normalizeResolution(resolution) as ResolutionString };
+    const target = { symbol, resolution: normalizeResolution(resolution) };
     if (
       target.symbol === this.desiredTarget.symbol &&
       target.resolution === this.desiredTarget.resolution

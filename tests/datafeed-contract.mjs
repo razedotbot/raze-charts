@@ -294,16 +294,22 @@ async function boot(feedSetup, contextOptions) {
   manager.destroy();
 }
 {
-  // An endless chain of gaps is bounded.
+  // An endless chain of gaps is bounded, and the stop is reported.
   let next = Math.floor(BASE / 1000);
-  const { calls, context, manager } = await boot({
-    history(_params, _index, onResult) {
-      next -= 86_400;
-      queueMicrotask(() => onResult([], { noData: true, nextTime: next }));
-    },
+  const warnings = await capture("warn", async () => {
+    const { calls, context, manager } = await boot({
+      history(_params, _index, onResult) {
+        next -= 86_400;
+        queueMicrotask(() => onResult([], { noData: true, nextTime: next }));
+      },
+    });
+    assert(calls.getBars.length === 6 && context.bars.length === 0, "gap retries are bounded (1 request + 5 gap hops)");
+    manager.destroy();
   });
-  assert(calls.getBars.length === 6 && context.bars.length === 0, "gap retries are bounded (1 request + 5 gap hops)");
-  manager.destroy();
+  assert(
+    warnings.length === 1 && warnings[0].includes("6 empty pages in a row") && warnings[0].includes(`stopped at nextTime ${next}`),
+    "running out of gap hops warns once with the nextTime it stopped at",
+  );
 }
 {
   const warnings = await capture("warn", async () => {
@@ -752,6 +758,49 @@ async function loadFixture(bars, options = {}) {
   flush();
   assert(optOut.calls.getMarks === 0 && arcs === 0, 'disabled_features "mark_on_bars" hides marks without requesting them');
   quiet.remove();
+
+  // favorites.intervals feed the header's interval row: they are canonicalised
+  // before it is built, and an invalid entry cannot abort the header build.
+  const withinSeconds = (promise, what) => Promise.race([
+    promise,
+    new Promise((_resolve, reject) => setTimeout(() => reject(new Error(`Timed out waiting for ${what}`)), 3_000)),
+  ]);
+  const headerChart = async (interval, favorites) => {
+    // No symbol resolutions, so the header lists the favorites.
+    const { feed } = makeFeed({
+      info: { supported_resolutions: undefined },
+      history: (_p, _i, onResult) => queueMicrotask(() => onResult(loaded)),
+    });
+    const root = mount();
+    let chartWidget;
+    const warnings = await capture("warn", async () => {
+      chartWidget = new widget({
+        symbol: "A",
+        interval,
+        container: root,
+        datafeed: feed,
+        disabled_features: ["left_toolbar", "scale_bar"],
+        favorites: { intervals: favorites },
+      });
+      await withinSeconds(chartWidget.headerReady(), "headerReady");
+      await withinSeconds(new Promise((resolve) => chartWidget.onChartReady(resolve)), "onChartReady");
+    });
+    const buttons = [...root.querySelectorAll('[role="group"][aria-label="Chart interval"] button')]
+      .map((button) => `${button.textContent}:${button.getAttribute("aria-pressed")}`);
+    chartWidget.remove();
+    return { warnings: warnings.filter((line) => line.includes("favorites.intervals")), buttons };
+  };
+
+  const hours = await headerChart("60", ["1H", "60"]);
+  assert(
+    hours.warnings.length === 1 && hours.warnings[0].includes('"1H"') && hours.warnings[0].includes("Accepted forms"),
+    "an invalid favorites interval is dropped with one warning listing the accepted forms",
+  );
+  assert(hours.buttons.join(",") === "1h:true", "the header still boots and shows the valid favorite as 1h");
+
+  const days = await headerChart("D", ["D", "W"]);
+  assert(days.warnings.length === 0, "valid favorites do not warn");
+  assert(days.buttons.join(",") === "1D:true,1W:false", 'favorites "D"/"W" match interval "D": the 1D button is pressed');
 }
 
 console.log("\nDATAFEED CONTRACT: PASS");

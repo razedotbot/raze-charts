@@ -8,6 +8,7 @@
 // and lists the accepted forms, so a typo such as "4h" can never silently
 // become a one-minute chart.
 
+import type { ResolutionString } from "../types/charting_library";
 import { floorToCalendar, getTimeZone, type TickUnit } from "./time";
 
 export interface ParsedResolution {
@@ -31,31 +32,27 @@ const PATTERN = /^(\d*)([SDWMsdw]?)$/;
 const cache = new Map<string, { parsed: ParsedResolution; canonical: string }>();
 const CACHE_LIMIT = 64;
 
+const show = (value: unknown): string => (typeof value === "string" ? JSON.stringify(value) : String(value));
+
 function invalid(value: unknown, hint?: string): RangeError {
-  const shown = typeof value === "string" ? JSON.stringify(value) : String(value);
   return new RangeError(
-    `[raze-charts] invalid resolution ${shown}.${hint ? ` ${hint}` : ""} Accepted forms: ${RESOLUTION_FORMS}.`,
+    `[raze-charts] invalid resolution ${show(value)}.${hint ? ` ${hint}` : ""} Accepted forms: ${RESOLUTION_FORMS}.`,
   );
 }
 
 /** Explain the most common mistakes before listing the accepted forms. */
 function hintFor(text: string): string | undefined {
-  const hours = text.match(/^(\d*)\s*[hH]$/);
-  if (hours) {
-    const n = Math.max(1, Number(hours[1] || "1"));
-    return `Hours are written in minutes: use "${n * 60}" for ${n} hour${n === 1 ? "" : "s"}.`;
+  const m = text.match(/^(\d*)([hHmtTyY])$/);
+  if (!m) return /^0+[SDWMsdw]?$/.test(text) ? "The multiplier must be a positive integer." : undefined;
+  const n = Math.max(1, Number(m[1] || "1"));
+  switch (m[2]) {
+    case "m": return `Lower-case "m" is ambiguous: use "${n}" (minutes) or "${n}M" (months).`;
+    case "t":
+    case "T": return "Tick resolutions are not supported.";
+    case "y":
+    case "Y": return `Years are months: use "${n * 12}M".`;
+    default: return `Hours are minutes: use "${n * 60}".`;
   }
-  if (/^\d*m$/.test(text)) {
-    const n = text.slice(0, -1) || "1";
-    return `Lower-case "m" is ambiguous: use "${n}" for ${n} minute(s) or "${n}M" for ${n} month(s).`;
-  }
-  if (/^\d*[tT]$/.test(text)) return "Tick resolutions are not supported.";
-  if (/^\d*[yY]$/.test(text)) {
-    const n = Math.max(1, Number(text.slice(0, -1) || "1"));
-    return `Years are written in months: use "${n * 12}M".`;
-  }
-  if (/^0+[SDWMsdw]?$/.test(text)) return "The multiplier must be a positive integer.";
-  return undefined;
 }
 
 function parse(res: unknown): { parsed: ParsedResolution; canonical: string } {
@@ -112,8 +109,26 @@ export function parseResolution(res: string): ParsedResolution {
  * Minute resolutions stay in minutes ("60" is not rewritten to "1H", which
  * TradingView does not accept). Throws like {@link parseResolution}.
  */
-export function normalizeResolution(res: string): string {
-  return parse(res).canonical;
+export function normalizeResolution(res: string): ResolutionString {
+  return parse(res).canonical as ResolutionString;
+}
+
+/**
+ * Canonicalise a resolution list with {@link normalizeResolution}, dropping
+ * duplicates. Invalid entries come back quoted in `invalid` so the caller can
+ * report them in one warning.
+ */
+export function canonicalResolutions(list: readonly unknown[]): { valid: ResolutionString[]; invalid: string[] } {
+  const valid: ResolutionString[] = [];
+  const rejected: string[] = [];
+  for (const item of list) {
+    if (!isValidResolution(item)) rejected.push(show(item));
+    else {
+      const canonical = normalizeResolution(item as string);
+      if (!valid.includes(canonical)) valid.push(canonical);
+    }
+  }
+  return { valid, invalid: rejected };
 }
 
 /** True when {@link parseResolution} accepts `res`. */
