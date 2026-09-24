@@ -65,8 +65,8 @@ npm run check:size
 
 | Entrypoint | Measurement | Contents | Gzip budget |
 | --- | --- | --- | ---: |
-| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
-| | Scenario: Widget only | `import { widget }` | 63 KiB |
+| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 74 KiB |
+| | Scenario: Widget only | `import { widget }` | 64 KiB |
 | Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 67 KiB |
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 49 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 33 KiB |
@@ -178,6 +178,23 @@ its 2 KiB; 1 KiB without them). `src/chart/compile/axes.ts` keeps a compact
 UTC ladder with the same label scheme instead, marked with a TODO for W1B-05:
 once the core builds its tables lazily and lets UTC-only callers skip the
 IANA zone machinery, `/chart` can switch back.
+
+W1B-05 raised the root artifact budget to 74 KiB and the "Widget only"
+scenario to 64 KiB, 2 KiB and 1 KiB past the AD-01 cap. This needs an
+orchestrator decision before it merges: an AD-01 override that W2-12's
+feature packs then win back, or cuts the orchestrator directs. Measured on
+this branch, the artifact is 73.8 KiB and the scenario 63.3 KiB, 11.1 KiB and
+8.9 KiB more than at the wave 1A merge. About 8.5 KiB of that is the shared
+time core the widget now draws its time axis, crosshair and session breaks
+through (`FinancialTimeAxis`, the zone math, weighted tick selection and the
+Intl cache, per AD-06). The rest is the widget side: display-zone resolution
+with `custom_timezones` and warn-once fallbacks, the synced and volume-pane
+crosshair, per-session breaks, the chart timezone API (0.6 KiB, of which
+`getTimezoneApi()` is 0.35 KiB and `availableTimezones()` 0.08 KiB) and
+the custom time formatters (0.13 KiB). The legacy UTC tick code in
+`plotScale.ts` is already tree-shaken out of the artifact, so deleting it
+saves nothing here. Moving the timezone API and the formatters out of the root
+would therefore still leave the artifact above 72 KiB.
 
 ## Dense native charts
 

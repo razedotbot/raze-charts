@@ -1,13 +1,18 @@
 import { resolutionToMs } from "../../util/resolution";
 import { TimeIndex } from "../../data/TimeIndex";
 import { xForIndex } from "../plotScale";
+import { resolutionKindOf, timeAxisOf } from "./axes";
 import type { FinanceView } from "./view";
 
 export function drawSessionBreaks(ctx: CanvasRenderingContext2D, v: FinanceView): void {
   if (!v.context.features.has("session_breaks")) return;
   const bars = v.context.bars;
   if (bars.length < 2) return;
-  const breaks = new TimeIndex(bars, resolutionToMs(v.context.resolution)).sessionBreaks();
+  const breaks = new TimeIndex(bars, resolutionToMs(v.context.resolution)).sessionBreaks({
+    timeZone: timeAxisOf(v.context).calendarZone(resolutionKindOf(v.context)),
+    from: v.visibleRange.from - 1,
+    to: v.visibleRange.to + 1,
+  });
   if (!breaks.length) return;
   ctx.save();
   ctx.strokeStyle = v.context.theme.vertGrid;

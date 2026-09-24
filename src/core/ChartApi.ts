@@ -11,6 +11,7 @@ import type {
   IChartWidgetApi,
   ILineDataSourceApi,
   ISubscription,
+  ITimezoneApi,
   ITradingLineAdapter,
   ResolutionString,
   ShapePoint,
@@ -94,6 +95,10 @@ export interface ChartApi {
   refreshMarks(): void;
   clearMarks(): void;
   resetData(): void;
+  timezone(): string;
+  setTimezone(timezone: string): void;
+  onTimezoneChanged(): ISubscription<(timezone: string) => void>;
+  getTimezoneApi(): ITimezoneApi;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging

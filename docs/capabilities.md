@@ -37,7 +37,7 @@ registry created there is standalone; pass definitions to a widget through
 | Capability | Status | Notes |
 | --- | --- | --- |
 | Candlestick, line, area, Heikin Ashi, bars, hollow candles, baseline, columns | **Yes** | Selected through the financial chart UI/options. |
-| Volume | **Yes** | Overlay (default), dedicated pane, or hidden via `raze.volume_mode`. |
+| Volume | **Yes** | Overlay (default), dedicated pane, or hidden via `raze.volume_mode`. The crosshair reads the volume on the axis over a dedicated pane. |
 | Initial history and lazy left pagination | **Yes** | Uses the TradingView-shaped `getBars` contract. |
 | Promise-first native data source | **Yes** | `defineDataSource` + `createDatafeed` adapt promises and optional realtime cleanup to the callback protocol. |
 | Live bars | **Yes** | `subscribeBars` / `unsubscribeBars`; append and forming-bar replacement are supported. |
@@ -45,10 +45,12 @@ registry created there is standalone; pass definitions to a widget through
 | Symbol and resolution races | **Yes** | Latest request wins; stale history, marks, and subscription callbacks are ignored. |
 | Async marks | **Yes** | Callback-based asynchronous `getMarks` results are applied only to the active target. |
 | Timescale marks | **Yes** | `getTimescaleMarks` is requested with history and painted on the time axis. |
-| Gapped market sessions | **Yes** | `TimeIndex` maps actual timestamps onto adjacent logical bar indices; `session_breaks` draws optional gap lines. |
+| Gapped market sessions | **Yes** | `TimeIndex` maps actual timestamps onto adjacent logical bar indices; `session_breaks` draws optional lines at session opens (after a gap) and, inside round-the-clock intraday sessions (gap-free runs longer than a day, such as a forex week or 24x7 crypto between outages), at each local midnight of the display zone. Sessions of a day or less, such as equity sessions or 23-hour futures sessions, break only at their open. |
 | Timeframe / go-to-date | **Yes** | Honours `options.timeframe`; header presets and go-to-date call `setVisibleRange`, which pages history when needed. |
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
-| Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
+| Timezone | **Yes** | `timezone` (an IANA zone, a fixed offset such as `"+05:30"`, `"exchange"` for `symbolInfo.timezone`, or a `custom_timezones` id) sets the zone of the time-axis labels, the crosshair time and the session breaks. DST is handled: the repeated fall-back hour is labelled twice and the skipped hour never. `activeChart().setTimezone()`, `timezone()`, `onTimezoneChanged()` and `getTimezoneApi()` change and observe it at runtime. `setTimezone()` throws a `RangeError` for an unknown zone; an unknown zone in options or in `symbolInfo` warns once and shows UTC. Daily and coarser bars keep their trading date in every zone. |
+| Time axis | **Yes** | Calendar-aligned weighted ticks (year, month, week, day, hour, down to seconds) spaced by pixels per bar, so gapped sessions keep their label density and session opens show their date. Labels never overlap or collide with the corner cell. `custom_formatters.tickMarkFormatter`, `dateFormatter` and `timeFormatter` customise the axis and crosshair labels. |
+| Timezone label and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). The label names the zone the axis shows: it follows `setTimezone()`, resolves `"exchange"` and `custom_timezones` ids, and reads `Etc/UTC` when the configured zone is unknown. |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. |
 | Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` and `lock` are stored on the instance. |
 | Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. |
@@ -58,7 +60,7 @@ registry created there is standalone; pass definitions to a widget through
 | Order and position lines | **Yes** | TradingView-style fluent adapters, styling, quantity/P&L labels, move/modify/cancel callbacks, mouse/touch drag, and one-tick keyboard adjustment. |
 | Stop-loss / take-profit brackets | **Yes** | Linked entry/SL/TP lines, risk/reward shading and ratio, auto-scale participation, group callbacks and cancellation. |
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
-| Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
+| Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. The synced crosshair's time line and time label show in every pane; its price line only where the symbol matches. |
 | Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
 | Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |
 | Encapsulated runtime surface | **Yes** | `widget` and `activeChart()` objects expose only the documented `IChartingLibraryWidget` / `IChartWidgetApi` methods. Internal state is `#private` or module-private and cannot be reached or mutated at runtime. |

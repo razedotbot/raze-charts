@@ -2,6 +2,7 @@ import { TIME_AXIS_H } from "../layout";
 import { resolutionToMs } from "../../util/resolution";
 import { TimeIndex } from "../../data/TimeIndex";
 import { xForIndex, yForPrice } from "../plotScale";
+import { displayTimeZoneId } from "./axes";
 import { timeAxisTopOf } from "./primitives";
 import type { FinanceView } from "./view";
 
@@ -30,9 +31,7 @@ export function drawAxisChrome(ctx: CanvasRenderingContext2D, v: FinanceView): v
   if (!v.context.features.has("timezone_display") && !v.context.features.has("countdown")) return;
   const t = v.context.theme;
   const top = timeAxisTopOf(v);
-  const tz = v.context.options.timezone === "exchange"
-    ? (v.context.symbolInfo?.timezone ?? "Etc/UTC")
-    : (v.context.options.timezone || v.context.symbolInfo?.timezone || "Etc/UTC");
+  const tz = displayTimeZoneId(v.context);
   const bars = v.context.bars;
   const last = bars[bars.length - 1];
   let countdown = "";

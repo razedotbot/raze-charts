@@ -54,6 +54,7 @@ interface ChartingLibraryWidgetOptions
   container: HTMLElement | string
   custom_font_family?: string | undefined
   custom_formatters?: CustomFormatters | undefined
+  custom_timezones?: CustomAliasedTimezone[] | undefined
   datafeed: IBasicDataFeed
   debug?: boolean | undefined
   disabled_features?: string[] | undefined
@@ -94,9 +95,16 @@ interface CreateShapeOptions<TOverrides extends object = Record<string, unknown>
   showInObjectsTree?: boolean | undefined
   text?: string | undefined
   zOrder?: 'bottom' | 'top' | undefined
+interface CustomAliasedTimezone
+  alias: string
+  id: string
+  title?: string | undefined
 interface CustomFormatters
   [key: string]: unknown
+  dateFormatter?: ISymbolDateTimeFormatter | undefined
   priceFormatterFactory?: PriceFormatterFactory | undefined
+  tickMarkFormatter?: ((date: Date, tickMarkType: TickMarkType) => null | string) | undefined
+  timeFormatter?: ISymbolDateTimeFormatter | undefined
 interface CustomSymbolValueFormatter
   format(price: number, signPositive?: boolean | undefined): string
 interface DatafeedConfiguration
@@ -145,9 +153,11 @@ interface IChartWidgetApi
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
   getShapeById(entityId: EntityId): ILineDataSourceApi
+  getTimezoneApi(): ITimezoneApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
   onIntervalChanged(): ISubscription<(interval: ResolutionString, timeframeObj: unknown) => void>
+  onTimezoneChanged(): ISubscription<(timezone: string) => void>
   refreshMarks(): void
   removeAllShapes(): void
   removeAllTradingLines(): void
@@ -156,8 +166,10 @@ interface IChartWidgetApi
   resolution(): ResolutionString
   setResolution(resolution: ResolutionString, callback?: (() => void) | undefined): void
   setSymbol(symbol: string, callback?: (() => void) | undefined): void
+  setTimezone(timezone: string): void
   setVisibleRange(range: { from: number; to: number; }): Promise<void>
   symbol(): string
+  timezone(): string
 interface IChartingLibraryWidget
   activeChart(): IChartWidgetApi
   chart(index?: number | undefined): IChartWidgetApi
@@ -191,6 +203,13 @@ interface ISubscription<TFunc extends (...args: never[]) => void = (...args: nev
   subscribe(obj: null | object, member: TFunc, singleshot?: boolean | undefined): void
   unsubscribe(obj: null | object, member: TFunc): void
   unsubscribeAll(obj: null | object): void
+interface ISymbolDateTimeFormatter
+  format(date: Date): null | string
+interface ITimezoneApi
+  availableTimezones(): TimezoneInfo[]
+  getTimezone(): TimezoneInfo
+  onTimezoneChanged(): ISubscription<(timezone: string) => void>
+  setTimezone(timezone: string): void
 interface ITradingLineAdapter
   cancel(): void
   getPrice(): number
@@ -339,6 +358,7 @@ interface StudySeries
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
 type SubscribeBarsCallback = (bar: Bar) => void
 type ThemeName = 'dark' | 'light'
+type TickMarkType = 'DayOfMonth' | 'Month' | 'Time' | 'TimeWithSeconds' | 'Year'
 interface TimescaleMark
   [key: string]: unknown
   color: string
@@ -347,6 +367,10 @@ interface TimescaleMark
   time: number
   tooltip: string[]
 type Timezone = string
+interface TimezoneInfo
+  id: string
+  offset?: number | undefined
+  title: string
 interface TradingLineEvent
   line: TradingLineSnapshot
   reason: 'api' | 'cancel' | 'drag' | 'keyboard'

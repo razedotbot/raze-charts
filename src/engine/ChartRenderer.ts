@@ -20,11 +20,10 @@ import {
 import {
   autoFitPriceRange,
   computePriceTicks,
-  computeTimeTicks,
   type PlotScale,
   toDisplay,
 } from "./plotScale";
-import { adjustPriceAxisWidth } from "./paint/axes";
+import { adjustPriceAxisWidth, computeTimeAxisTicks } from "./paint/axes";
 import type {
   Crosshair,
   DraftShape,
@@ -286,7 +285,7 @@ export class ChartRenderer implements GestureHost {
 
     const v = this.financeView();
     const priceTicks = computePriceTicks(v);
-    const timeTicks = computeTimeTicks(this.context.bars, v);
+    const timeTicks = computeTimeAxisTicks(ctx, v);
 
     const desired = adjustPriceAxisWidth(ctx, v, priceTicks);
     if (Math.abs(desired - this.priceAxisW) > 1) {
