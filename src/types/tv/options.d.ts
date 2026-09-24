@@ -177,6 +177,13 @@ export interface RazeChartsOptions {
   volume_mode?: VolumeMode;
   magnet?: boolean;
   /**
+   * CSP nonce for the chrome stylesheet. Only needed where the browser lacks
+   * constructable stylesheets and the page's `style-src` forbids
+   * `'unsafe-inline'`: the fallback `<style>` elements (in the document, the
+   * widget's shadow root and fullscreen overlays) then carry this nonce.
+   */
+  style_nonce?: string;
+  /**
    * Undo steps kept per widget (default 100). The oldest step is dropped
    * beyond it; `Infinity` keeps every step. Other values below 1 and
    * fractions throw.

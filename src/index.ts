@@ -159,7 +159,7 @@ export { ObjectsTree } from "./ui/ObjectsTree";
 export { ScaleBar } from "./ui/ScaleBar";
 export { LoadingScreen } from "./ui/LoadingScreen";
 export { closeContextMenu, showContextMenu } from "./ui/ContextMenu";
-export { ensureBaseStyles, isCoarsePointer, openPopup, popupRow } from "./ui/popup";
+export { ensureBaseStyles, isCoarsePointer, openPopup, popupRow, popupSeparator } from "./ui/popup";
 export type { PopupHandle, PopupOptions } from "./ui/popup";
 
 // ── Utils ───────────────────────────────────────────────────────────────────

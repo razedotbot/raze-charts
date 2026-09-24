@@ -32,7 +32,7 @@ const themedPopup = openPopup({
   initialFocus: false,
 });
 assert.equal(
-  themedPopup.el.style.getPropertyValue("--tv-color-popup-background"),
+  themedPopup.el.closest("[data-raze-portal]").style.getPropertyValue("--tv-color-popup-background"),
   "#ffffff",
   "body-portalled popups retain their widget theme variables",
 );

@@ -29,9 +29,9 @@ public widget API is unchanged except where noted in the
 
 | Primitive | Use for | Behaviour |
 | --- | --- | --- |
-| `openDialog(options)` | Settings, go-to, shortcuts, search | `role="dialog"` + `aria-modal`, named by its title; Tab and Shift+Tab are trapped; Escape cancels; focus returns to the opener; optional tab list with arrow/Home/End keys and lazily rendered panels; OK, Cancel and "Reset to defaults"; Enter submits and `onSubmit` may return `false` to stay open; while an async `onSubmit` is pending the dialog is `aria-busy`, Cancel and Close are disabled, and Escape, backdrop and swipe dismissals are refused (a sheet snaps back), so a half-applied submit is never reported as a cancel, though `close()` from code still closes it; draggable by the header on desktop; page scroll is locked. A backdrop click dismisses sheets, but desktop dialogs ignore it unless `closeOnBackdrop` is set, so a stray click cannot discard edits. |
+| `openDialog(options)` | Settings, go-to, shortcuts, search | `role="dialog"` + `aria-modal`, named by its title; with the default `auto` presentation an open dialog switches between centred dialog and bottom sheet when the viewport crosses 520px or the primary pointer changes, keeping its content, tab, field values and focus (`DialogHandle.presentation` reports the current one); Tab and Shift+Tab are trapped; Escape cancels; focus returns to the opener; optional tab list with arrow/Home/End keys and lazily rendered panels; OK, Cancel and "Reset to defaults"; Enter submits and `onSubmit` may return `false` to stay open; while an async `onSubmit` is pending the dialog is `aria-busy`, Cancel and Close are disabled, and Escape, backdrop and swipe dismissals are refused (a sheet snaps back), so a half-applied submit is never reported as a cancel, though `close()` from code still closes it; draggable by the header on desktop; page scroll is locked. A backdrop click dismisses sheets, but desktop dialogs ignore it unless `closeOnBackdrop` is set, so a stray click cannot discard edits. |
 | `openPopover(options)` | Colour picker, inline pickers | Anchored and non-modal. It flips and shifts to stay in the viewport, caps its height to the available space, and closes on Escape, an outside press or focus leaving it. |
-| `attachTooltip(target, text)` | Icon buttons | Replaces `title`. It shows on hover after a short delay (instantly while warm) and on keyboard focus, never on touch. It stays open while hovered, Escape dismisses it, and it is linked with `aria-describedby`. A target without a name gets the text as its `aria-label`. A visible tooltip hides itself when its target leaves the DOM. |
+| `attachTooltip(target, text)` | Icon buttons | Replaces `title`. It shows on hover after a short delay (instantly while warm) and on keyboard focus, never on touch. It stays open while hovered, Escape dismisses it, and it is linked with `aria-describedby`. A target without a name gets the text as its `aria-label`. A visible tooltip hides itself when its target leaves the DOM. `destroy()` restores the `title` it replaced and removes an `aria-label` only the tooltip provided. |
 | `showToast(message, options)` | Confirmations, errors | Bottom-centre stack inside a named region. Persistent live regions announce toasts (polite for info/success, assertive for warning/error). Timers pause on hover or focus, one optional action is allowed, and at most three toasts are visible. |
 
 On a coarse primary pointer or a viewport narrower than 520px (`prefersSheet()`),
@@ -60,7 +60,37 @@ path and the focused element inside shadow roots, so a sheet portalled into
 the chart's shadow root handles taps, arrow keys and Escape, and an anchor
 inside a shadow root still toggles its anchored menu. An anchored menu closes
 when focus arrives outside it, its anchor and overlays opened from it; moving
-focus between its rows (by keyboard or by pressing a row) keeps it open.
+focus between its rows (by keyboard or by pressing a row) keeps it open. A
+mouse press on a row of a focused menu keeps focus in the menu and moves it to
+that row, so engines that do not focus pressed buttons (WebKit) behave the
+same. Focus that goes nowhere is checked a task later, and a focused row that
+a re-render removed hands focus back to the menu instead of closing it. When
+the chart enters or leaves element fullscreen, the engine can blur the focused
+row before `fullscreenchange` re-homes the portal (Chromium does on entry); an
+open menu then moves into (or out of) the fullscreen element at once and
+focuses the same row again. A menu closes when another element, one that does
+not contain its chart, goes fullscreen. Tab and Shift+Tab on a row (or the
+menu itself) close a menu and continue from its opener; a field or other
+control a host puts inside a `role="menu"` popup keeps the browser's Tab
+order. Rows marked `aria-disabled` are reached by the arrow keys (WAI-ARIA
+APG) but never run their action; hovering or pressing one leaves focus where
+it is, and a menu opens on its first enabled row.
+
+Anchored menus render in a portal too (below), so they work in element
+fullscreen and in shadow roots. Placement uses `computePosition()`: the menu
+flips to the side of its anchor with room, is capped at the viewport height
+minus 16px and scrolls inside (`overscroll-behavior: contain`), and follows
+its anchor through resizes, scrolls, content-size changes and fullscreen
+changes; it closes if its anchor leaves the DOM. A context menu (no anchor)
+opens at the cursor and flips around it. Rows (`popupRow()`) and separators
+(`popupSeparator()`) are styled by the `POPUP_STYLES` chunk: hover, focus,
+`aria-selected` and `aria-disabled` states are CSS, the highlight is single
+(hovering a row of a focused menu focuses it), keyboard focus adds a 2px
+`--raze-focus` ring to that row (focus the pointer moved does not, whatever
+the engine's `:focus-visible` heuristics say), and every menu shares the 4px
+`--raze-popup-inset` (`PopupOptions.padding` still overrides it but is
+deprecated). Menus fade and scale in over 120ms from the corner nearest their
+anchor, with no animation under `prefers-reduced-motion`.
 
 ### Portals
 
@@ -211,6 +241,8 @@ Some forms cannot be checked statically. Keep them out of UI modules:
 | Test | Covers |
 | --- | --- |
 | `tests/ui-kit.spec.ts` | Real Chromium: dialog audit (plus axe when installed), Tab trap and focus return, keyboard-operable controls and colour popover, header drag, 390×844 touch sheets (kit dialog and the widget's Indicators menu), swipe and backdrop dismissal, Tab trapping in sheet menus, sheet modality (menu sheets and menu-role popover sheets are `aria-modal` dialog containers), sheet width on tablets, sheet menus closing when a narrow window widens, fullscreen and shadow-root portals, `openPopup()` menus anchored inside a shadow root (sheet taps, arrows, Escape, backdrop; anchored toggling and focus-out), pressing a non-focused row in an anchored widget menu, a standalone `LoadingScreen` spinning in documents and shadow roots, strict CSP for the kit and for the whole widget (zero violations with no `'unsafe-inline'`), nonce fallback, Trusted Types enforcement on the full widget including Element sidebar icons, tooltips, toasts, reduced motion |
+| `tests/popups.spec.ts` | Real Chromium: mouse-clicking non-focused Indicators rows (RSI, MACD, Bollinger) and a press that does not move focus, Tab/Shift+Tab and outside dismissal, the single highlight and the shared 4px inset across the widget's menus, context-menu separators, removals and cursor flipping, a 60-row objects tree that scrolls within the viewport (End, Home, wheel without zooming the chart), every menu in element fullscreen by mouse and keyboard, a menu that is open when the chart enters fullscreen (light DOM and shadow root) following it with focus kept, closing when another element goes fullscreen, the keyboard focus ring, disabled rows reachable but inert, Tab from a field inside a menu, the widget in a shadow root (scoped styles, menus), `raze.style_nonce` with the `<style>` fallback under a nonce-only CSP, flip placement, following the anchor on resize, reduced motion, and a kit dialog switching between dialog and sheet while open |
+| `tests/popup-menus.mjs` | TradingView context-menu conventions, separator and disabled-row semantics (arrow keys reach disabled rows, which never run; menus open on the first enabled row), class-only row styling and the focus ring rule, the deprecated padding override, closing when the anchor leaves the DOM, Tab leaving a menu from a row but not from a field inside it, re-render focus recovery, tooltip teardown, the string-container error |
 | `tests/ui-kit-dom.mjs` | Stylesheet adoption and nonces (including reuse across roots), placement math, control semantics, dialog lifecycle and busy submits, cleanup when a content or tab render callback throws, sheet `aria-modal` placement, anchored-menu focus rules, tooltip and toast lifecycles, the sheet-preference watcher, popup presentation |
 | `tests/i18n-runtime.mjs` | Defaults, packs, fallback chain, lazy loaders, overlapping `setLocale()` calls, plurals, hooks, isolation, misuse |
 | `tests/safe-text.mjs` | Escaping, `setMarkup`, Trusted Types policy behaviour, URL filtering, `h()` |

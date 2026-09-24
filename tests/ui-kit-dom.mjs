@@ -491,7 +491,8 @@ try {
   menuAnchor.focus();
   const anchored = kit.openPopup({ anchor: menuAnchor, fontFamily: "sans-serif", label: "Menu" });
   assert.equal(anchored.presentation, "anchored", "wide fine-pointer viewports keep anchored menus");
-  assert.equal(anchored.el.parentElement, document.body);
+  assert(anchored.el.parentElement.matches("[data-raze-portal]"), "anchored menus render in a kit portal");
+  assert.equal(anchored.el.parentElement.parentElement, document.body, "outside fullscreen and shadow roots the portal is on <body>");
   anchored.close();
   const sheet = kit.openPopup({ anchor: menuAnchor, fontFamily: "sans-serif", label: "Indicators", presentation: "sheet" });
   sheet.el.appendChild(kit.popupRow("EMA 9", () => {}));

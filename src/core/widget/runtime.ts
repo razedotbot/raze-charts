@@ -16,6 +16,7 @@ import { createChartContext, type ChartContext } from "../context";
 import { ShapeStore } from "../ShapeStore";
 import { buildTheme } from "../theme";
 import { TradingStore } from "../TradingStore";
+import { ensureBaseStyles } from "../../ui/popup";
 import { WIDGET_CONTROLLERS } from "./controllers";
 import type { ChildWidget, WidgetController, WidgetControllerMap, WidgetHost } from "./host";
 import { LifecycleController } from "./LifecycleController";
@@ -102,9 +103,18 @@ export class WidgetRuntime implements WidgetHost {
     const container = typeof options.container === "string"
       ? document.getElementById(options.container)
       : options.container;
-    if (!container) throw new Error("[raze-charts] widget container not found");
+    if (!container) {
+      throw new Error(typeof options.container === "string"
+        ? `[raze-charts] widget container "#${options.container}" not found in the document. ` +
+          "A string container is looked up with document.getElementById; inside a shadow root, pass the element itself."
+        : "[raze-charts] widget container not found");
+    }
     this.container = container;
     this.commands = new CommandStack({ limit: options.raze?.undo_limit });
+    // Chrome styles go to the root that renders the widget: the document, or
+    // the shadow root it is mounted in. The nonce also covers overlays that
+    // later render in other roots of this document.
+    ensureBaseStyles(container, { nonce: options.raze?.style_nonce });
     this.context = createWidgetContext(options);
     this.lifecycle = new LifecycleController(this);
 
