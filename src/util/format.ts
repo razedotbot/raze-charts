@@ -15,6 +15,27 @@ export function decimalsFromPricescale(pricescale: number): number {
   return Math.max(0, Math.round(Math.log10(pricescale)));
 }
 
+// `toLocaleString(locale, options)` builds a new Intl.NumberFormat on every
+// call (about 20 µs); the legend, crosshair and axes format several labels a
+// frame. Cached instances give byte-identical output. (W1B-06 generalises
+// this cache per locale; this is the minimal en-US subset.)
+let defaultFormat: Intl.NumberFormat | null = null;
+const priceFormats = new Map<number, Intl.NumberFormat>();
+
+/** The `toLocaleString("en-US")` defaults: grouping, up to three fraction digits. */
+function defaultFormatter(): Intl.NumberFormat {
+  return (defaultFormat ??= new Intl.NumberFormat("en-US"));
+}
+
+function priceFormatFor(decimals: number): Intl.NumberFormat {
+  let nf = priceFormats.get(decimals);
+  if (!nf) {
+    nf = new Intl.NumberFormat("en-US", { minimumFractionDigits: Math.min(decimals, 2), maximumFractionDigits: decimals });
+    priceFormats.set(decimals, nf);
+  }
+  return nf;
+}
+
 export function formatPrice(value: number, pricescale: number): string {
   if (!Number.isFinite(value)) return "";
   const decimals = decimalsFromPricescale(pricescale);
@@ -23,13 +44,11 @@ export function formatPrice(value: number, pricescale: number): string {
   // 140,000), decimals taken from the symbol's pricescale. (Compact K/M/B is
   // reserved for volume only — see formatVolume.)
   if (decimals === 0) {
-    return Math.round(value).toLocaleString("en-US");
+    return defaultFormatter().format(Math.round(value));
   }
-  // Fractional prices: show up to `decimals` places, trimming trailing zeros
-  // past the second so sub-penny tokens still read cleanly.
-  const minFrac = Math.min(decimals, 2);
-  const s = value.toLocaleString("en-US", { minimumFractionDigits: minFrac, maximumFractionDigits: decimals });
-  return s;
+  // Fractional prices: show up to `decimals` places (at least two), trimming
+  // trailing zeros past the second so sub-penny tokens still read cleanly.
+  return priceFormatFor(decimals).format(value);
 }
 
 function minTickOf(info: LibrarySymbolInfo | null | undefined): string {
@@ -101,7 +120,7 @@ export function formatCompact(value: number): string {
       return `${sign}${trimZeros(s)}${suffix}`;
     }
   }
-  return value.toLocaleString("en-US");
+  return defaultFormatter().format(value);
 }
 
 function trimZeros(s: string): string {

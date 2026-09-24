@@ -356,20 +356,29 @@ it. Crosshair, legend values, hover, draft and countdown repaint only the
 overlay, so a crosshair move no longer walks the visible bars. The benchmark
 proves it: the crosshair scenarios spy on both layers and fail the run when a
 move paints the main layer or paints the overlay more than once per frame.
-Same machine and session as the reference above, raster included, medians:
+Same machine as the reference above, raster included, medians (the "after"
+rows include the cached number formatters described below):
 
 | Scenario | 1k | 10k | 100k | 500k |
 | --- | ---: | ---: | ---: | ---: |
 | `crosshair-move` before | 2.25 ms | 2.56 ms | 2.21 ms | 2.01 ms |
-| `crosshair-move` after | 0.95 ms | 1.24 ms | 1.07 ms | 0.97 ms |
+| `crosshair-move` after | 0.87 ms | 0.82 ms | 0.86 ms | 0.94 ms |
 | `crosshair-move-all` before | 4.54 ms | 29.26 ms | 277 ms | 1372 ms |
-| `crosshair-move-all` after | 0.99 ms | 1.11 ms | 0.95 ms | 0.91 ms |
-| `overlay-frame` (frame JS only) | 0.45 ms | 0.61 ms | 0.54 ms | 0.47 ms |
+| `crosshair-move-all` after | 0.88 ms | 0.55 ms | 0.77 ms | 0.89 ms |
+| `overlay-frame` (frame JS only) | 0.30 ms | 0.27 ms | 0.29 ms | 0.33 ms |
+| `overlay-frame-all` (frame JS only) | 0.31 ms | 0.21 ms | 0.28 ms | 0.31 ms |
 
 The overlay frame no longer depends on the visible span or the history
-length. About 0.22 ms of it is `formatPrice` building an `Intl.NumberFormat`
-per legend value; with cached formatters (W1B-06) the overlay frame measured
-0.28 ms, under its 0.5 ms `target`. Budget changes, recorded in
+length, and stays under its 0.5 ms `target` at every size. Half of it used
+to be `formatPrice` building a new `Intl.NumberFormat` (through
+`toLocaleString`) for every legend and crosshair value, about 20 µs each;
+`formatPrice` now reuses cached instances with byte-identical output, which
+took the overlay frame from 0.45-0.61 ms to 0.21-0.33 ms. What remains is
+mostly text drawing. The absolute 0.5 ms stays a `--strict` target because
+runners differ, but every run now checks, per size, that `overlay-frame-all`
+stays within 2x `overlay-frame` + 0.25 ms (span independence) and that
+`overlay-frame` stays within 2x its value at the smallest size + 0.25 ms
+(history independence). Budget changes, recorded in
 `widget-baseline.json`: `crosshair-move-all` drops to 20 ms at every size,
 because a move that scales with the visible span again is a regression; the
 new `overlay-frame` scenarios carry a 4 ms portable budget and a 0.5 ms
@@ -378,3 +387,11 @@ small heaps, because the old floor let the 1k and 10k sizes grow tenfold
 unnoticed. The harness also fails when a study cannot be created, when the
 library logs a `[raze-charts]` warning, when any sample paints no frame, and
 when a raster readback fails.
+
+An opaque pane background gives the scene layer an `{ alpha: false }`
+context, so the compositor never blends it with the page. Trade-off: Chromium
+draws text on an opaque canvas with LCD subpixel anti-aliasing, and no context
+option or launch flag turns that off, so scene text (axis labels) is subpixel
+while overlay text (crosshair pills, legend) stays greyscale. Screenshots
+repaint both layers into an alpha canvas (`ChartRenderer.snapshot()`), so
+exported PNGs carry greyscale text rather than colour fringes.

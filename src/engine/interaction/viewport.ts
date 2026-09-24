@@ -40,7 +40,7 @@ export const viewportHandler: InteractionHandler = {
     const { from, to } = h.context.visibleRange;
     const span = to - from;
     const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
-    const newSpan = Math.max(h.plotW / MAX_BAR_SPACING, Math.min(h.plotW / MIN_BAR_SPACING, span * factor));
+    const newSpan = Math.max(h.plotW / MAX_BAR_SPACING, Math.min(Math.max(h.plotW / MIN_BAR_SPACING, span), span * factor));
     const pivot = indexForX(h.plotScale(), x);
     const leftFrac = (pivot - from) / span;
     setRange(h, pivot - leftFrac * newSpan, pivot + (1 - leftFrac) * newSpan, true);
@@ -67,7 +67,7 @@ export const viewportHandler: InteractionHandler = {
       setRange(h, to - Math.max(h.plotW / MAX_BAR_SPACING, span / 1.15), to, false);
       message = "Zoomed in.";
     } else if (e.key === "-" || e.key === "_") {
-      setRange(h, to - Math.min(h.plotW / MIN_BAR_SPACING, span * 1.15), to, true);
+      setRange(h, to - Math.min(Math.max(h.plotW / MIN_BAR_SPACING, span), span * 1.15), to, true);
       message = "Zoomed out.";
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       const shift = span * 0.08 * (e.key === "ArrowLeft" ? -1 : 1);

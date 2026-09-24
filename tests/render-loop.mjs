@@ -140,6 +140,7 @@ export * from "./src/engine/paint/axisTags";
 export { AXIS_TAG_PRIORITY } from "./src/engine/paint/view";
 export { WidgetRuntime } from "./src/core/widget/runtime";
 export { MIN_BAR_SPACING, MAX_BAR_SPACING } from "./src/engine/layout";
+export { formatCompact, formatPrice } from "./src/util/format";
 `;
 const bundled = await build({
   stdin: { contents: entry, resolveDir: root, loader: "ts", sourcefile: "render-loop-entry.ts" },
@@ -164,6 +165,8 @@ const {
   FINANCE_LAYER_ORDER,
   FINANCE_PAINT_ORDER,
   MAX_BAR_SPACING,
+  MIN_BAR_SPACING,
+  SCALE_CHANGE_REASONS,
   SeriesTransformCache,
   WidgetRuntime,
   createChartContext,
@@ -173,8 +176,11 @@ const {
   drawAxisTags,
   financeMarkLayer,
   fitAllRange,
+  formatCompact,
+  formatPrice,
   isOpaqueColor,
   layoutAxisTags,
+  paintFinanceMark,
   paintFinanceScene,
   seriesTransformFor,
 } = mod;
@@ -326,6 +332,27 @@ const spacingOf = (runtime) => runtime.renderer.plotW / (runtime.context.visible
   assert(ctx.autoScalePrice === true && ctx.priceRange === null, "a rejected window leaves the scale untouched");
   assert(ctx.setScaleMode({ priceRange: { min: 5, max: 6 } }, "api") && ctx.priceRange.max === 6, "a non-empty window is still accepted");
   assert(ctx.setScaleMode({ autoScale: true }, "reset") && ctx.autoScalePrice, "reset is a scale-change reason");
+  assert(
+    SCALE_CHANGE_REASONS.at(-1) === "reset" && SCALE_CHANGE_REASONS.indexOf("preset") === SCALE_CHANGE_REASONS.indexOf("fit") + 1,
+    "'reset' is appended to the published SCALE_CHANGE_REASONS tuple, so existing indices keep their meaning",
+  );
+}
+
+// ── Cached number formatters: byte-identical labels ─────────────────────────
+{
+  const values = [0, 1, 7, 42.5, -42.125, 999.9994, 1234.5678, 6400.1, 89_909, 140_000, 1_234_567.891, 0.000123456, 0.5, -1500.25];
+  let mismatches = 0;
+  for (const pricescale of [1, 10, 100, 1_000, 100_000_000]) {
+    const decimals = pricescale <= 1 ? 0 : Math.round(Math.log10(pricescale));
+    for (const value of values) {
+      const expected = decimals === 0
+        ? Math.round(value).toLocaleString("en-US")
+        : value.toLocaleString("en-US", { minimumFractionDigits: Math.min(decimals, 2), maximumFractionDigits: decimals });
+      if (formatPrice(value, pricescale) !== expected) mismatches += 1;
+    }
+  }
+  assert(mismatches === 0, "formatPrice with cached Intl.NumberFormat instances matches toLocaleString for pricescale 1 to 1e8");
+  assert([0.5, 12.3456, -999].every((value) => formatCompact(value) === value.toLocaleString("en-US")), "formatCompact keeps the toLocaleString defaults below 1,000");
 }
 
 // ── Engine: layers, invalidation and resize ─────────────────────────────────
@@ -551,6 +578,161 @@ for (const width of [390, 480, 1280]) {
   assert(Math.abs(afterSpacing - beforeSpacing) < 0.05 && context.visibleRange.to === beforeTo, `resize keeps ${beforeSpacing.toFixed(2)} px per bar anchored right (got ${afterSpacing.toFixed(2)})`);
   assert(ranges.seen.at(-1)[0].reason === "resize" && viewport.seen.length === resizeEvents + 1, "the resize adjustment goes through setViewport (reason resize) once");
   assert(mainCtx.calls("setTransform") === 1, "the resize frame is not painted a second time by the next animation frame");
+  runtime.remove();
+}
+
+// ── Widget runtime: zooming out after a fit never zooms in ──────────────────
+// A fit may show more bars than plotW / MIN_BAR_SPACING (5,000 bars on about
+// 1,000 px). The zoom-out gestures used to clamp to that limit, so the first
+// "zoom out" after F jumped to about 700 bars.
+{
+  const { runtime } = await mountRuntime({ bars: 5_000, width: 1100, height: 520 });
+  const { context, renderer, engine } = runtime;
+  engine.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1100, height: 520, right: 1100, bottom: 520, x: 0, y: 0 });
+  const span = () => context.visibleRange.to - context.visibleRange.from;
+  const key = (value) => engine.canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }));
+  const wheel = (deltaY) => engine.canvas.dispatchEvent(new window.WheelEvent("wheel", { clientX: 500, clientY: 200, deltaY, bubbles: true, cancelable: true }));
+  const release = (x, y, id = 1, type = "mouse") => {
+    window.dispatchEvent(pointer("pointerup", x, y, { id, type }));
+    engine.canvas.dispatchEvent(pointer("pointerup", x, y, { id, type }));
+  };
+  const fit = () => {
+    key("f");
+    const fitted = span();
+    assert(fitted >= 5_000 && renderer.plotW / fitted < MIN_BAR_SPACING, `the fit shows all 5,000 bars below MIN_BAR_SPACING (span ${fitted.toFixed(1)})`);
+    return fitted;
+  };
+
+  let fitted = fit();
+  key("-");
+  assert(span() >= fitted, `'-' after a fit does not shrink the span (got ${span().toFixed(1)})`);
+  wheel(100);
+  assert(span() >= fitted, `wheel-down after a fit does not shrink the span (got ${span().toFixed(1)})`);
+  wheel(-100);
+  assert(span() < fitted && span() > fitted * 0.85, `wheel-up after a fit zooms in by one step instead of jumping to the gesture limit (got ${span().toFixed(1)})`);
+
+  fitted = fit();
+  const axisY = 520 - 8;
+  engine.canvas.dispatchEvent(pointer("pointerdown", 600, axisY, { buttons: 1 }));
+  engine.canvas.dispatchEvent(pointer("pointermove", 450, axisY, { buttons: 1 }));
+  release(450, axisY);
+  assert(span() >= fitted, `dragging the time axis to zoom out after a fit does not shrink the span (got ${span().toFixed(1)})`);
+
+  fitted = fit();
+  engine.canvas.dispatchEvent(pointer("pointerdown", 400, 200, { id: 11, type: "touch", buttons: 1 }));
+  engine.canvas.dispatchEvent(pointer("pointerdown", 700, 200, { id: 12, type: "touch", buttons: 1 }));
+  engine.canvas.dispatchEvent(pointer("pointermove", 550, 200, { id: 12, type: "touch", buttons: 1 }));
+  assert(span() >= fitted, `a zoom-out pinch after a fit does not shrink the span (got ${span().toFixed(1)})`);
+  engine.canvas.dispatchEvent(pointer("pointermove", 1000, 200, { id: 12, type: "touch", buttons: 1 }));
+  assert(span() < fitted, "a zoom-in pinch after a fit still zooms in");
+  release(1000, 200, 12, "touch");
+  release(400, 200, 11, "touch");
+  flushFrames();
+
+  // Default views never exceed the limit, so zoom-out there still grows the span.
+  runtime.controllers.api.api.resetView();
+  const before = span();
+  key("-");
+  assert(span() > before * 1.1, "'-' from the default view still zooms out");
+  runtime.remove();
+}
+
+// ── Widget runtime: the draft ghost stays out of the drawing hit list ───────
+{
+  const { runtime } = await mountRuntime({ bars: 600, width: 640 });
+  const { engine, renderer, context } = runtime;
+  engine.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0 });
+  engine.canvas.dispatchEvent(pointer("pointermove", 200, 120));
+  // A real drawing, so the hit list has entries the draft must not disturb.
+  await runtime.shapes.create({ time: Math.floor((FIRST_MS + 580 * RES_MS) / 1000), price: 101 }, { shape: "horizontal_line" });
+  flushFrames();
+  context.drawingTool = "trend_line";
+  engine.canvas.dispatchEvent(pointer("pointerdown", 200, 120, { buttons: 1 }));
+  window.dispatchEvent(pointer("pointerup", 200, 120));
+  engine.canvas.dispatchEvent(pointer("pointerup", 200, 120));
+  flushFrames();
+  assert(renderer.draft?.points.length === 1, "the first click places the draft's first point");
+  const hits = renderer.shapeScreen;
+  const hitCount = hits.length;
+  const mainPaints = engine.paintStats.main;
+  const overlayPaints = engine.paintStats.overlay;
+  for (let i = 0; i < 100; i++) {
+    engine.canvas.dispatchEvent(pointer("pointermove", 210 + i, 100 + (i % 30)));
+    flushFrames();
+  }
+  assert(engine.paintStats.overlay - overlayPaints >= 100 && engine.paintStats.main === mainPaints, "moving the draft's free point repaints the overlay only");
+  assert(hitCount === 1 && renderer.shapeScreen === hits && hits.length === hitCount, `100 overlay frames leave the drawing hit list alone (${hitCount} -> ${hits.length} entries)`);
+  assert(!hits.some((hit) => String(hit.shape.id) === "draft"), "the draft ghost is never hit-tested as a drawing");
+  context.requestPaint();
+  flushFrames();
+  assert(!renderer.shapeScreen.some((hit) => String(hit.shape.id) === "draft"), "a main paint during the draft keeps the ghost out of the hit list too");
+
+  // On the overlay the draft paints above the axes, so it is clipped to the plot.
+  const ctx = recorderFor(null, {});
+  const rects = [];
+  ctx.rect = (...args) => rects.push(args);
+  const view = renderer.financeView();
+  paintFinanceMark("draft", ctx, view, [], []);
+  assert(
+    ctx.calls("clip") === 1 && rects[0]?.join() === [view.plotL, view.plotT, view.plotW, view.plotH].join() && ctx.calls("save") === ctx.calls("restore"),
+    "the draft is clipped to the plot so it never paints over the axis labels",
+  );
+  runtime.remove();
+}
+
+// ── Widget runtime: the sidebar Fit button ──────────────────────────────────
+{
+  const { runtime, container } = await mountRuntime({
+    bars: 5_000,
+    width: 1100,
+    height: 520,
+    options: { disabled_features: ["header_widget", "scale_bar", "countdown"] },
+  });
+  const { context } = runtime;
+  const button = [...container.querySelectorAll("button")].find((b) => /^Fit content/.test(b.getAttribute("aria-label") ?? b.title ?? ""));
+  assert(button, "the left toolbar has a Fit content button");
+  const viewport = listen(context.viewportChanged);
+  const ranges = listen(context.rangeChanged);
+  button.click();
+  const span = context.visibleRange.to - context.visibleRange.from;
+  assert(viewport.seen.length === 1 && ranges.seen.at(-1)[0].reason === "fit", "the sidebar Fit button fires exactly one viewportChanged (reason fit)");
+  assert(span >= 5_000 && context.visibleRange.from <= 0, `the sidebar Fit button fits all 5,000 bars (span ${span.toFixed(1)})`);
+  viewport.stop();
+  ranges.stop();
+  runtime.remove();
+}
+
+// ── Widget runtime: screenshots repaint into an alpha canvas ────────────────
+{
+  const { runtime } = await mountRuntime({ bars: 600, width: 640 });
+  const { engine, renderer } = runtime;
+  engine.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0 });
+  engine.canvas.dispatchEvent(pointer("pointermove", 200, 120));
+  flushFrames();
+  assert(engine.mainLayerOpaque, "the scene layer is opaque (LCD text on screen)");
+  const exported = [];
+  const originalToBlob = window.HTMLCanvasElement.prototype.toBlob;
+  window.HTMLCanvasElement.prototype.toBlob = function toBlob() { exported.push(this); };
+  const hits = { marks: renderer.markScreen, shapes: renderer.shapeScreen, trading: renderer.tradingScreen };
+  const hitLengths = [hits.marks.length, hits.shapes.length, hits.trading.length].join();
+  const paints = { ...engine.paintStats };
+  try {
+    renderer.takeScreenshot();
+  } finally {
+    window.HTMLCanvasElement.prototype.toBlob = originalToBlob;
+  }
+  const [canvas] = exported;
+  assert(exported.length === 1 && canvas !== engine.canvas && canvas !== engine.mainCanvas, "takeScreenshot exports a canvas of its own, not the overlay-only interactive canvas");
+  assert(canvas.width === 640 && canvas.height === 360, "the export has the chart's device size");
+  const exportCtx = ctxOf(canvas);
+  assert(exportCtx.options?.alpha !== false, "the export canvas keeps alpha, so its text is greyscale rather than LCD subpixel");
+  assert(exportCtx.calls("fillRect") >= 1 && exportCtx.calls("fillText") > 0 && exportCtx.calls("stroke") > 0, "the export repaints the scene and the overlay (crosshair, legend)");
+  assert(
+    renderer.markScreen === hits.marks && renderer.shapeScreen === hits.shapes && renderer.tradingScreen === hits.trading
+      && [hits.marks.length, hits.shapes.length, hits.trading.length].join() === hitLengths,
+    "a screenshot leaves the hit lists hit testing reads untouched",
+  );
+  assert(engine.paintStats.main === paints.main && engine.paintStats.overlay === paints.overlay, "a screenshot does not repaint the on-screen layers");
   runtime.remove();
 }
 

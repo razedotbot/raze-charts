@@ -204,8 +204,10 @@ export class ChartEngine {
 
   /**
    * A new canvas holding the main layer with the overlay composited on top, at
-   * device resolution. Screenshots and exports use it because no single layer
-   * holds the whole picture.
+   * device resolution: the picture exactly as displayed, since no single layer
+   * holds all of it (pixel checks, tests). The scene bitmap may carry LCD
+   * subpixel text (see layers.ts), so screenshots and exports use
+   * ChartRenderer.snapshot(), which repaints into an alpha canvas instead.
    */
   composite(): HTMLCanvasElement {
     const out = document.createElement("canvas");

@@ -15,6 +15,12 @@
 // (z-index -1 inside the host's isolated stacking context), so it can be
 // recreated when its context options change (an opaque theme turning
 // translucent) without losing listeners, focus or ARIA state.
+//
+// An opaque main layer gets an `{ alpha: false }` context. Chromium then draws
+// its text with LCD subpixel anti-aliasing (no context option or launch flag
+// turns that off), while the transparent overlay keeps greyscale text. That is
+// fine on screen, but colour fringes baked into an exported PNG are not, so
+// screenshots repaint through ChartRenderer.snapshot() into an alpha canvas.
 
 export type FinanceLayerId = "main" | "overlay";
 

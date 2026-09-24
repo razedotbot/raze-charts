@@ -154,6 +154,30 @@ function checkOverlayOnly(overlayId: string, size: number, samples: Sample[]): v
   }))));
 }
 
+/** Absolute slack of the overlay scale checks: timer noise on a sub-millisecond frame. */
+const OVERLAY_SLACK_MS = 0.25;
+
+/**
+ * The overlay frame must not depend on the visible span or on the history
+ * length (AD-04). Relative checks stay portable where the absolute 0.5 ms
+ * `target` would not (it is enforced by `--check --strict`): an overlay that
+ * walked the visible bars again would cost 100x more with 500k bars in view.
+ */
+function checkOverlayScaleFree(size: number): void {
+  const frame = results.scenarios["overlay-frame"] ?? {};
+  const view = frame[String(size)]?.median;
+  const all = results.scenarios["overlay-frame-all"]?.[String(size)]?.median;
+  expect(view, `overlay-frame at ${size} bars was recorded`).toBeDefined();
+  expect(all, `overlay-frame-all at ${size} bars was recorded`).toBeDefined();
+  expect(all!, `overlay-frame-all at ${size} bars: the overlay frame grows with the visible span`)
+    .toBeLessThanOrEqual(2 * view! + OVERLAY_SLACK_MS);
+  const smallest = frame[String(sizes[0])]?.median;
+  if (smallest !== undefined && size !== sizes[0]) {
+    expect(view!, `overlay-frame at ${size} bars: the overlay frame grows with the history length`)
+      .toBeLessThanOrEqual(2 * smallest + OVERLAY_SLACK_MS);
+  }
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.afterAll(async ({ browser }) => {
@@ -194,6 +218,7 @@ for (const size of sizes) {
     checkOverlayOnly("overlay-frame", size, crosshair.samples);
     const crosshairAll = await measure(page, "crosshair-move-all", size, "crosshair-move", { view: "all" });
     checkOverlayOnly("overlay-frame-all", size, crosshairAll.samples);
+    checkOverlayScaleFree(size);
     await measure(page, "pan", size, "pan", { view: "default" });
     await measure(page, "wheel-zoom", size, "wheel-zoom", { view: "default" });
 

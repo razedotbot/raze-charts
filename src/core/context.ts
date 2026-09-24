@@ -101,7 +101,6 @@ export const SCALE_CHANGE_REASONS = Object.freeze([
   "axis-reset",
   "keyboard",
   "fit",
-  "reset",
   "preset",
   "chart-type",
   "compare",
@@ -109,6 +108,7 @@ export const SCALE_CHANGE_REASONS = Object.freeze([
   "api",
   "cancel",
   "context-menu",
+  "reset",
 ] as const);
 export type ScaleChangeReason = (typeof SCALE_CHANGE_REASONS)[number];
 

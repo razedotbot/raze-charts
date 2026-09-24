@@ -268,6 +268,7 @@ class ChartRenderer implements GestureHost
   setToolDoneHandler(fn: (tool: SidebarToolId) => void): void
   shapeScreen: ShapeHit[]
   readonly shapes: ShapeStore
+  snapshot(): HTMLCanvasElement
   readonly studies: StudyStore
   subPanes: SubPaneGeom[]
   takeScreenshot(): void
@@ -522,7 +523,6 @@ interface IChartWidgetApi
   createPositionLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
-  fitContent(): void
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
@@ -532,7 +532,6 @@ interface IChartWidgetApi
   removeAllTradingLines(): void
   removeEntity(entityId: EntityId): void
   resetData(): void
-  resetView(): void
   resolution(): ResolutionString
   setResolution(resolution: ResolutionString, callback?: (() => void) | undefined): void
   setSymbol(symbol: string, callback?: (() => void) | undefined): void
@@ -1195,7 +1194,7 @@ type DrawingHit = { readonly kind: 'anchor'; readonly index: number; readonly cu
 interface PriceRange
   max: number
   min: number
-const SCALE_CHANGE_REASONS: readonly ['initial', 'scale-bar', 'axis-drag', 'axis-reset', 'keyboard', 'fit', 'reset', 'preset', 'chart-type', 'compare', 'load', 'api', 'cancel', 'context-menu']
+const SCALE_CHANGE_REASONS: readonly ['initial', 'scale-bar', 'axis-drag', 'axis-reset', 'keyboard', 'fit', 'preset', 'chart-type', 'compare', 'load', 'api', 'cancel', 'context-menu', 'reset']
 interface StyleOptions
   nonce?: string | undefined
 const VIEWPORT_CHANGE_REASONS: readonly ['initial', 'pan', 'zoom', 'pinch', 'keyboard', 'fit', 'reset', 'preset', 'timeframe', 'api', 'load', 'sync', 'realtime', 'rebase', 'resize', 'cancel']

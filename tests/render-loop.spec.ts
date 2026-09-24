@@ -1,6 +1,7 @@
 // Render loop in a real browser (W1B-07): overlay-only crosshair frames, no
-// cleared frame during a live resize, width-based default spacing, fit-all,
-// layout sync after F, opaque and transparent pane backgrounds.
+// cleared frame during a live resize, width-based default spacing, fit-all
+// (F and the sidebar button), layout sync after F, opaque and transparent pane
+// backgrounds, and greyscale text in screenshots.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -160,6 +161,85 @@ test.describe("render loop", () => {
     expect(state.visibleRange.to - state.visibleRange.from).toBeGreaterThanOrEqual(state.bars);
     await expect(page.locator(".raze-chart-a11y-status").first()).toHaveText("Chart fitted to all data.");
     await expect(page.locator(".raze-chart-a11y-description").first()).toContainText("F fits all loaded data");
+  });
+
+  test("the sidebar Fit button fits every loaded bar", async ({ page }) => {
+    await open(page, "bars=5000");
+    await page.getByRole("button", { name: "Fit content (F)" }).click();
+    await settle(page);
+    const state = await page.evaluate(() => (window as unknown as HarnessWindow).__razeChartState!);
+    expect(state.visibleRange.from).toBeLessThanOrEqual(0);
+    expect(state.visibleRange.to - state.visibleRange.from).toBeGreaterThanOrEqual(state.bars);
+  });
+
+  test("a screenshot repaints both layers into an alpha canvas, so exported text is greyscale", async ({ page }) => {
+    await open(page);
+    const box = await plotBox(page);
+    await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.4);
+    await settle(page);
+    await page.evaluate(() => {
+      const proto = HTMLCanvasElement.prototype;
+      const original = proto.toBlob;
+      // Capture the exported canvas instead of downloading it.
+      proto.toBlob = function capture(this: HTMLCanvasElement) {
+        (window as unknown as { __exported?: HTMLCanvasElement }).__exported = this;
+        proto.toBlob = original;
+      };
+    });
+    await page.getByRole("button", { name: "Screenshot" }).click();
+    const result = await page.evaluate(() => {
+      const exported = (window as unknown as { __exported?: HTMLCanvasElement }).__exported;
+      const main = document.querySelector<HTMLCanvasElement>("canvas.raze-chart-layer-main")!;
+      const overlay = document.querySelector<HTMLCanvasElement>("canvas.raze-chart-canvas")!;
+      if (!exported) return null;
+      const ctx = exported.getContext("2d")!;
+      // The time-axis labels left of the price axis: neutral text (and the
+      // neutral crosshair pill) on the pane background, nothing coloured.
+      // Chromium's LCD text on the opaque scene layer shows colour fringes
+      // there; an export with greyscale text shows none.
+      const plotW = (window as unknown as HarnessWindow).__razeChartState!.plotW;
+      const band = (c: CanvasRenderingContext2D) => c.getImageData(0, main.height - 22, Math.floor(plotW) - 1, 22).data;
+      const chromatic = (data: Uint8ClampedArray) => {
+        let count = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i]!, g = data[i + 1]!, b = data[i + 2]!;
+          if (Math.max(r, g, b) - Math.min(r, g, b) > 40) count += 1;
+        }
+        return count;
+      };
+      const exportedPx = band(ctx);
+      let text = 0;
+      for (let i = 0; i < exportedPx.length; i += 4) if (exportedPx[i]! > 90) text += 1;
+      // The overlay must be in the export too: the legend values live only on
+      // the overlay, so the export differs from the scene layer in the legend.
+      const legend = (c: CanvasRenderingContext2D) => c.getImageData(8, 6, 280, 34).data;
+      const scenePx = legend(main.getContext("2d")!);
+      const exportLegend = legend(ctx);
+      let overlayPainted = 0;
+      for (let i = 0; i < scenePx.length; i += 4) {
+        if (Math.max(Math.abs(scenePx[i]! - exportLegend[i]!), Math.abs(scenePx[i + 1]! - exportLegend[i + 1]!), Math.abs(scenePx[i + 2]! - exportLegend[i + 2]!)) > 60) {
+          overlayPainted += 1;
+        }
+      }
+      return {
+        alpha: ctx.getContextAttributes?.().alpha ?? null,
+        size: [exported.width, exported.height, main.width, main.height],
+        isLayer: exported === main || exported === overlay,
+        exportedChromatic: chromatic(exportedPx),
+        // Informational: platforms without LCD text report 0 here too.
+        screenChromatic: chromatic(band(main.getContext("2d")!)),
+        text,
+        overlayPainted,
+      };
+    });
+    test.info().annotations.push({ type: "lcd", description: `on-screen scene chromatic pixels in the time axis: ${result?.screenChromatic}` });
+    expect(result, "takeScreenshot exported a canvas").not.toBeNull();
+    expect(result!.text, "the sampled band holds the time-axis labels").toBeGreaterThan(50);
+    expect(result!.isLayer, "the export is its own canvas, not a single layer").toBe(false);
+    expect(result!.alpha, "the export canvas keeps alpha").toBe(true);
+    expect(result!.size.slice(0, 2)).toEqual(result!.size.slice(2));
+    expect(result!.overlayPainted, "the export includes the overlay (legend values)").toBeGreaterThan(100);
+    expect(result!.exportedChromatic, "chromatic pixels in the exported time-axis labels (LCD fringes)").toBe(0);
   });
 
   test("a 2x1 layout stays synced after F", async ({ page }) => {

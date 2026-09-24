@@ -77,6 +77,15 @@ each gesture hit test.
 | `hoverTimescaleMark` | W1B-10 (sets `renderer.hoverTimescaleMark`) | W1B-09 and W1B-10 (tooltip) | null until W1B-10. |
 | `ShapeHit.z`, `ShapeHit.hitTest` | W1B-11 (registry painters) | W1B-10 (topmost-first anchor, body and label hits) | Optional. Without them, gestures keep the `y`-proximity test. |
 
+Hit lists (`markScreen`, `shapeScreen`, `tradingScreen`,
+`timescaleMarkScreen`) belong to the main layer: its painters reset and fill
+them, and hit testing reads the renderer's copies between main paints.
+Overlay painters may read them (the mark tooltip reads `markScreen`) but must
+never add to them, because overlay frames run without the main paint that
+resets them. The overlay view therefore carries a per-frame scratch
+`shapeScreen` that receives the draft ghost, and screenshots paint with
+scratch lists throughout.
+
 ## Engine seams (`src/engine/ChartEngine.ts`, `src/engine/layers.ts`)
 
 Each pane paints two stacked canvases (AD-04, W1B-07). The scene marks and the
@@ -106,12 +115,41 @@ overlay marks are listed in `FINANCE_LAYER_ORDER` (`src/engine/scene.ts`).
   the `ResizeObserver` callback, so no presented frame shows a cleared bitmap,
   and one resize causes one paint.
 - `paintStats` counts frames and main, overlay and resize paints for
-  benchmarks and tests. `composite()` returns one bitmap with both layers
-  (screenshots and exports).
+  benchmarks and tests. `composite()` stacks the two layer bitmaps exactly
+  as displayed (pixel checks). Screenshots and exports use
+  `ChartRenderer.snapshot()` instead, which repaints both layers into a new
+  alpha canvas (see the next point).
 - The main context is created with `{ alpha: false }` when
   `theme.paneBackground` is opaque (`isOpaqueColor()`), and the bitmap is
   swapped for an alpha context when the background becomes translucent. The
-  overlay always keeps alpha.
+  overlay always keeps alpha. Trade-off: Chromium draws text on an opaque
+  canvas with LCD subpixel anti-aliasing (no context option or flag turns it
+  off, `--disable-lcd-text` included), so axis labels on the scene layer are
+  subpixel while overlay text (crosshair pills, legend) stays greyscale.
+  `snapshot()` keeps exported PNGs
+  greyscale, because colour fringes baked into a file look wrong once it is
+  scaled or shown on another display.
+- Pixels and events: `engine.canvas`, the first `canvas` in the host, holds
+  only the overlay. Target `canvas.raze-chart-canvas` for input and focus,
+  and read pixels through `composite()` or `snapshot()`, never from a single
+  layer.
+
+### View ranges (`src/engine/ChartRenderer.ts`)
+
+- `fitContent()` (F, double-click, the sidebar Fit button, `chart.fitContent()`)
+  shows every loaded bar: `fitAllRange()` spreads them at most
+  `MAX_BAR_SPACING` apart, and may pack them tighter than `MIN_BAR_SPACING`,
+  the gesture zoom-out limit (5,000 bars on a 1,000 px plot is 0.2 px per
+  bar). The ALL preset and `setVisibleRange` can do the same.
+- Every zoom gesture (wheel, `-`, pinch, time-axis drag) therefore treats the
+  limit as "never zoom out past it", not "clamp to it": a zoom-out from a span
+  already above `plotW / MIN_BAR_SPACING` holds the span, and a zoom-in steps
+  in from it instead of jumping to the limit. W1B-10's `zoomSpan()`
+  (`interaction/limits.ts`) implements the same rule for every writer; W2-04
+  lowers the limit once level-of-detail painting makes dense views cheap.
+- `resetView()` (`chart.resetView()`) returns to `DEFAULT_BAR_SPACING` per
+  bar anchored to the latest bar. Both route through `setViewport` (reasons
+  `fit` and `reset`) and `setScaleMode({ autoScale: true })`.
 
 ## Plugin and data contracts
 

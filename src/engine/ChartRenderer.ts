@@ -42,7 +42,7 @@ import type {
   TimescaleMarkHit,
   TradingHit,
 } from "./paint/view";
-import { paintFinanceLayer } from "./scene";
+import { paintFinanceLayer, paintFinanceScene } from "./scene";
 import { SeriesTransformCache } from "./seriesTransform";
 import { GestureController, type GestureHost } from "./gestures";
 
@@ -112,6 +112,13 @@ export class ChartRenderer implements GestureHost {
   private mainKey: unknown[] = [];
   private priceTicks: number[] = [];
   private timeTicks: { index: number; time: number }[] = [];
+  /**
+   * Drawing hit list the overlay paints into (the draft ghost). Overlay
+   * frames run without a main paint, which is what resets `shapeScreen`, so
+   * anything they appended there would pile up and be hit-tested as a real
+   * drawing. Cleared every overlay frame.
+   */
+  private readonly overlayShapeScreen: ShapeHit[] = [];
   /** Pointers currently pressed on the chart (drags edit drawings in place). */
   private readonly pressed = new Set<number>();
   /** The default view fell back to DEFAULT_VISIBLE_BARS because the plot had no width yet. */
@@ -224,11 +231,43 @@ export class ChartRenderer implements GestureHost {
     return scaled || moved;
   }
 
+  /**
+   * The whole chart (scene plus overlay) repainted into a new canvas at device
+   * resolution, for screenshots and exports. It repaints instead of stacking
+   * the layer bitmaps (ChartEngine.composite()): Chromium draws text on the
+   * opaque `{ alpha: false }` scene layer with LCD subpixel anti-aliasing,
+   * whose colour fringes look wrong once a PNG is scaled or shown on another
+   * display. This canvas keeps alpha, so exported text is greyscale. Hover,
+   * hit testing and the on-screen layers are left untouched.
+   */
+  snapshot(): HTMLCanvasElement {
+    const { cssWidth: width, cssHeight: height, dpr } = this.engine;
+    const out = document.createElement("canvas");
+    out.width = Math.floor(width * dpr);
+    out.height = Math.floor(height * dpr);
+    const ctx = out.getContext("2d");
+    if (!ctx) throw new Error("[raze-charts] 2D canvas context unavailable");
+    if (width <= 0 || height <= 0 || this.plotW <= 0) return out;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = this.context.theme.paneBackground;
+    ctx.fillRect(0, 0, width, height);
+    // Scratch hit lists: an export must not replace the ones hit testing reads.
+    const view = this.financeView();
+    view.markScreen = [];
+    view.shapeScreen = [];
+    view.tradingScreen = [];
+    view.timescaleMarkScreen = [];
+    paintFinanceScene(ctx, view, this.priceTicks, this.timeTicks);
+    return out;
+  }
+
   takeScreenshot(): void {
     try {
-      const source = typeof this.engine.composite === "function" ? this.engine.composite() : this.canvas;
-      source.toBlob((blob) => {
-        if (!blob) return;
+      this.snapshot().toBlob((blob) => {
+        if (!blob) {
+          console.warn("[raze-charts] takeScreenshot: the chart has no pixels to export yet (zero-size container?)");
+          return;
+        }
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -236,8 +275,8 @@ export class ChartRenderer implements GestureHost {
         a.click();
         URL.revokeObjectURL(url);
       }, "image/png");
-    } catch {
-      /* ignore */
+    } catch (error) {
+      console.warn(`[raze-charts] takeScreenshot failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -454,9 +493,16 @@ export class ChartRenderer implements GestureHost {
     }
   }
 
-  /** Overlay layer: reuses the geometry of the last main paint. */
+  /**
+   * Overlay layer: reuses the geometry and hit lists of the last main paint.
+   * Overlay painters may read those lists (the mark tooltip reads
+   * markScreen) but never add to them; the draft ghost goes to a scratch list.
+   */
   private renderOverlay(ctx: CanvasRenderingContext2D): void {
     if (this.engine.cssWidth <= 0 || this.engine.cssHeight <= 0 || this.plotW <= 0) return;
-    paintFinanceLayer("overlay", ctx, this.financeView(), this.priceTicks, this.timeTicks);
+    const view = this.financeView();
+    this.overlayShapeScreen.length = 0;
+    view.shapeScreen = this.overlayShapeScreen;
+    paintFinanceLayer("overlay", ctx, view, this.priceTicks, this.timeTicks);
   }
 }

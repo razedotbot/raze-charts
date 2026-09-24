@@ -107,7 +107,15 @@ export function paintFinanceMark(
       drawShapes(ctx, v);
       break;
     case "draft":
+      // On the single canvas the draft painted below the axes, which hid any
+      // part of it outside the plot. The overlay paints above the axes, so
+      // the draft is clipped to the main plot instead.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(v.plotL, v.plotT, v.plotW, v.plotH);
+      ctx.clip();
       drawDraft(ctx, v);
+      ctx.restore();
       break;
     case "barMarks":
       drawMarks(ctx, v);
@@ -165,7 +173,9 @@ export function paintFinanceLayer(
 
 /**
  * Paint the whole scene into one context (screenshots, exports, single-canvas
- * hosts): the main layer, then the overlay with its own axis-tag queue.
+ * hosts): the main layer, then the overlay with its own axis-tag queue. As on
+ * the overlay canvas, the overlay pass may read the hit lists the main pass
+ * filled but never adds to them (the draft ghost is not a drawing).
  */
 export function paintFinanceScene(
   ctx: CanvasRenderingContext2D,
@@ -174,5 +184,5 @@ export function paintFinanceScene(
   timeTicks: { index: number; time: number }[],
 ): void {
   paintFinanceLayer("main", ctx, v, priceTicks, timeTicks);
-  paintFinanceLayer("overlay", ctx, { ...v, axisTags: [] }, priceTicks, timeTicks);
+  paintFinanceLayer("overlay", ctx, { ...v, axisTags: [], shapeScreen: [] }, priceTicks, timeTicks);
 }

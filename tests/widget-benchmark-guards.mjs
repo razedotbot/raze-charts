@@ -60,6 +60,9 @@ run("the benchmark page fails loudly instead of measuring the wrong thing", () =
   assert.match(bench, /includes\("\[raze-charts\]"\)/, "library warnings fail the run");
   assert.match(bench, /samples painted no frame/, "every sample must paint, not just one");
   assert.match(bench, /a crosshair move repainted the main layer/, "a main-layer paint during a crosshair move fails the run");
+  assert.match(bench, /checkOverlayScaleFree\(size\);/, "every size checks that the overlay frame is independent of span and history");
+  assert.match(bench, /grows with the visible span/, "an overlay frame that scales with the visible span fails the run");
+  assert.match(bench, /grows with the history length/, "an overlay frame that scales with the history length fails the run");
   assert.match(bench, /every reference study was created/, "the study count is asserted");
 });
 

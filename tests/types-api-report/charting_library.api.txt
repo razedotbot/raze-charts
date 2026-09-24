@@ -144,7 +144,6 @@ interface IChartWidgetApi
   createPositionLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
-  fitContent(): void
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
@@ -154,7 +153,6 @@ interface IChartWidgetApi
   removeAllTradingLines(): void
   removeEntity(entityId: EntityId): void
   resetData(): void
-  resetView(): void
   resolution(): ResolutionString
   setResolution(resolution: ResolutionString, callback?: (() => void) | undefined): void
   setSymbol(symbol: string, callback?: (() => void) | undefined): void
