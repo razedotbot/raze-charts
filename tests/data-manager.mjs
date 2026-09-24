@@ -2,7 +2,7 @@
 // Run after the build: node build.mjs && node tests/data-manager.mjs
 
 import { JSDOM } from "jsdom";
-import { DataManager, Delegate, widget } from "../dist/charting_library.esm.js";
+import { DataManager, Delegate, createChartContext, widget } from "../dist/charting_library.esm.js";
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(`Assertion failed: ${message}`);
@@ -81,13 +81,17 @@ function makeControlledFeed() {
     subscriptions,
     unsubscribed,
     ready() {
-      readyCallback?.({ supported_resolutions: ["1", "5", "15"] });
+      readyCallback?.({
+        supported_resolutions: ["1", "5", "15"],
+        supports_marks: true,
+        supports_timescale_marks: true,
+      });
     },
   };
 }
 
 function makeContext(datafeed, symbol = "A", resolution = "1") {
-  return {
+  return createChartContext({
     options: { symbol, interval: resolution, container: /** @type {any} */ ({}), datafeed },
     datafeed,
     locale: "en",
@@ -99,6 +103,7 @@ function makeContext(datafeed, symbol = "A", resolution = "1") {
     theme: /** @type {any} */ ({}),
     features: new Set(),
     bars: [],
+    marks: [],
     timescaleMarks: [],
     visibleRange: { from: 0, to: 1 },
     autoScalePrice: true,
@@ -113,13 +118,15 @@ function makeContext(datafeed, symbol = "A", resolution = "1") {
     syncedCrosshair: null,
     drawingTool: "cursor",
     selectedShapeId: null,
+    selectedTradingLineId: null,
     intervalChanged: new Delegate(),
     dataChanged: new Delegate(),
     drawingEvent: new Delegate(),
+    tradingEvent: new Delegate(),
     viewportChanged: new Delegate(),
     crosshairMoved: new Delegate(),
     requestPaint() {},
-  };
+  });
 }
 
 // A stale initial A request must not contaminate the newer B@5 target.

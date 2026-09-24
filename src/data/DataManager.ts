@@ -1,21 +1,45 @@
 // Drives the consumer-supplied datafeed (IBasicDataFeed): symbol resolution,
-// historical bars with lazy left-scroll pagination, live bar subscription, and
-// bar marks. Owns the canonical bar series stored on the shared ChartContext.
+// historical bars with lazy left-scroll pagination, live bar subscription,
+// server time and bar marks. Owns the canonical bar series stored on the
+// shared ChartContext.
+//
+// The datafeed contract follows TradingView's:
+// - `HistoryMetadata.nextTime` on an empty page marks a gap; the request is
+//   repeated with `to = nextTime` (bounded) instead of ending history.
+// - Failing pagination backs off exponentially (with jitter) and reports one
+//   error per backoff window instead of retrying on every pointer move.
+// - Bars are validated: undrawable bars are dropped, and each mistake class
+//   (seconds, strings, NaN, inverted high/low) warns once with its first index.
+//   `raze.coerce_bars` repairs the unambiguous ones.
+// - `supports_time`, `supports_marks` and `supports_timescale_marks` gate
+//   getServerTime, getMarks and getTimescaleMarks.
+// - Resolutions are parsed strictly and stored in canonical form ("D" → "1D").
+// - Every visible-range write goes through the context's setViewport().
 
 import type {
   Bar,
   DatafeedConfiguration,
   HistoryMetadata,
+  IntervalChangedParameters,
   LibrarySymbolInfo,
   Mark,
   PeriodParams,
   ResolutionString,
+  TimeFrameTimeRange,
   TimescaleMark,
+  TimeFrameValue,
 } from "../types/charting_library";
-import { applySymbolInfo, type ChartContext } from "../core/context";
+import {
+  applySymbolInfo,
+  DEFAULT_VISIBLE_BARS,
+  type ChartContext,
+  type IndexRange,
+  type ViewportChangeReason,
+} from "../core/context";
 import { resolveTimeframe } from "../core/timeframe";
-import { resolutionToMs } from "../util/resolution";
+import { normalizeResolution, resolutionToMs, RESOLUTION_FORMS } from "../util/resolution";
 import { TimeIndex } from "./TimeIndex";
+import { describeBarIssue, SECONDS_THRESHOLD, validateBars } from "./validateBars";
 
 let guidCounter = 0;
 const nextGuid = (): string => `raze_${++guidCounter}_${Math.floor(performance.now())}`;
@@ -24,8 +48,16 @@ const nextGuid = (): string => `raze_${++guidCounter}_${Math.floor(performance.n
 const INITIAL_BARS = 1500;
 /** How many bars to request on each left-scroll page. */
 const PAGE_BARS = 1000;
-/** Keep the opening candle density stable even when the feed returns few bars. */
-const INITIAL_VISIBLE_BARS = 120;
+/** Follow at most this many consecutive `nextTime` gaps per history request. */
+export const MAX_GAP_HOPS = 5;
+/** First pagination retry delay; doubles per consecutive failure. */
+export const HISTORY_BACKOFF_BASE_MS = 1_000;
+/** Longest pagination retry delay. */
+export const HISTORY_BACKOFF_MAX_MS = 60_000;
+/** The first history request waits at most this long for getServerTime. */
+export const SERVER_TIME_TIMEOUT_MS = 1_000;
+/** getServerTime is repeated at this interval while supports_time is on. */
+export const SERVER_TIME_RESYNC_MS = 5 * 60_000;
 
 interface DataTarget {
   symbol: string;
@@ -35,12 +67,24 @@ interface DataTarget {
 interface HistoryResult {
   bars: Bar[];
   noData: boolean;
+  /** Unix seconds where older data resumes after a gap, or null. */
+  nextTime: number | null;
 }
 
 const errorMessage = (reason: unknown): string => {
   if (reason instanceof Error) return reason.message;
   if (typeof reason === "string" && reason.trim()) return reason;
   return "unknown datafeed error";
+};
+
+/** `disabled_features: ["mark_on_bars"]` is the Raze opt-out for bar marks. */
+const barMarksOptedOut = (context: ChartContext): boolean =>
+  context.options.disabled_features?.includes("mark_on_bars") === true;
+
+/** Accept nextTime in Unix seconds (TradingView) or milliseconds. */
+const nextTimeSeconds = (value: unknown): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.floor(Math.abs(value) >= SECONDS_THRESHOLD ? value / 1000 : value);
 };
 
 export class DataManager {
@@ -58,6 +102,14 @@ export class DataManager {
   /** A request id avoids an old pagination finally-block unlocking a new one. */
   private historyRequestId = 0;
   private activeHistoryRequestId: number | null = null;
+  /** Consecutive pagination failures, and when the next attempt is allowed. */
+  private historyFailures = 0;
+  private historyRetryAt = 0;
+  /**
+   * `to` (Unix seconds) for the next page when a gap outlasted MAX_GAP_HOPS;
+   * null means "just before the oldest loaded bar".
+   */
+  private historyCursor: number | null = null;
   /** Marks have their own revision so refresh/clear can supersede one another. */
   private marksRequestId = 0;
   private marksCancellation: (() => void) | null = null;
@@ -70,7 +122,17 @@ export class DataManager {
   private readyResolve!: () => void;
   private readySettled = false;
 
+  /** serverMs - clientMs, as last written to the context. */
+  private serverOffsetMs = 0;
+  private serverTimeReady: Promise<void> | null = null;
+  private serverTimeInFlight: Promise<void> | null = null;
+  private serverTimeTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Warning keys already reported by this manager (one message per class). */
+  private readonly warned = new Set<string>();
+
   constructor(private readonly context: ChartContext) {
+    this.context.resolution = normalizeResolution(this.context.resolution) as ResolutionString;
     this.desiredTarget = {
       symbol: this.context.symbol,
       resolution: this.context.resolution,
@@ -79,7 +141,11 @@ export class DataManager {
       this.readyResolve = resolve;
       try {
         this.context.datafeed.onReady((cfg: DatafeedConfiguration) => {
-          if (!this.destroyed) this.config = cfg ?? {};
+          if (!this.destroyed) {
+            this.config = this.sanitiseConfiguration(cfg ?? {});
+            this.checkCapabilities();
+            this.startServerTimeSync();
+          }
           this.settleReady();
         });
       } catch (error) {
@@ -124,7 +190,210 @@ export class DataManager {
     this.historyRequestId += 1;
     this.activeHistoryRequestId = null;
     this.hasMoreHistory = true;
+    this.historyCursor = null;
+    this.resetHistoryBackoff();
     return this.generation;
+  }
+
+  // -- Diagnostics -----------------------------------------------------------
+
+  private warnOnce(key: string, message: string): void {
+    if (this.warned.has(key)) return;
+    this.warned.add(key);
+    console.warn(message);
+  }
+
+  private reportError(operation: string, error: unknown): void {
+    console.error(`[raze-charts] ${operation} failed`, error);
+  }
+
+  // -- Configuration -----------------------------------------------------------
+
+  /** Canonicalise resolution lists; drop invalid entries with one warning. */
+  private sanitiseResolutions(
+    list: unknown,
+    origin: string,
+  ): ResolutionString[] | undefined {
+    if (!Array.isArray(list)) return undefined;
+    const valid: ResolutionString[] = [];
+    const invalid: string[] = [];
+    for (const item of list) {
+      try {
+        const canonical = normalizeResolution(item as string) as ResolutionString;
+        if (!valid.includes(canonical)) valid.push(canonical);
+      } catch {
+        invalid.push(typeof item === "string" ? JSON.stringify(item) : String(item));
+      }
+    }
+    if (invalid.length) {
+      this.warnOnce(
+        `resolutions:${origin}`,
+        `[raze-charts] ${origin}.supported_resolutions contains invalid resolution(s) ${invalid.join(", ")}; `
+          + `they were ignored. Accepted forms: ${RESOLUTION_FORMS}.`,
+      );
+    }
+    return valid;
+  }
+
+  private sanitiseConfiguration(cfg: DatafeedConfiguration): DatafeedConfiguration {
+    const resolutions = this.sanitiseResolutions(cfg.supported_resolutions, "DatafeedConfiguration");
+    return resolutions ? { ...cfg, supported_resolutions: resolutions } : cfg;
+  }
+
+  private sanitiseSymbolInfo(info: LibrarySymbolInfo): LibrarySymbolInfo {
+    const current = info.supported_resolutions;
+    const resolutions = this.sanitiseResolutions(current, `LibrarySymbolInfo "${info.name}"`);
+    if (
+      !resolutions
+      || (resolutions.length === current!.length && resolutions.every((res, i) => res === current![i]))
+    ) {
+      return info;
+    }
+    return { ...info, supported_resolutions: resolutions };
+  }
+
+  /** Warn once when the configuration and the implemented methods disagree. */
+  private checkCapabilities(): void {
+    const cfg = this.config ?? {};
+    const feed = this.context.datafeed;
+    const enabled = this.context.options.enabled_features ?? [];
+    if (cfg.supports_marks === true && typeof feed.getMarks !== "function") {
+      this.warnOnce(
+        "marks-missing",
+        "[raze-charts] configuration.supports_marks is true but the datafeed has no getMarks(); no bar marks will load.",
+      );
+    } else if (cfg.supports_marks === undefined && typeof feed.getMarks === "function") {
+      this.warnOnce(
+        "marks-unused",
+        "[raze-charts] the datafeed implements getMarks() but configuration.supports_marks is not true, so it is never called. "
+          + "Set supports_marks: true in the onReady configuration to show bar marks"
+          + (enabled.includes("mark_on_bars") ? ' (enabled_features "mark_on_bars" no longer turns them on).' : "."),
+      );
+    }
+    if (cfg.supports_timescale_marks === true && typeof feed.getTimescaleMarks !== "function") {
+      this.warnOnce(
+        "timescale-missing",
+        "[raze-charts] configuration.supports_timescale_marks is true but the datafeed has no getTimescaleMarks(); no timescale marks will load.",
+      );
+    } else if (cfg.supports_timescale_marks === undefined && typeof feed.getTimescaleMarks === "function") {
+      this.warnOnce(
+        "timescale-unused",
+        "[raze-charts] the datafeed implements getTimescaleMarks() but configuration.supports_timescale_marks is not true, so it is never called. "
+          + "Set supports_timescale_marks: true to show timescale marks.",
+      );
+    }
+  }
+
+  private barMarksWanted(): boolean {
+    return this.config?.supports_marks === true
+      && typeof this.context.datafeed.getMarks === "function"
+      && !barMarksOptedOut(this.context);
+  }
+
+  private timescaleMarksWanted(): boolean {
+    return this.config?.supports_timescale_marks === true
+      && typeof this.context.datafeed.getTimescaleMarks === "function";
+  }
+
+  // -- Server time -------------------------------------------------------------
+
+  /** The client clock without the server offset this manager applied. */
+  private clientNow(): number {
+    return this.context.now() - this.serverOffsetMs;
+  }
+
+  private startServerTimeSync(): void {
+    const cfg = this.config ?? {};
+    const hasMethod = typeof this.context.datafeed.getServerTime === "function";
+    if (cfg.supports_time !== true) {
+      if (hasMethod && cfg.supports_time === undefined) {
+        this.warnOnce(
+          "server-time-unused",
+          "[raze-charts] the datafeed implements getServerTime() but configuration.supports_time is not true, so it is never called "
+            + "and the client clock is used. Set supports_time: true to use the server clock.",
+        );
+      }
+      return;
+    }
+    if (!hasMethod) {
+      this.warnOnce(
+        "server-time-missing",
+        "[raze-charts] configuration.supports_time is true but the datafeed has no getServerTime(); using the client clock.",
+      );
+      return;
+    }
+    this.serverTimeReady = this.syncServerTime();
+    this.serverTimeTimer = setInterval(() => {
+      void this.syncServerTime();
+    }, SERVER_TIME_RESYNC_MS);
+  }
+
+  /**
+   * Ask the feed for its clock and store serverMs - clientMs on the context.
+   * Resolves on the answer or after SERVER_TIME_TIMEOUT_MS; a late answer is
+   * still applied.
+   */
+  private syncServerTime(): Promise<void> {
+    if (this.serverTimeInFlight) return this.serverTimeInFlight;
+    const feed = this.context.datafeed;
+    const getServerTime = feed.getServerTime;
+    if (this.destroyed || typeof getServerTime !== "function") return Promise.resolve();
+
+    let resolve!: () => void;
+    const request = new Promise<void>((done) => {
+      resolve = done;
+    });
+    this.serverTimeInFlight = request;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      if (this.serverTimeInFlight === request) this.serverTimeInFlight = null;
+      resolve();
+    };
+    const sentAt = this.clientNow();
+    const receive = (unixTime: unknown): void => {
+      // A late answer (after the timeout) is still a valid clock reading.
+      if (!this.destroyed) this.applyServerTime(unixTime, sentAt, this.clientNow());
+      settle();
+    };
+    try {
+      getServerTime.call(feed, receive);
+    } catch (error) {
+      this.reportError("getServerTime", error);
+      settle();
+      return request;
+    }
+    if (!settled) timer = setTimeout(settle, SERVER_TIME_TIMEOUT_MS);
+    return request;
+  }
+
+  private applyServerTime(unixTime: unknown, sentAt: number, receivedAt: number): void {
+    if (typeof unixTime !== "number" || !Number.isFinite(unixTime) || unixTime <= 0) {
+      this.warnOnce(
+        "server-time-invalid",
+        `[raze-charts] getServerTime() returned ${String(unixTime)}; expected Unix seconds. Using the client clock.`,
+      );
+      return;
+    }
+    let serverMs: number;
+    if (unixTime >= SECONDS_THRESHOLD) {
+      this.warnOnce(
+        "server-time-ms",
+        "[raze-charts] getServerTime() returned milliseconds; expected Unix seconds. The value was converted.",
+      );
+      serverMs = unixTime;
+    } else {
+      // Whole seconds are truncated, so the true instant is half a second later on average.
+      serverMs = unixTime * 1000 + (Number.isInteger(unixTime) ? 500 : 0);
+    }
+    // Compare against the request midpoint to cancel the round trip.
+    const offset = Math.round(serverMs - (sentAt + receivedAt) / 2);
+    this.serverOffsetMs = offset;
+    this.context.setServerTimeOffset(offset);
+    this.context.requestPaint();
   }
 
   // -- Symbol resolution + initial load -------------------------------------
@@ -171,18 +440,24 @@ export class DataManager {
     try {
       await this.ready();
       if (!this.isCurrent(generation)) return false;
+      // The first window ends at the server's "now" when the feed has a clock.
+      if (this.serverTimeReady) await this.serverTimeReady;
+      if (!this.isCurrent(generation)) return false;
 
       let info: LibrarySymbolInfo | null = null;
       if (!forceResolve && target.symbol === this.context.symbol) {
         info = this.context.symbolInfo;
       }
-      if (!info) info = await this.resolveSymbol(target.symbol, generation);
+      if (!info) {
+        const resolved = await this.resolveSymbol(target.symbol, generation);
+        info = resolved && this.sanitiseSymbolInfo(resolved);
+      }
       if (!info || !this.isCurrent(generation)) return false;
 
       const resMs = resolutionToMs(target.resolution);
-      const nowSec = Math.floor(Date.now() / 1000);
+      const nowSec = Math.floor(this.context.now() / 1000);
       const fromSec = nowSec - Math.ceil((INITIAL_BARS * resMs) / 1000);
-      const history = await this.requestBars(
+      const history = await this.fetchHistory(
         info,
         target.resolution,
         { from: fromSec, to: nowSec, countBack: INITIAL_BARS, firstDataRequest: true },
@@ -192,6 +467,7 @@ export class DataManager {
 
       // Commit symbol, interval, bars, and formatter atomically. Until history
       // succeeds the previous chart remains internally consistent.
+      const previousResolution = this.context.resolution;
       this.context.symbol = target.symbol;
       this.context.resolution = target.resolution;
       applySymbolInfo(this.context, info);
@@ -201,10 +477,16 @@ export class DataManager {
       // `noData` means the feed has reached the beginning of the series. Some
       // compatible feeds return their final (non-empty) page together with the
       // flag, so checking the bar count here would request that page forever.
-      this.hasMoreHistory = !history.noData;
+      // A gap that outlasted MAX_GAP_HOPS keeps its resume point instead.
+      this.hasMoreHistory = !history.noData || history.nextTime !== null;
+      this.historyCursor = history.bars.length ? null : history.nextTime;
       this.initVisibleRange();
       await this.applyConfiguredTimeframe(generation);
       if (!this.isCurrent(generation)) return false;
+      if (previousResolution !== target.resolution) {
+        await this.announceInterval(generation, target.resolution);
+        if (!this.isCurrent(generation)) return false;
+      }
       this.startLiveSubscription(generation, info, target.resolution);
       this.context.dataChanged.fire();
       this.context.requestPaint();
@@ -271,26 +553,100 @@ export class DataManager {
     });
   }
 
-  /** Position the initial visible window over the most recent ~120 bar slots. */
+  /** Bars shown by the opening view: the render loop's width-aware count. */
+  private defaultVisibleBars(): number {
+    const count = typeof this.context.defaultVisibleBars === "function"
+      ? this.context.defaultVisibleBars()
+      : DEFAULT_VISIBLE_BARS;
+    return Number.isFinite(count) && count >= 1 ? count : DEFAULT_VISIBLE_BARS;
+  }
+
+  /** Position the initial visible window over the most recent bar slots. */
   private initVisibleRange(): void {
     const n = this.context.bars.length;
+    // Loads replace the window silently: layout sync and range events react
+    // to user and API changes, and the reason tells internal listeners why.
     if (n === 0) {
-      this.context.visibleRange = { from: 0, to: 1 };
+      this.context.setViewport({ from: 0, to: 1 }, "load", { notify: false });
       return;
     }
     // Preserve empty slots on the left for sparse/new feeds. Fitting only the
     // bars returned by the feed spreads a handful of candles across the whole
     // canvas instead of keeping consecutive candles visually grouped.
-    const visibleCount = INITIAL_VISIBLE_BARS;
+    const visibleCount = this.defaultVisibleBars();
     const rightPad = Math.min(8, Math.max(1, Math.round(visibleCount * 0.06)));
-    this.context.visibleRange = {
-      from: n - visibleCount,
-      to: n - 1 + rightPad,
-    };
-    this.context.autoScalePrice = true;
+    this.context.setViewport(
+      { from: n - visibleCount, to: n - 1 + rightPad },
+      "load",
+      { notify: false },
+    );
+    this.context.setScaleMode({ autoScale: true }, "load");
   }
 
-  // -- Lazy left-scroll pagination -----------------------------------------
+  /** Shift the window by `count` bars, keeping the visible time span. */
+  private shiftViewport(count: number, reason: ViewportChangeReason): void {
+    const { from, to } = this.context.visibleRange;
+    this.context.setViewport({ from: from + count, to: to + count }, reason, { notify: false });
+  }
+
+  // -- History ---------------------------------------------------------------
+
+  /**
+   * Request a history window and follow `nextTime` gaps: an empty page that
+   * names where older data resumes is repeated with `to = nextTime`, at most
+   * MAX_GAP_HOPS times. The result keeps the last page's `nextTime` when the
+   * hops ran out, so pagination can resume there.
+   */
+  private async fetchHistory(
+    info: LibrarySymbolInfo,
+    resolution: ResolutionString,
+    periodParams: PeriodParams,
+    generation: number,
+  ): Promise<HistoryResult | null> {
+    let params = periodParams;
+    for (let hop = 0; ; hop++) {
+      const result = await this.requestBars(info, resolution, params, generation);
+      if (!result || result.bars.length || result.nextTime === null) return result;
+      if (result.nextTime >= params.to) {
+        this.warnOnce(
+          "next-time-forward",
+          `[raze-charts] getBars returned nextTime ${result.nextTime}, which is not older than the requested \`to\` (${params.to}); `
+            + "it was ignored. nextTime must be the Unix time (seconds) where older data resumes.",
+        );
+        return { ...result, nextTime: null };
+      }
+      if (hop >= MAX_GAP_HOPS) return result;
+      const span = Math.max(1, params.to - params.from);
+      params = {
+        from: result.nextTime - span,
+        to: result.nextTime,
+        countBack: params.countBack,
+        firstDataRequest: false,
+      };
+    }
+  }
+
+  private resetHistoryBackoff(): void {
+    this.historyFailures = 0;
+    this.historyRetryAt = 0;
+  }
+
+  /** Exponential backoff with jitter, reported once per window. */
+  private noteHistoryFailure(error: unknown): void {
+    this.historyFailures += 1;
+    const base = Math.min(
+      HISTORY_BACKOFF_BASE_MS * 2 ** (this.historyFailures - 1),
+      HISTORY_BACKOFF_MAX_MS,
+    );
+    // ±25% jitter keeps many charts on one failing backend from retrying in lockstep.
+    const delay = Math.round(base * (0.75 + Math.random() * 0.5));
+    this.historyRetryAt = this.context.now() + delay;
+    console.error(
+      `[raze-charts] history pagination failed (attempt ${this.historyFailures}); `
+        + `retrying no sooner than ${(delay / 1000).toFixed(1)}s from now`,
+      error,
+    );
+  }
 
   /** Called by the engine when the visible range nears the left edge. */
   async maybeLoadMoreHistory(): Promise<void> {
@@ -299,6 +655,7 @@ export class DataManager {
     const info = this.context.symbolInfo;
     if (!bars.length || !info) return;
     if (this.context.visibleRange.from > 50) return;
+    if (this.historyFailures > 0 && this.context.now() < this.historyRetryAt) return;
 
     const generation = this.generation;
     const resolution = this.context.resolution;
@@ -307,9 +664,9 @@ export class DataManager {
     try {
       const oldestMs = bars[0]!.time;
       const resMs = resolutionToMs(resolution);
-      const toSec = Math.floor(oldestMs / 1000) - 1;
+      const toSec = this.historyCursor ?? Math.floor(oldestMs / 1000) - 1;
       const fromSec = toSec - Math.ceil((PAGE_BARS * resMs) / 1000);
-      const history = await this.requestBars(
+      const history = await this.fetchHistory(
         info,
         resolution,
         { from: fromSec, to: toSec, countBack: PAGE_BARS, firstDataRequest: false },
@@ -318,30 +675,35 @@ export class DataManager {
       if (!history || !this.isCurrent(generation) || this.activeHistoryRequestId !== requestId) {
         return;
       }
+      this.resetHistoryBackoff();
 
       let changed = false;
       if (history.bars.length) {
+        this.historyCursor = null;
         const before = this.context.bars.length;
         this.mergeBars(history.bars);
         const addedCount = this.context.bars.length - before;
         if (addedCount > 0) {
           changed = true;
-          this.context.visibleRange = {
-            from: this.context.visibleRange.from + addedCount,
-            to: this.context.visibleRange.to + addedCount,
-          };
+          // Same time window, re-anchored after the prepend.
+          this.shiftViewport(addedCount, "rebase");
         }
         // A page containing only timestamps we already have made no progress.
         // Continuing would hammer feeds which ignore the requested boundary.
         if (addedCount === 0) this.hasMoreHistory = false;
+        if (history.noData) this.hasMoreHistory = false;
+      } else if (history.nextTime !== null) {
+        // The gap outlasted MAX_GAP_HOPS: resume from its far side next time.
+        this.historyCursor = history.nextTime;
+      } else {
+        this.hasMoreHistory = false;
       }
-      if (history.noData || !history.bars.length) this.hasMoreHistory = false;
       if (changed) {
         this.context.dataChanged.fire();
         this.context.requestPaint();
       }
     } catch (error) {
-      if (this.isCurrent(generation)) this.reportError("history pagination", error);
+      if (this.isCurrent(generation)) this.noteHistoryFailure(error);
     } finally {
       if (this.activeHistoryRequestId === requestId) this.activeHistoryRequestId = null;
     }
@@ -381,8 +743,13 @@ export class DataManager {
           resolution,
           periodParams,
           (bars: Bar[], meta?: HistoryMetadata) => {
-            const safeBars = Array.isArray(bars) ? bars : [];
-            finish({ bars: safeBars, noData: meta?.noData === true });
+            if (settled) return;
+            const safeBars = Array.isArray(bars) ? this.validate(bars, "getBars") : [];
+            finish({
+              bars: safeBars,
+              noData: meta?.noData === true,
+              nextTime: nextTimeSeconds(meta?.nextTime),
+            });
           },
           (reason) => finish(null, reason),
         );
@@ -392,17 +759,30 @@ export class DataManager {
     });
   }
 
+  /** Validate datafeed bars, warning once per problem class. */
+  private validate(batch: readonly unknown[], origin: string): Bar[] {
+    const coerce = this.context.options.raze?.coerce_bars === true;
+    const { bars, issues } = validateBars(batch, coerce);
+    for (const issue of issues) {
+      const key = `bars:${issue.problem}:${issue.repaired ? "repaired" : "reported"}`;
+      if (this.warned.has(key)) continue;
+      this.warned.add(key);
+      const message = describeBarIssue(issue, origin);
+      if (issue.repaired) console.debug(message);
+      else console.warn(message);
+    }
+    return bars;
+  }
+
   /** Merge a batch into the canonical series, dedup by time, keep ascending. */
   private mergeBars(batch: Bar[]): void {
     this.context.bars = this.normaliseBars([...this.context.bars, ...batch]);
   }
 
+  /** Sort validated bars ascending and keep the last bar for each time. */
   private normaliseBars(batch: Bar[]): Bar[] {
     const byTime = new Map<number, Bar>();
-    for (const bar of batch) {
-      if (!bar || !Number.isFinite(bar.time)) continue;
-      byTime.set(bar.time, bar);
-    }
+    for (const bar of batch) byTime.set(bar.time, bar);
     return Array.from(byTime.values()).sort((a, b) => a.time - b.time);
   }
 
@@ -454,8 +834,9 @@ export class DataManager {
     }
   }
 
-  private onLiveBar(bar: Bar): void {
-    if (!Number.isFinite(bar.time)) return;
+  private onLiveBar(input: Bar): void {
+    const bar = this.validate([input], "subscribeBars")[0];
+    if (!bar) return;
     const bars = this.context.bars;
     const last = bars[bars.length - 1];
     const pinnedRight = bars.length > 0 && this.context.visibleRange.to >= bars.length - 1;
@@ -463,13 +844,13 @@ export class DataManager {
       bars[bars.length - 1] = bar;
     } else if (!last || bar.time > last.time) {
       bars.push(bar);
-      if (pinnedRight) {
-        this.context.visibleRange = {
-          from: this.context.visibleRange.from + 1,
-          to: this.context.visibleRange.to + 1,
-        };
-      }
+      if (pinnedRight) this.shiftViewport(1, "realtime");
     } else {
+      this.warnOnce(
+        "live-order",
+        `[raze-charts] subscribeBars delivered a bar at ${bar.time}, older than the last bar (${last.time}); it was ignored. `
+          + "Live updates may only change the last bar or append a newer one.",
+      );
       return;
     }
     this.context.dataChanged.fire();
@@ -602,8 +983,7 @@ export class DataManager {
     const from = Math.floor(bars[0]!.time / 1000);
     const to = Math.floor(bars[bars.length - 1]!.time / 1000) + 86_400;
     const jobs: Promise<boolean>[] = [];
-    const getMarks = this.context.datafeed.getMarks;
-    if (typeof getMarks === "function") {
+    if (this.barMarksWanted()) {
       jobs.push(this.requestMarks(
         generation,
         requestId,
@@ -626,8 +1006,7 @@ export class DataManager {
       this.context.marks = [];
     }
 
-    const getTimescaleMarks = this.context.datafeed.getTimescaleMarks;
-    if (typeof getTimescaleMarks === "function") {
+    if (this.timescaleMarksWanted()) {
       jobs.push(this.requestTimescaleMarks(
         generation,
         requestId,
@@ -684,6 +1063,14 @@ export class DataManager {
   }
 
   refreshMarks(): void {
+    if (this.config && !this.barMarksWanted() && !this.timescaleMarksWanted()) {
+      this.warnOnce(
+        "refresh-marks-unsupported",
+        "[raze-charts] refreshMarks() has nothing to refresh: the datafeed configuration enables neither "
+          + "supports_marks (with getMarks) nor supports_timescale_marks (with getTimescaleMarks)"
+          + (barMarksOptedOut(this.context) ? ', and disabled_features contains "mark_on_bars".' : "."),
+      );
+    }
     this.refreshMarksFor(
       this.generation,
       this.context.symbolInfo,
@@ -703,25 +1090,26 @@ export class DataManager {
 
   // -- Resolution / symbol changes -----------------------------------------
 
+  /**
+   * Switch the interval. Rejects with a RangeError (listing the accepted
+   * forms) for an invalid resolution before any request is made.
+   */
   async changeResolution(resolution: ResolutionString): Promise<void> {
-    const target = { symbol: this.desiredTarget.symbol, resolution };
-    if (resolution === this.desiredTarget.resolution) {
+    const canonical = normalizeResolution(resolution) as ResolutionString;
+    const target = { symbol: this.desiredTarget.symbol, resolution: canonical };
+    if (canonical === this.desiredTarget.resolution) {
       if (this.latestReload) await this.latestReload;
       return;
     }
-
-    const previous = this.context.resolution;
-    const changed = await this.startReload(target);
-    if (changed && previous !== resolution && !this.destroyed) {
-      this.context.intervalChanged.fire(resolution, this.timeframePayload());
-    }
+    await this.startReload(target);
   }
 
+  /** Switch the symbol (and optionally the interval). Rejects like changeResolution(). */
   async changeSymbol(
     symbol: string,
     resolution: ResolutionString = this.desiredTarget.resolution,
   ): Promise<void> {
-    const target = { symbol, resolution };
+    const target = { symbol, resolution: normalizeResolution(resolution) as ResolutionString };
     if (
       target.symbol === this.desiredTarget.symbol &&
       target.resolution === this.desiredTarget.resolution
@@ -729,12 +1117,7 @@ export class DataManager {
       if (this.latestReload) await this.latestReload;
       return;
     }
-
-    const previousResolution = this.context.resolution;
-    const changed = await this.startReload(target);
-    if (changed && previousResolution !== resolution && !this.destroyed) {
-      this.context.intervalChanged.fire(resolution, this.timeframePayload());
-    }
+    await this.startReload(target);
   }
 
   resetData(): void {
@@ -745,14 +1128,62 @@ export class DataManager {
     });
   }
 
-  timeframePayload(): { timeframe: { value: string; type: "time-range" } } {
+  /**
+   * Fire `intervalChanged(resolution, { timeframe })` after the new interval's
+   * data is committed and before its first paint. `timeframe` is the range
+   * the chart will show; a listener may replace it (or edit `from`/`to`) to
+   * choose another range, which is applied here.
+   */
+  private async announceInterval(generation: number, resolution: ResolutionString): Promise<void> {
     const range = this.visibleUnixRange();
-    return {
-      timeframe: {
-        value: `${range.from}-${range.to}`,
-        type: "time-range",
-      },
-    };
+    const initial: TimeFrameTimeRange = { type: "time-range", from: range.from, to: range.to };
+    const params: IntervalChangedParameters = { timeframe: initial };
+    this.context.intervalChanged.fire(resolution, params);
+    if (!this.isCurrent(generation)) return;
+    const chosen = params.timeframe as TimeFrameValue | undefined;
+    if (chosen === initial && initial.from === range.from && initial.to === range.to) return;
+
+    const window = this.resolveTimeFrameValue(chosen);
+    if (!window) {
+      this.warnOnce(
+        "interval-timeframe",
+        `[raze-charts] onIntervalChanged listener set timeframe to ${JSON.stringify(chosen)}; expected `
+          + '{ type: "time-range", from, to } in Unix seconds or { type: "period-back", value: "12M" }. It was ignored.',
+      );
+      return;
+    }
+    try {
+      if (window.all) this.showAllBars("timeframe");
+      else await this.revealTimeRange(window.from, window.to, "timeframe");
+    } catch (error) {
+      // The interval itself switched; a failed reveal keeps the default view.
+      if (this.isCurrent(generation)) this.reportError("apply onIntervalChanged timeframe", error);
+    }
+  }
+
+  private resolveTimeFrameValue(value: unknown): { from: number; to: number; all?: boolean } | null {
+    if (!value || typeof value !== "object") return null;
+    const tf = value as { type?: unknown; from?: unknown; to?: unknown; value?: unknown };
+    if (tf.type === "time-range" && typeof tf.from === "number" && typeof tf.to === "number") {
+      if (!Number.isFinite(tf.from) || !Number.isFinite(tf.to) || tf.from > tf.to) return null;
+      return { from: tf.from, to: tf.to };
+    }
+    if ((tf.type === "period-back" || tf.type === "time-range") && typeof tf.value === "string") {
+      return resolveTimeframe(
+        { type: tf.type, value: tf.value },
+        Math.floor(this.context.now() / 1000),
+      );
+    }
+    return null;
+  }
+
+  /**
+   * TradingView-shaped interval payload for the current visible range:
+   * `{ timeframe: { type: "time-range", from, to } }` in Unix seconds.
+   */
+  timeframePayload(): IntervalChangedParameters {
+    const range = this.visibleUnixRange();
+    return { timeframe: { type: "time-range", from: range.from, to: range.to } };
   }
 
   visibleUnixRange(): { from: number; to: number } {
@@ -766,7 +1197,11 @@ export class DataManager {
     return { from: idx(from), to: idx(to) };
   }
 
-  applyIndexRangeFromUnix(fromSec: number, toSec: number): void {
+  /**
+   * Show a Unix-second window. `reason` tags the viewport change (defaults to
+   * "api"; layout sync passes "sync", presets "preset").
+   */
+  applyIndexRangeFromUnix(fromSec: number, toSec: number, reason: ViewportChangeReason = "api"): void {
     this.assertValidUnixRange(fromSec, toSec);
     const bars = this.context.bars;
     if (!bars.length) return;
@@ -776,10 +1211,17 @@ export class DataManager {
     const from = timeIndex.indexAt(fromMs);
     const to = timeIndex.indexAt(toMs);
     if (from === null || to === null) return;
-    this.context.visibleRange = { from, to: Math.max(from + 1, to) };
-    this.context.autoScalePrice = true;
-    this.context.viewportChanged.fire(this.visibleUnixRange());
-    this.context.requestPaint();
+    this.applyRange({ from, to: Math.max(from + 1, to) }, reason);
+  }
+
+  private applyRange(range: IndexRange, reason: ViewportChangeReason): void {
+    this.context.setScaleMode({ autoScale: true }, reason === "timeframe" || reason === "preset" ? "preset" : "api");
+    this.context.setViewport(range, reason);
+  }
+
+  private showAllBars(reason: ViewportChangeReason): void {
+    const n = this.context.bars.length;
+    if (n) this.applyRange({ from: 0, to: n - 1 }, reason);
   }
 
   private assertValidUnixRange(fromSec: number, toSec: number): void {
@@ -793,27 +1235,32 @@ export class DataManager {
 
   async applyConfiguredTimeframe(generation = this.generation): Promise<void> {
     if (!this.isCurrent(generation)) return;
-    const resolved = resolveTimeframe(this.context.options.timeframe);
+    const resolved = resolveTimeframe(
+      this.context.options.timeframe,
+      Math.floor(this.context.now() / 1000),
+    );
     if (!resolved) return;
     if (resolved.all) {
-      const n = this.context.bars.length;
-      if (n) {
-        this.context.visibleRange = { from: 0, to: n - 1 };
-        this.context.autoScalePrice = true;
-        this.context.viewportChanged.fire(this.visibleUnixRange());
-        this.context.requestPaint();
-      }
+      this.showAllBars("timeframe");
       return;
     }
-    await this.revealTimeRange(resolved.from, resolved.to);
+    await this.revealTimeRange(resolved.from, resolved.to, "timeframe");
   }
 
-  async revealTimeRange(fromSec: number, toSec: number): Promise<void> {
+  /**
+   * Show a Unix-second window, paging older history (and following gaps) until
+   * it is covered. `reason` tags the viewport change; see applyIndexRangeFromUnix.
+   */
+  async revealTimeRange(
+    fromSec: number,
+    toSec: number,
+    reason: ViewportChangeReason = "api",
+  ): Promise<void> {
     if (this.destroyed) return;
     this.assertValidUnixRange(fromSec, toSec);
     const info = this.context.symbolInfo;
     if (!info) {
-      this.applyIndexRangeFromUnix(fromSec, toSec);
+      this.applyIndexRangeFromUnix(fromSec, toSec, reason);
       return;
     }
     const generation = this.generation;
@@ -826,12 +1273,13 @@ export class DataManager {
       && safety++ < 24
     ) {
       const oldest = this.context.bars[0]!;
-      const history = await this.requestBars(
+      const to = this.historyCursor ?? Math.floor(oldest.time / 1000) - 1;
+      const history = await this.fetchHistory(
         info,
         this.context.resolution,
         {
-          from: fromSec,
-          to: Math.floor(oldest.time / 1000) - 1,
+          from: Math.min(fromSec, to - 1),
+          to,
           countBack: PAGE_BARS,
           firstDataRequest: false,
         },
@@ -839,32 +1287,41 @@ export class DataManager {
       );
       if (!history || !this.isCurrent(generation)) return;
       if (!history.bars.length) {
-        this.hasMoreHistory = false;
+        if (history.nextTime !== null && history.nextTime > fromSec) {
+          this.historyCursor = history.nextTime;
+          continue;
+        }
+        if (history.nextTime !== null) this.historyCursor = history.nextTime;
+        else this.hasMoreHistory = false;
         break;
       }
+      this.historyCursor = null;
       const before = this.context.bars.length;
       this.mergeBars(history.bars);
-      if (history.noData || this.context.bars.length === before) {
+      const added = this.context.bars.length - before;
+      if (added > 0) this.shiftViewport(added, "rebase");
+      if (history.noData || added === 0) {
         this.hasMoreHistory = false;
         break;
       }
     }
-    if (this.isCurrent(generation)) this.applyIndexRangeFromUnix(fromSec, toSec);
+    if (this.isCurrent(generation)) this.applyIndexRangeFromUnix(fromSec, toSec, reason);
   }
 
   async loadCompare(symbol: string): Promise<Bar[]> {
     const info = await this.resolveSymbolPublic(symbol);
     if (!info) return [];
     const bars = this.context.bars;
-    const from = bars[0] ? Math.floor(bars[0].time / 1000) : Math.floor(Date.now() / 1000) - 86_400 * 30;
-    const to = bars[bars.length - 1] ? Math.floor(bars[bars.length - 1]!.time / 1000) + 86_400 : Math.floor(Date.now() / 1000);
-    const history = await this.requestBars(
+    const nowSec = Math.floor(this.context.now() / 1000);
+    const from = bars[0] ? Math.floor(bars[0].time / 1000) : nowSec - 86_400 * 30;
+    const to = bars[bars.length - 1] ? Math.floor(bars[bars.length - 1]!.time / 1000) + 86_400 : nowSec;
+    const history = await this.fetchHistory(
       info,
       this.context.resolution,
       { from, to, countBack: bars.length || PAGE_BARS, firstDataRequest: true },
       this.generation,
     );
-    return history?.bars ?? [];
+    return history ? this.normaliseBars(history.bars) : [];
   }
 
   private resolveSymbolPublic(symbol: string): Promise<LibrarySymbolInfo | null> {
@@ -881,10 +1338,6 @@ export class DataManager {
     });
   }
 
-  private reportError(operation: string, error: unknown): void {
-    console.error(`[raze-charts] ${operation} failed`, error);
-  }
-
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -892,6 +1345,8 @@ export class DataManager {
     this.historyRequestId += 1;
     this.activeHistoryRequestId = null;
     this.marksRequestId += 1;
+    if (this.serverTimeTimer !== null) clearInterval(this.serverTimeTimer);
+    this.serverTimeTimer = null;
     this.stopLiveSubscription();
     this.cancelPending();
     this.latestReload = null;

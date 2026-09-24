@@ -348,7 +348,7 @@ const DEFAULT_SIDEBAR_ITEMS: SidebarItem[]
 class DataManager
   new (context: ChartContext): DataManager
   applyConfiguredTimeframe(generation?: number | undefined): Promise<void>
-  applyIndexRangeFromUnix(fromSec: number, toSec: number): void
+  applyIndexRangeFromUnix(fromSec: number, toSec: number, reason?: 'api' | 'cancel' | 'fit' | 'initial' | 'keyboard' | 'load' | 'pan' | 'pinch' | 'preset' | 'realtime' | 'rebase' | 'reset' | 'resize' | 'sync' | 'timeframe' | 'zoom' | undefined): void
   changeResolution(resolution: ResolutionString): Promise<void>
   changeSymbol(symbol: string, resolution?: ResolutionString | undefined): Promise<void>
   clearMarks(): void
@@ -361,8 +361,8 @@ class DataManager
   refreshMarks(): void
   resetData(): void
   resolveAndLoad(): Promise<void>
-  revealTimeRange(fromSec: number, toSec: number): Promise<void>
-  timeframePayload(): { timeframe: { value: string; type: 'time-range'; }; }
+  revealTimeRange(fromSec: number, toSec: number, reason?: 'api' | 'cancel' | 'fit' | 'initial' | 'keyboard' | 'load' | 'pan' | 'pinch' | 'preset' | 'realtime' | 'rebase' | 'reset' | 'resize' | 'sync' | 'timeframe' | 'zoom' | undefined): Promise<void>
+  timeframePayload(): IntervalChangedParameters
   visibleUnixRange(): { from: number; to: number; }
 interface DatafeedConfiguration
   [key: string]: unknown
@@ -436,6 +436,9 @@ interface FinanceView extends PlotScale
   tradingScreen: TradingHit[]
   visibleRange: IndexRange
   volumePane: null | { top: number; h: number; }
+interface FloorToBarOptions
+  timezone?: null | string | undefined
+  weekStart?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | undefined
 interface GestureHost
   readonly canvas: HTMLCanvasElement
   readonly context: ChartContext
@@ -606,6 +609,8 @@ class IndicatorsMenu
   destroy(): void
   open(anchor: HTMLElement): void
   toggle(anchor: HTMLElement): void
+interface IntervalChangedParameters
+  timeframe: TimeFrameValue
 class IntervalSelector
   new (context: ChartContext, mount: HTMLElement, onSelect: (res: ResolutionString) => void, favorites?: string[] | undefined): IntervalSelector
   destroy(): void
@@ -743,10 +748,12 @@ interface PopupOptions
 type PriceFormatFn = (value: number, pricescale: number) => string
 type PriceFormatterFactory = (symbolInfo: LibrarySymbolInfo | null, minTick: string) => CustomSymbolValueFormatter | null
 type PriceScaleMode = 'log' | 'normal' | 'percent'
+const RESOLUTION_FORMS: string
 interface RazeChartsOptions
   aria_description?: string | undefined
   aria_label?: string | undefined
   chart_types?: ChartStyleName[] | undefined
+  coerce_bars?: boolean | undefined
   compact_breakpoint?: number | undefined
   custom_studies?: StudyDefinition[] | undefined
   format_price?: ((value: number, pricescale: number) => string) | undefined
@@ -995,6 +1002,14 @@ interface ThemeColors
   wickDown: string
   wickUp: string
 type ThemeName = 'dark' | 'light'
+interface TimeFramePeriodBack
+  type: 'period-back'
+  value: string
+interface TimeFrameTimeRange
+  from: number
+  to: number
+  type: 'time-range'
+type TimeFrameValue = TimeFramePeriodBack | TimeFrameTimeRange
 class TimeIndex
   new (points: readonly TimePoint[], expectedStepMs?: number | undefined): TimeIndex
   indexAt(timeMs: number): null | number
@@ -1125,14 +1140,16 @@ const default: { widget: typeof Widget; version: string; }
 function defineDataSource<T extends RazeDataSource>(source: T): T
 function ema(closes: number[], length: number): (null | number)[]
 function ensureBaseStyles(target?: Node | undefined, options?: StyleOptions | undefined): void
-function floorToBar(timeMs: number, res: string): number
+function floorToBar(timeMs: number, res: string, options?: FloorToBarOptions | undefined): number
 function formatCompact(value: number): string
 function formatPrice(value: number, pricescale: number): string
 function formatVolume(value: number): string
 function heikinAshi(bars: Bar[]): Bar[]
 function isCoarsePointer(): boolean
 function isLightColor(color: string): boolean
+function isValidResolution(res: unknown): boolean
 function macd(closes: number[], fast?: number | undefined, slow?: number | undefined, signal?: number | undefined): { macd: (null | number)[]; signal: (null | number)[]; hist: (null | number)[]; }
+function normalizeResolution(res: string): string
 function openPopup(opts: PopupOptions): PopupHandle
 function parseResolution(res: string): ParsedResolution
 function popupRow(content: string, onClick: (e: MouseEvent) => void, options?: undefined | { role?: 'menuitem' | 'menuitemcheckbox' | 'menuitemradio' | undefined; checked?: boolean | undefined; label?: string | undefined; trustedHtml?: boolean | undefined; }): HTMLButtonElement

@@ -38,13 +38,18 @@ registry created there is standalone; pass definitions to a widget through
 | --- | --- | --- |
 | Candlestick, line, area, Heikin Ashi, bars, hollow candles, baseline, columns | **Yes** | Selected through the financial chart UI/options. |
 | Volume | **Yes** | Overlay (default), dedicated pane, or hidden via `raze.volume_mode`. |
-| Initial history and lazy left pagination | **Yes** | Uses the TradingView-shaped `getBars` contract. |
+| Initial history and lazy left pagination | **Yes** | Uses the TradingView-shaped `getBars` contract. An empty page with `HistoryMetadata.nextTime` is a gap: the request repeats with `to = nextTime` (up to 5 hops per request). Failing pages back off exponentially (1 s, 2 s, 4 s … with jitter, max 60 s) and log one error per window; a success resets the backoff. |
+| Bar validation | **Yes** | Undrawable bars (non-finite time or OHLC, numeric strings, non-objects) are dropped. Seconds-based times and an inverted high/low are kept. Each problem class warns once, naming the field and the first bad index. `raze.coerce_bars` converts numeric strings, multiplies seconds by 1000 and swaps high/low instead. |
+| Strict resolutions | **Yes** | `"<n>S"`, `"<n>"` (minutes), `"<n>D"`/`"D"`, `"<n>W"`/`"W"`, `"<n>M"`/`"M"`. `D`/`W`/`M` normalise to `1D`/`1W`/`1M` for the chart and the feed. The constructor, `setResolution` and `setSymbol` throw a `RangeError` listing these forms for anything else (`"4h"`, `"1H"`, lower-case `"1m"`); invalid `supported_resolutions` entries are dropped with a warning. |
+| Tick resolutions (`"1T"`) | **No** | Rejected with a `RangeError`. |
+| Server time | **Yes** | With `supports_time: true`, `getServerTime` is called at boot (the first window waits up to 1 s) and every 5 minutes. The offset feeds the first history window and `context.now()` for the countdown and presets. |
+| `floorToBar(time, resolution, { timezone, weekStart })` | **Yes** | Calendar-aligned: weeks start on Monday (configurable), `1M`/`3M`/`12M` start on months, quarters and years, in UTC or an IANA zone across DST. |
 | Promise-first native data source | **Yes** | `defineDataSource` + `createDatafeed` adapt promises and optional realtime cleanup to the callback protocol. |
 | Live bars | **Yes** | `subscribeBars` / `unsubscribeBars`; append and forming-bar replacement are supported. |
 | Abortable native realtime setup | **Yes** | The native adapter supplies `AbortSignal` and runs cleanup even when async setup finishes after unsubscribe. |
 | Symbol and resolution races | **Yes** | Latest request wins; stale history, marks, and subscription callbacks are ignored. |
 | Async marks | **Yes** | Callback-based asynchronous `getMarks` results are applied only to the active target. |
-| Timescale marks | **Yes** | `getTimescaleMarks` is requested with history and painted on the time axis. |
+| Timescale marks | **Yes** | `getTimescaleMarks` is requested with history (only when `supports_timescale_marks` is true) and painted on the time axis. |
 | Gapped market sessions | **Yes** | `TimeIndex` maps actual timestamps onto adjacent logical bar indices; `session_breaks` draws optional gap lines. |
 | Timeframe / go-to-date | **Yes** | Honours `options.timeframe`; header presets and go-to-date call `setVisibleRange`, which pages history when needed. |
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
@@ -57,7 +62,8 @@ registry created there is standalone; pass definitions to a widget through
 | Shape editing | **Yes** | Create, drag, read/update points, remove, and remove all shapes. |
 | Order and position lines | **Yes** | TradingView-style fluent adapters, styling, quantity/P&L labels, move/modify/cancel callbacks, mouse/touch drag, and one-tick keyboard adjustment. |
 | Stop-loss / take-profit brackets | **Yes** | Linked entry/SL/TP lines, risk/reward shading and ratio, auto-scale participation, group callbacks and cancellation. |
-| Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
+| Marks on bars | **Yes** | Shown by default when the datafeed configuration sets `supports_marks: true`; `getMarks` is never called otherwise. `disabled_features: ["mark_on_bars"]` opts out. Hover tooltip and refresh/clear APIs. |
+| `onIntervalChanged` timeframe | **Yes** | Listeners receive `{ timeframe: { type: "time-range", from, to } }` and may assign a `time-range` or `period-back` value, applied before the new interval paints. |
 | Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
 | Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
 | Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |

@@ -2,13 +2,14 @@
 // context, drives every registered controller through create -> attach ->
 // boot -> destroy, and owns the kernel services between those phases.
 
-import type { ChartingLibraryWidgetOptions } from "../../types/charting_library";
+import type { ChartingLibraryWidgetOptions, ResolutionString } from "../../types/charting_library";
 import { DataManager } from "../../data/DataManager";
 import { ChartEngine } from "../../engine/ChartEngine";
 import { ChartRenderer } from "../../engine/ChartRenderer";
 import { StudyRegistry } from "../../studies/registry";
 import { StudyStore } from "../../studies/StudyStore";
 import { createPriceFormatter } from "../../util/format";
+import { normalizeResolution } from "../../util/resolution";
 import { Delegate } from "../../util/delegate";
 import { CommandStack } from "../CommandStack";
 import { buildFeatureSet, createChartContext, type ChartContext } from "../context";
@@ -29,7 +30,8 @@ export function createWidgetContext(options: ChartingLibraryWidgetOptions): Char
     locale: options.locale ?? "en",
     fontFamily: options.custom_font_family || DEFAULT_FONT,
     symbol: options.symbol,
-    resolution: options.interval,
+    // Strict: an invalid interval throws a RangeError before any DOM work.
+    resolution: normalizeResolution(options.interval) as ResolutionString,
     symbolInfo: null,
     formatPrice: createPriceFormatter(options, null),
     theme: buildTheme(options),
