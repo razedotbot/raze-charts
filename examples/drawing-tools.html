@@ -16,7 +16,7 @@
     // (?theme=light). Used by tests/drawing-tools.spec.ts for goldens and
     // pixel checks; drawings are placed relative to the visible data so they
     // stay on screen whatever the synthetic walk does.
-    import { widget } from "../dist/charting_library.esm.js";
+    import { defineDrawingTool, widget } from "../dist/charting_library.esm.js";
     import { makeMockDatafeed, VISUAL_NOW } from "./mock-datafeed.mjs";
 
     const light = new URLSearchParams(location.search).get("theme") === "light";
@@ -77,6 +77,10 @@
         text: "Limit",
         overrides: { linecolor: "#66d89e", linestyle: 1, showPrice: true },
       });
+      // tests/drawing-tools.spec.ts registers a host tool against this widget.
+      window.__razeWidget = w;
+      window.__razeDefineDrawingTool = defineDrawingTool;
+      window.__razeAt = at;
       window.__razeReady = true;
     });
   </script>

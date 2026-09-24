@@ -23,7 +23,7 @@ objects tree and saved/loaded like a built-in one.
 | `rectangle` | 2 | | `linecolor`, `linewidth`, `linestyle`, `backgroundColor`, `fillBackground`, `transparency` |
 | `fib_retracement` | 2 | | `linecolor`, `linewidth`, `linestyle`, `levels`, `reverse`, `extendLines`, `showCoeffs`, `showPrices`, `fillBackground`, `transparency` |
 | `measure` | 2 | `date_and_price_range` | `linecolor`, `linewidth`, `linestyle`, `fillBackground`, `transparency` |
-| `text` | 1 | | `color` (or `textcolor`), `fontsize`, `bold`, `italic`, `backgroundColor`, `fillBackground`, `borderColor`, `drawBorder`, `wordWrap`, `wordWrapWidth` |
+| `text` | 1 | | `color` (or `textcolor`, then `linecolor`), `fontsize`, `bold`, `italic`, `backgroundColor`, `fillBackground`, `borderColor`, `drawBorder`, `wordWrap`, `wordWrapWidth` |
 
 Conventions shared by every tool:
 
@@ -60,7 +60,11 @@ Conventions shared by every tool:
   on a theme backdrop above a rise or below a fall, kept inside the plot.
 - **Text** is anchored at its top-left corner. `\n` starts a new line and
   `wordWrap` wraps at `wordWrapWidth` CSS px. The backdrop is on by default
-  and uses the `labelBackground` token.
+  and uses the `labelBackground` token. The text colour is `color`, then its
+  TradingView alias `textcolor`, then `linecolor`, which earlier releases
+  painted text with (text drawn from the toolbar was saved with a
+  `linecolor`), so saved layouts keep their colours. With none of them set,
+  text uses the `labelText` token.
 - **Horizontal line** queues its `showPrice` tag on the frame's axis-tag list
   (`view.axisTags`). The axis-overlay pass paints that list after the price
   axis, so the tag is never hidden under the axis. Labels of lines closer
@@ -113,7 +117,10 @@ defineDrawingTool({
   anchors mapped to CSS pixels. An anchor is `null` when it cannot be mapped.
   `env` provides the theme tokens, the symbol's price formatter, the duration
   formatter, the bar spacing, coordinate converters and `pushAxisTag()` for
-  axis pills.
+  axis pills. Pair every `save()` with a `restore()` in your own code. If
+  `paint` throws, or leaves its saves unbalanced, the runtime unwinds the
+  canvas to its own saved state. The rest of the frame keeps its clip and
+  styles, and a throwing tool is skipped with a one-time warning.
 - `hitTest` must hit what `paint` draws. The runtime publishes it as
   `ShapeHit.hitTest` with the drawing's `z`, so gestures can hit-test
   topmost-first against the geometry of the last frame.
@@ -123,7 +130,15 @@ defineDrawingTool({
   invalid id, an id or alias that is already registered, icon markup with
   scripts, event handlers, links or `url()`, a bad anchor spec, missing
   `paint`/`hitTest`, and property defaults that do not match their field type.
-  Registering the same definition object twice does nothing.
+  Registering an identical definition again (the same object, or the same
+  field values) does nothing.
+- Development reloads (HMR) run your module again and build a new definition
+  with new functions, which would throw as an id that is already registered.
+  Pass `{ replace: true }` to swap it in place:
+  `defineDrawingTool(definition, { replace: true })`. Existing drawings of that
+  kind keep their data and use the new definition from the chart's next
+  frame, and `onDrawingToolsChanged` listeners are notified. Built-in tools
+  cannot be replaced.
 - A saved drawing whose kind is not registered stays in the store and in
   `save()` output, but it is not painted. The chart warns once and names the
   registered kinds.

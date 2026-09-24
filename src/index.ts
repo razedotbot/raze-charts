@@ -107,7 +107,7 @@ export {
   onDrawingToolsChanged,
   removeDrawingTool,
 } from "./drawings/registry";
-export type { RegisteredDrawingTool } from "./drawings/registry";
+export type { DefineDrawingToolOptions, RegisteredDrawingTool } from "./drawings/registry";
 export { anchorsComplete, minAnchors } from "./drawings/types";
 export type {
   BuiltinDrawingToolId,

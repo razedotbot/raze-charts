@@ -80,9 +80,10 @@ function fieldProblem(field: DrawingPropField): string {
 
 /**
  * Why a definition cannot be registered (invalid, or its id or an alias is
- * taken), or "" when it can.
+ * taken by another tool), or "" when it can. `replacing` names the registered
+ * tool the definition is about to replace, whose own id and aliases are free.
  */
-export function drawingToolProblem(def: RegisteredDrawingTool): string {
+export function drawingToolProblem(def: RegisteredDrawingTool, replacing?: string): string {
   if (!def || typeof def !== "object") return "expects a tool definition object";
   const spec = def.anchors;
   if (!ID.test(def.id)) return `id must match ${ID} (it is stored in saved layouts)`;
@@ -106,7 +107,10 @@ export function drawingToolProblem(def: RegisteredDrawingTool): string {
   for (const name of [def.id, ...(def.aliases ?? [])]) {
     if (!ID.test(name)) return `alias "${name}" must match ${ID}`;
     const owner = tools.get(name)?.id ?? aliases.get(name);
-    if (owner) return `"${name}" is already used by "${owner}"; tool ids are page-wide, so prefix yours (for example "acme_arrow")`;
+    if (owner && owner !== replacing) {
+      return `"${name}" is already used by "${owner}"; tool ids are page-wide, so prefix yours (for example "acme_arrow")`
+        + (owner === def.id ? ", or pass { replace: true } to swap in a new version" : "");
+    }
   }
   return "";
 }
@@ -115,27 +119,48 @@ function notify(): void {
   for (const listener of [...listeners]) listener();
 }
 
+/** Options for defineDrawingTool(). */
+export interface DefineDrawingToolOptions {
+  /**
+   * Replace a host tool already registered under the same id instead of
+   * throwing. Meant for development reloads (HMR), where re-running a module
+   * creates a new definition with new functions. Drawings of that kind keep
+   * their data and paint with the new definition from the next frame.
+   * Built-in tools cannot be replaced.
+   */
+  readonly replace?: boolean;
+}
+
 /**
  * Register a drawing tool and return its frozen definition. The tool then
  * paints, hit-tests, drafts with its anchor count, undoes and round-trips
  * through save()/load() exactly like the built-ins, which use this same path.
  *
  * Throws a TypeError naming the problem for an invalid definition or an id
- * (or alias) that is already registered. Registering the same definition
- * object again is a no-op, so module re-evaluation under HMR is safe.
+ * (or alias) that is already registered. Registering an identical definition
+ * again (the same object, or one with the same field values) is a no-op.
+ * Re-running a module under HMR builds a new definition whose functions
+ * differ, so that throws unless `{ replace: true }` is passed.
  */
 export function defineDrawingTool<TProps extends object>(
   definition: DrawingToolDefinition<TProps>,
+  options?: DefineDrawingToolOptions,
 ): DrawingToolDefinition<TProps> {
   const erased = definition as unknown as RegisteredDrawingTool;
-  const current = catalogue().get(erased?.id);
-  if (!current || Object.keys(erased).some((key) => current[key as "id"] !== erased[key as "id"])) {
-    const issue = drawingToolProblem(erased);
-    if (issue) throw new TypeError(`[raze-charts] defineDrawingTool("${erased?.id}"): ${issue}.`);
+  const id = erased?.id;
+  const current = catalogue().get(id);
+  const keys = current ? Object.keys(erased) : [];
+  if (!current || keys.length !== Object.keys(current).length || keys.some((key) => current[key as "id"] !== erased[key as "id"])) {
+    const replacing = current && options?.replace ? id : undefined;
+    const issue = replacing && builtins!.has(id)
+      ? "built-in tools cannot be replaced"
+      : drawingToolProblem(erased, replacing);
+    if (issue) throw new TypeError(`[raze-charts] defineDrawingTool("${id}"): ${issue}.`);
+    for (const alias of current?.aliases ?? []) aliases.delete(alias);
     add(erased);
     notify();
   }
-  return tools.get(erased.id) as unknown as DrawingToolDefinition<TProps>;
+  return tools.get(id) as unknown as DrawingToolDefinition<TProps>;
 }
 
 /** Look a tool up by id or alias (for example TradingView's `extended`). */

@@ -143,6 +143,19 @@ function hit(tool: Tool, point: ScreenPoint, state: AnyState, geometry: DrawingG
   }
 }
 
+// miterLimit values written just before the runtime's save() calls around a
+// tool's paint(): OUTER before the save that precedes the plot clip, INNER
+// before the saves inside it. Canvas state cannot be queried for its save
+// depth, but restore() brings these values back exactly, so they mark the
+// runtime's own levels.
+const OUTER_LEVEL = 10.03125;
+const INNER_LEVEL = 10.0625;
+
+/** restore() until miterLimit is one of `levels` (bounded, for contexts without state). */
+function unwindTo(ctx: CanvasRenderingContext2D, ...levels: number[]): void {
+  for (let guard = 32; guard-- && !levels.includes(ctx.miterLimit);) ctx.restore();
+}
+
 /** Paint one drawing clipped to the plot, then its handles when they should show. */
 function paint(
   ctx: CanvasRenderingContext2D,
@@ -165,11 +178,17 @@ function paint(
   const accent = [p.linecolor, p.color, p.textcolor]
     .find((c): c is string => typeof c === "string" && !!c.trim()) ?? theme.drawingDefault;
 
+  const miterLimit = ctx.miterLimit;
+  ctx.miterLimit = OUTER_LEVEL;
   ctx.save();
   ctx.beginPath();
   ctx.rect(plot.x, plot.y, plot.w, plot.h);
   ctx.clip();
+  ctx.miterLimit = INNER_LEVEL;
   ctx.save();
+  // A spare level: a tool that restores once or twice too often still lands inside the clip.
+  ctx.save();
+  ctx.miterLimit = miterLimit;
   ctx.globalAlpha = 1;
   ctx.setLineDash([]);
   ctx.textAlign = "left";
@@ -188,12 +207,18 @@ function paint(
   } catch (error) {
     warnOnce(`paint:${tool.id}`, `drawing tool "${tool.id}" threw while painting; the drawing is skipped.`, error);
   }
-  ctx.restore();
-  ctx.setLineDash([]);
-  for (const handle of handles) {
-    if (handle) drawHandle(ctx, handle.x, handle.y, theme.handleStroke || accent, theme.handleFill, interaction.selected);
+  // Back to a clean, clipped state whatever the tool did: one that throws
+  // between its own save() and restore() (or restores too often) must not
+  // leave its clip, transform or styles on the rest of the frame.
+  unwindTo(ctx, INNER_LEVEL, OUTER_LEVEL);
+  if (ctx.miterLimit === INNER_LEVEL) {
+    ctx.setLineDash([]);
+    for (const handle of handles) {
+      if (handle) drawHandle(ctx, handle.x, handle.y, theme.handleStroke || accent, theme.handleFill, interaction.selected);
+    }
   }
-  ctx.restore();
+  unwindTo(ctx, OUTER_LEVEL);
+  ctx.miterLimit = miterLimit;
   return env;
 }
 

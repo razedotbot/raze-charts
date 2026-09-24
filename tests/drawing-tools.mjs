@@ -12,7 +12,11 @@
 //     the formatted measure label, theme tokens and contrast;
 //   - handles only on hover/selection, store z order, queued axis tags;
 //   - an external 3-anchor tool drafted with 3 clicks, dragged by a handle,
-//     undone, and round-tripped through the store snapshot.
+//     undone, and round-tripped through the store snapshot (the widget's
+//     save()/load() and the objects tree are covered in a real browser by
+//     tests/drawing-tools.spec.ts);
+//   - development reloads with { replace: true }, and a tool that throws or
+//     restores too often cannot unbalance the frame's canvas state.
 //
 // Run: node tests/drawing-tools.mjs
 
@@ -53,7 +57,7 @@ globalThis.document = { createElement: () => ({ getContext: () => new MeasureCon
 // ── Recording canvas context ─────────────────────────────────────────────────
 const STATE_KEYS = [
   "strokeStyle", "fillStyle", "lineWidth", "globalAlpha", "font", "textAlign",
-  "textBaseline", "shadowBlur", "shadowColor", "lineDash",
+  "textBaseline", "shadowBlur", "shadowColor", "lineDash", "miterLimit",
 ];
 class RecordingContext extends MeasureContext {
   constructor() {
@@ -62,7 +66,7 @@ class RecordingContext extends MeasureContext {
     this.stack = [];
     Object.assign(this, {
       strokeStyle: "#000", fillStyle: "#000", lineWidth: 1, globalAlpha: 1, textAlign: "start",
-      textBaseline: "alphabetic", shadowBlur: 0, shadowColor: "transparent", lineDash: [],
+      textBaseline: "alphabetic", shadowBlur: 0, shadowColor: "transparent", lineDash: [], miterLimit: 10,
     });
   }
   snapshot() {
@@ -207,6 +211,40 @@ const probe = D.defineDrawingTool(valid);
 assert(D.defineDrawingTool(valid) === probe && changes === 1, "registering the same definition twice is an idempotent no-op");
 assert(D.removeDrawingTool("probe_tool") && !D.getDrawingTool("probe_tool") && changes === 2, "host tools can be removed and listeners hear about it");
 unsubscribe();
+{
+  // Development reloads (HMR) re-run a module and build a new definition with new functions.
+  const first = D.defineDrawingTool({ ...valid, id: "probe_reload", aliases: ["probe_reload_alias"] });
+  assert(D.defineDrawingTool({ ...first }) === first, "an equal definition (same field values) is a no-op");
+  throwsLike(
+    () => D.defineDrawingTool({ ...valid, id: "probe_reload", paint() {} }),
+    /already used by "probe_reload".*pass \{ replace: true \}/,
+    "re-registering an id with new functions throws and points at { replace: true }",
+  );
+  let heard = 0;
+  const stop = D.onDrawingToolsChanged(() => { heard += 1; });
+  const position = D.listDrawingTools().findIndex((tool) => tool.id === "probe_reload");
+  const reloaded = D.defineDrawingTool({ ...valid, id: "probe_reload", title: "Probe v2" }, { replace: true });
+  assert(
+    D.getDrawingTool("probe_reload") === reloaded && reloaded.title === "Probe v2" && heard === 1
+      && D.listDrawingTools().findIndex((tool) => tool.id === "probe_reload") === position,
+    "{ replace: true } swaps in the new definition in place and notifies listeners",
+  );
+  assert(D.getDrawingTool("probe_reload_alias") === undefined, "aliases of the replaced definition are released");
+  throwsLike(() => D.defineDrawingTool({ ...valid, id: "trend_line" }, { replace: true }), /built-in tools cannot be replaced/, "built-in tools cannot be replaced");
+  throwsLike(
+    () => D.defineDrawingTool({ ...valid, id: "probe_reload", aliases: ["extended"] }, { replace: true }),
+    /already used by "extended_line"/,
+    "a replacement still cannot take another tool's alias",
+  );
+  const world = makeWorld();
+  await add(world, "probe_reload", [[10, 100], [20, 150]]);
+  let painted = "";
+  D.defineDrawingTool({ ...valid, id: "probe_reload", paint() { painted = "v3"; } }, { replace: true });
+  world.paint();
+  assert(painted === "v3", "existing drawings of a replaced kind paint with the new definition");
+  stop();
+  D.removeDrawingTool("probe_reload");
+}
 const freeform = D.defineDrawingTool({ ...valid, id: "probe_path", anchors: { min: 2, finish: "double-click" } });
 assert(D.neededPoints("probe_path") === Infinity, "free-form tools collect anchors until their finish gesture");
 D.removeDrawingTool(freeform.id);
@@ -354,6 +392,16 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
   const pctx = plain.paint();
   assert(pctx.ops("fillRect").length === 0 && pctx.ops("fillText")[0].state.fillStyle === "#abcdef", "fillBackground:false drops the backdrop and textcolor is accepted as an alias");
 
+  // Earlier releases painted text in `linecolor`, and toolbar-drawn text was saved with one.
+  const legacy = makeWorld();
+  await add(legacy, "text", [[50, 300]], { linecolor: "#66d89e" }, { text: "saved" });
+  assert(legacy.paint().ops("fillText")[0].state.fillStyle === "#66d89e", "text saved with only a linecolor keeps that colour");
+  const both = makeWorld();
+  await add(both, "text", [[50, 300]], { linecolor: "#66d89e", textcolor: "#abcdef" }, { text: "x" });
+  await add(both, "text", [[50, 200]], { linecolor: "#66d89e", color: "#123456", textcolor: "#abcdef" }, { text: "y" });
+  const colours = both.paint().ops("fillText").map((call) => call.state.fillStyle);
+  assert(colours[0] === "#abcdef" && colours[1] === "#123456", "color, then textcolor, take precedence over linecolor");
+
   const wrapped = D.wrapText("alpha beta gamma delta", (s) => s.length * 6, 70);
   assert(JSON.stringify(wrapped) === JSON.stringify(["alpha beta", "gamma delta"]), "word wrap breaks between words at wordWrapWidth");
   assert(D.wrapText("abcdefghij", (s) => s.length * 6, 30).join("|") === "abcde|fghij", "a word wider than the wrap width breaks by glyph");
@@ -411,6 +459,21 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
   assert(texts.length === 2 && texts[0].args[0] === "−10.00 (−10.00%)" && texts[1].args[0] === "42 bars, 42m", "the painted label shows the formatted change, bars and span");
   assert(texts[0].state.fillStyle === world.context.theme.labelText, "label text uses the theme label colour");
   assert(ctx.ops("fill").some((call) => call.state.fillStyle === world.context.theme.labelBackground), "the label sits on the theme label backdrop");
+
+  // Painted through the runtime: the chart's formatter and the symbol's pricescale reach the label.
+  const micro = makeWorld({ pricescale: 1e8 });
+  await add(micro, "measure", [[10, 0.00001234], [52, 0.00001246]]);
+  const microTexts = micro.paint().ops("fillText").map((call) => call.args[0]);
+  assert(microTexts[0] === "+0.00000012 (+0.97%)", `a painted measure at pricescale 1e8 formats through context.formatPrice (${microTexts[0]})`);
+  const custom = makeWorld();
+  const seen = [];
+  custom.context.formatPrice = (price, pricescale) => {
+    seen.push(pricescale);
+    return `≈${price.toFixed(1)}`;
+  };
+  await add(custom, "measure", [[10, 100], [52, 90]]);
+  const customTexts = custom.paint().ops("fillText").map((call) => call.args[0]);
+  assert(customTexts[0] === "−≈10.0 (−10.00%)" && seen.every((scale) => scale === 100), `a host price formatter (custom_formatters, raze.format_price) is used as is (${customTexts[0]})`);
 }
 
 // ── Handles: only when hovered or selected, themed ────────────────────────────
@@ -480,6 +543,38 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
   assert(warnings.filter((w) => w.includes('"probe_broken" threw while painting')).length === 1, "a throwing tool warns once");
   D.removeDrawingTool(broken.id);
   assert(D.constrainDrawingPoint({ shape: "horizontal_line", points: [{ time: 5, price: 1 }] }, 0, { time: 9, price: 2 }).time === 5, "constrain keeps a horizontal line's time");
+}
+
+// ── Unbalanced save()/restore() in a host tool never leaks into the frame ─────
+{
+  const cases = [
+    ["throws inside one save()", (ctx) => { ctx.save(); ctx.globalAlpha = 0.2; ctx.lineWidth = 9; throw new Error("boom"); }],
+    ["throws inside two nested save()s", (ctx) => { ctx.save(); ctx.save(); ctx.globalAlpha = 0.2; throw new Error("boom"); }],
+    ["returns without its restore()", (ctx) => { ctx.save(); ctx.globalAlpha = 0.2; }],
+    ["restores once more than it saved", (ctx) => { ctx.restore(); ctx.globalAlpha = 0.2; }],
+    ["restores twice more than it saved", (ctx) => { ctx.restore(); ctx.restore(); ctx.globalAlpha = 0.2; }],
+  ];
+  for (const [label, body] of cases) {
+    const id = `probe_unbalanced_${cases.findIndex(([name]) => name === label)}`;
+    D.defineDrawingTool({ ...valid, id, paint: body });
+    const world = makeWorld();
+    const odd = await add(world, id, [[10, 100], [20, 150]]);
+    await add(world, "trend_line", [[30, 100], [40, 150]]);
+    world.view.selectedShapeId = String(odd.id);
+    const { ctx } = world;
+    ctx.reset();
+    ctx.fillStyle = "#caller";
+    ctx.save(); // the scene's own state, which a drawing must never pop
+    world.view.axisTags = [];
+    D.drawShapes(ctx, world.view);
+    const trend = strokes(ctx).at(-1);
+    assert(
+      ctx.stack.length === 1 && ctx.stack[0].fillStyle === "#caller" && ctx.globalAlpha === 1 && ctx.miterLimit === 10
+        && trend?.state.globalAlpha === 1 && trend.state.lineWidth === 1,
+      `a tool that ${label} leaves the caller's save stack and the next drawing untouched`,
+    );
+    D.removeDrawingTool(id);
+  }
 }
 
 // ── External 3-anchor tool: draft, select, drag, undo, save/load ─────────────

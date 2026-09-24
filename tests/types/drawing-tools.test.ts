@@ -2,7 +2,12 @@
 // `tsc -p tsconfig.type-tests.json` (part of `npm run typecheck`); never run.
 
 import type * as Raze from "../../src/index";
-import type { DrawingLineStyle, DrawingToolDefinition, RegisteredDrawingTool } from "../../src/index";
+import type {
+  DefineDrawingToolOptions,
+  DrawingLineStyle,
+  DrawingToolDefinition,
+  RegisteredDrawingTool,
+} from "../../src/index";
 
 // Type-only: Playwright loads tests/**/*.test.ts, so no runtime import may appear here.
 declare const defineDrawingTool: typeof Raze.defineDrawingTool;
@@ -73,6 +78,12 @@ if (false) {
   // @ts-expect-error hit kinds are a closed union
   const badHit: DrawingToolDefinition["hitTest"] = () => ({ kind: "edge" });
   void badHit;
+
+  // Development reloads replace a host tool in place.
+  const options: DefineDrawingToolOptions = { replace: true };
+  defineDrawingTool({ ...arrow, title: "Arrow v2" }, options);
+  // @ts-expect-error replace is a boolean flag
+  defineDrawingTool(arrow, { replace: "yes" });
 
   const found: RegisteredDrawingTool | undefined = getDrawingTool("extended");
   const ids: string[] = listDrawingTools().map((tool) => tool.id);

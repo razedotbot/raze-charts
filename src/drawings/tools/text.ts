@@ -50,8 +50,10 @@ export const textTool: ToolDef = {
     if (!anchor) return;
     const p = drawing.props;
     const { font, lines, lineHeight, box } = textLayout(drawing, anchor, env, ctx);
-    // `textcolor` is the TradingView alias; empty follows the theme label colour (>= 4.5:1).
-    const color = colorOr(p.color, colorOr(p.textcolor, env.theme.labelText));
+    // `textcolor` is the TradingView alias and `linecolor` the colour earlier
+    // releases painted text with (UI-created text saved it there); empty
+    // follows the theme label colour (>= 4.5:1).
+    const color = colorOr(p.color, colorOr(p.textcolor, colorOr(p.linecolor, env.theme.labelText)));
     const x = crisp(box.x);
     const y = crisp(box.y);
     if (p.fillBackground !== false) {

@@ -383,6 +383,8 @@ interface DefineDataSourceOptions
   exchanges?: Exchange[] | undefined
   supportedResolutions?: ResolutionString[] | undefined
   symbolTypes?: DatafeedSymbolType[] | undefined
+interface DefineDrawingToolOptions
+  readonly replace?: boolean | undefined
 class Delegate<TArgs extends unknown[] = unknown[]>
   new <TArgs extends unknown[] = unknown[]>(): Delegate<TArgs>
   destroy(): void
@@ -1219,7 +1221,7 @@ function createPriceFormatter(options?: ChartingLibraryWidgetOptions | null | un
 function decimalsFromPricescale(pricescale: number): number
 const default: { widget: typeof Widget; version: string; }
 function defineDataSource<T extends RazeDataSource>(source: T): T
-function defineDrawingTool<TProps extends object>(definition: DrawingToolDefinition<TProps>): DrawingToolDefinition<TProps>
+function defineDrawingTool<TProps extends object>(definition: DrawingToolDefinition<TProps>, options?: DefineDrawingToolOptions | undefined): DrawingToolDefinition<TProps>
 function drawingToolDefaults(idOrAlias: string): Record<string, unknown>
 function ema(closes: number[], length: number): (null | number)[]
 function ensureBaseStyles(target?: Node | undefined, options?: StyleOptions | undefined): void
