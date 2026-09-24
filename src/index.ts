@@ -98,6 +98,37 @@ export type {
 } from "./engine/paint/view";
 export type { AxisTag, AxisTagSourceKind, Rect, ScreenPoint, TimescaleMarkHit } from "./engine/paint/view";
 
+// ── Drawing tools (registry shared by built-in and host tools) ──────────────
+export {
+  defineDrawingTool,
+  drawingToolDefaults,
+  getDrawingTool,
+  listDrawingTools,
+  onDrawingToolsChanged,
+  removeDrawingTool,
+} from "./drawings/registry";
+export type { RegisteredDrawingTool } from "./drawings/registry";
+export { anchorsComplete, minAnchors } from "./drawings/types";
+export type {
+  BuiltinDrawingToolId,
+  DrawingAnchorSpec,
+  DrawingConstrainInput,
+  DrawingCursor,
+  DrawingEnv,
+  DrawingGeometry,
+  DrawingHit,
+  DrawingInteractionState,
+  DrawingLevel,
+  DrawingLineStyle,
+  DrawingPaintEnv,
+  DrawingPropField,
+  DrawingPropSchema,
+  DrawingState,
+  DrawingThemeTokens,
+  DrawingToolDefinition,
+  DrawingToolGroup,
+} from "./drawings/types";
+
 // ── Studies (indicator math is pure and dependency-free) ────────────────────
 export { bollinger, closesFromBars, ema, macd, rsi, sma, stdev, vwap } from "./studies/calc";
 export { BUILTIN_STUDIES, StudyRegistry } from "./studies/registry";

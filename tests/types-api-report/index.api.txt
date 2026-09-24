@@ -45,6 +45,7 @@ interface BracketOrderSnapshot
   side: TradingSide
   stopLossPrice?: number | undefined
   takeProfitPrice?: number | undefined
+type BuiltinDrawingToolId = 'extended_line' | 'fib_retracement' | 'horizontal_line' | 'measure' | 'ray' | 'rectangle' | 'text' | 'trend_line' | 'vertical_line'
 class ChartApi implements IChartWidgetApi
   new (context: ChartContext, deps: ChartApiDeps): ChartApi
   clearMarks(): void
@@ -393,8 +394,87 @@ class Delegate<TArgs extends unknown[] = unknown[]>
 interface DraftShape
   points: ShapePoint[]
   tool: SidebarToolId
+type DrawingAnchorSpec = number | { readonly min: number; readonly max?: number | undefined; readonly finish: 'double-click' | 'either' | 'enter'; }
+interface DrawingConstrainInput
+  readonly index: number
+  readonly point: ShapePoint
+  readonly points: readonly ShapePoint[]
+  readonly shiftKey: boolean
+type DrawingCursor = 'crosshair' | 'ew-resize' | 'grab' | 'move' | 'nesw-resize' | 'ns-resize' | 'nwse-resize' | 'pointer' | 'text'
+interface DrawingEnv
+  readonly barMs: number
+  readonly barSpacing: number
+  readonly dpr: number
+  readonly fontFamily: string
+  readonly formatDuration: (bars: number, seconds: number) => string
+  readonly formatPrice: (price: number) => string
+  readonly plot: Rect
+  priceToY(price: number): number
+  readonly state: DrawingInteractionState
+  readonly theme: DrawingThemeTokens
+  timeToX(unixSeconds: number): null | number
+  xToTime(x: number): number
+  yToPrice(y: number): number
 type DrawingEventType = 'click' | 'create' | 'hide' | 'move' | 'points_changed' | 'properties_changed' | 'remove' | 'show'
+interface DrawingGeometry
+  readonly anchors: readonly (ScreenPoint | null)[]
+  readonly plot: Rect
+type DrawingHit = { readonly kind: 'anchor'; readonly index: number; readonly cursor?: DrawingCursor | undefined; } | { readonly kind: 'body'; readonly cursor?: DrawingCursor | undefined; } | { readonly kind: 'label'; readonly cursor?: DrawingCursor | undefined; }
+interface DrawingInteractionState
+  readonly draft: boolean
+  readonly hovered: boolean
+  readonly selected: boolean
+interface DrawingLevel
+  readonly color?: string | undefined
+  readonly value: number
+  readonly visible?: boolean | undefined
+type DrawingLineStyle = 0 | 1 | 2 | 3 | 4
+interface DrawingPaintEnv extends DrawingEnv
+  readonly barMs: number
+  readonly barSpacing: number
+  readonly dpr: number
+  readonly fontFamily: string
+  readonly formatDuration: (bars: number, seconds: number) => string
+  readonly formatPrice: (price: number) => string
+  readonly plot: Rect
+  priceToY(price: number): number
+  pushAxisTag(tag: Omit<AxisTag, 'source'>): void
+  readonly state: DrawingInteractionState
+  readonly theme: DrawingThemeTokens
+  timeToX(unixSeconds: number): null | number
+  xToTime(x: number): number
+  yToPrice(y: number): number
+type DrawingPropField = DrawingBooleanField | DrawingColorField<string> | DrawingLevelsField | DrawingLineStyleField | DrawingLineWidthField | DrawingNumberField | DrawingSelectField<string> | DrawingTextField<string>
+type DrawingPropSchema<TProps extends object> = { readonly [K in keyof TProps]-?: DrawingPropFieldFor<TProps[K]>; }
+interface DrawingState<TProps extends object = Record<string, unknown>>
+  readonly hidden: boolean
+  readonly id: string
+  readonly locked: boolean
+  readonly points: readonly ShapePoint[]
+  readonly props: Readonly<TProps>
+  readonly text: string
+  readonly toolId: string
+  readonly z: number
+interface DrawingThemeTokens
+  readonly drawingDefault: string
+  readonly handleFill: string
+  readonly handleStroke: string
+  readonly labelBackground: string
+  readonly labelText: string
+  readonly paneBackground: string
 type DrawingTool = 'cursor' | 'extended_line' | 'fib_retracement' | 'horizontal_line' | 'measure' | 'ray' | 'rectangle' | 'text' | 'trend_line' | 'vertical_line'
+interface DrawingToolDefinition<TProps extends object = Record<string, unknown>>
+  readonly aliases?: readonly string[] | undefined
+  readonly anchors: DrawingAnchorSpec
+  readonly group?: DrawingToolGroup | undefined
+  hitTest(point: ScreenPoint, drawing: DrawingState<TProps>, geometry: DrawingGeometry, env: DrawingEnv, tolerancePx: number): DrawingHit | null
+  readonly icon: string
+  readonly id: string
+  paint(ctx: CanvasRenderingContext2D, drawing: DrawingState<TProps>, geometry: DrawingGeometry, env: DrawingPaintEnv): void
+  readonly props: DrawingPropSchema<TProps>
+  readonly text?: boolean | undefined
+  readonly title: string
+type DrawingToolGroup = 'annotation' | 'custom' | 'fibonacci' | 'lines' | 'measure' | 'patterns' | 'projection' | 'shapes'
 type EntityId = string & { [Symbol.species]?: 'EntityId' | undefined; }
 interface Exchange
   desc: string
@@ -775,6 +855,21 @@ interface Rect
   w: number
   x: number
   y: number
+interface RegisteredDrawingTool extends Omit<DrawingToolDefinition<Record<string, unknown>>, 'props'>
+  readonly aliases?: readonly string[] | undefined
+  readonly anchors: DrawingAnchorSpec
+  constrain?: ((input: DrawingConstrainInput) => ShapePoint) | undefined
+  describe?: ((drawing: DrawingState<Record<string, unknown>>, env: DrawingEnv) => string) | undefined
+  readonly group?: DrawingToolGroup | undefined
+  handles?: ((drawing: DrawingState<Record<string, unknown>>, geometry: DrawingGeometry, env: DrawingEnv) => readonly ScreenPoint[]) | undefined
+  hitTest: (point: ScreenPoint, drawing: DrawingState<Record<string, unknown>>, geometry: DrawingGeometry, env: DrawingEnv, tolerancePx: number) => DrawingHit | null
+  readonly icon: string
+  readonly id: string
+  paint: (ctx: CanvasRenderingContext2D, drawing: DrawingState<Record<string, unknown>>, geometry: DrawingGeometry, env: DrawingPaintEnv) => void
+  readonly props: Readonly<Record<string, DrawingPropField>>
+  readonly text?: boolean | undefined
+  readonly title: string
+  validateProps?: ((props: Record<string, unknown>) => readonly { path: string; message: string; }[]) | undefined
 type ResolutionString = string & { [Symbol.species]?: 'ResolutionString' | undefined; }
 type ResolveCallback = (symbolInfo: LibrarySymbolInfo) => void
 interface ResolvedIndicatorPreset
@@ -1113,6 +1208,7 @@ class Widget implements IChartingLibraryWidget
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
   subscribe(event: string, callback: (...args: never[]) => void): void
   unsubscribe(event: string, callback: (...args: never[]) => void): void
+function anchorsComplete(spec: DrawingAnchorSpec, count: number): boolean
 function bollinger(closes: number[], length: number, multiplier?: number | undefined): { mid: (null | number)[]; upper: (null | number)[]; lower: (null | number)[]; }
 function buildTheme(opts: ChartingLibraryWidgetOptions): ThemeColors
 function closeContextMenu(): void
@@ -1123,19 +1219,26 @@ function createPriceFormatter(options?: ChartingLibraryWidgetOptions | null | un
 function decimalsFromPricescale(pricescale: number): number
 const default: { widget: typeof Widget; version: string; }
 function defineDataSource<T extends RazeDataSource>(source: T): T
+function defineDrawingTool<TProps extends object>(definition: DrawingToolDefinition<TProps>): DrawingToolDefinition<TProps>
+function drawingToolDefaults(idOrAlias: string): Record<string, unknown>
 function ema(closes: number[], length: number): (null | number)[]
 function ensureBaseStyles(target?: Node | undefined, options?: StyleOptions | undefined): void
 function floorToBar(timeMs: number, res: string): number
 function formatCompact(value: number): string
 function formatPrice(value: number, pricescale: number): string
 function formatVolume(value: number): string
+function getDrawingTool(idOrAlias: string): RegisteredDrawingTool | undefined
 function heikinAshi(bars: Bar[]): Bar[]
 function isCoarsePointer(): boolean
 function isLightColor(color: string): boolean
+function listDrawingTools(): RegisteredDrawingTool[]
 function macd(closes: number[], fast?: number | undefined, slow?: number | undefined, signal?: number | undefined): { macd: (null | number)[]; signal: (null | number)[]; hist: (null | number)[]; }
+function minAnchors(spec: DrawingAnchorSpec): number
+function onDrawingToolsChanged(listener: () => void): () => void
 function openPopup(opts: PopupOptions): PopupHandle
 function parseResolution(res: string): ParsedResolution
 function popupRow(content: string, onClick: (e: MouseEvent) => void, options?: undefined | { role?: 'menuitem' | 'menuitemcheckbox' | 'menuitemradio' | undefined; checked?: boolean | undefined; label?: string | undefined; trustedHtml?: boolean | undefined; }): HTMLButtonElement
+function removeDrawingTool(id: string): boolean
 function resolutionLabel(res: string): string
 function resolutionToMs(res: string): number
 function resolveIndicatorPresets(raze: RazeChartsOptions | undefined, registry: StudyRegistry): ResolvedIndicatorPreset[]
@@ -1164,8 +1267,66 @@ class widget implements IChartingLibraryWidget
 function withAlpha(color: string, alpha: number): string
 # referenced, not exported
 const CHART_TYPE_CHANGE_REASONS: readonly ['initial', 'sidebar', 'header', 'api', 'load', 'override', 'context-menu']
-type DrawingCursor = 'crosshair' | 'ew-resize' | 'grab' | 'move' | 'nesw-resize' | 'ns-resize' | 'nwse-resize' | 'pointer' | 'text'
-type DrawingHit = { readonly kind: 'anchor'; readonly index: number; readonly cursor?: DrawingCursor | undefined; } | { readonly kind: 'body'; readonly cursor?: DrawingCursor | undefined; } | { readonly kind: 'label'; readonly cursor?: DrawingCursor | undefined; }
+interface DrawingBooleanField extends DrawingPropFieldBase<boolean>
+  readonly default: boolean
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'boolean'
+interface DrawingColorField<V extends string = string> extends DrawingPropFieldBase<V>
+  readonly default: V
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'color'
+interface DrawingLevelsField extends DrawingPropFieldBase<readonly DrawingLevel[]>
+  readonly default: readonly DrawingLevel[]
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'levels'
+interface DrawingLineStyleField extends DrawingPropFieldBase<DrawingLineStyle>
+  readonly default: DrawingLineStyle
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'lineStyle'
+interface DrawingLineWidthField extends DrawingPropFieldBase<number>
+  readonly default: number
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+  readonly type: 'lineWidth'
+interface DrawingNumberField extends DrawingPropFieldBase<number>
+  readonly default: number
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly max?: number | undefined
+  readonly min?: number | undefined
+  readonly step?: number | undefined
+  readonly title: string
+  readonly type: 'number'
+interface DrawingPropFieldBase<V>
+  readonly default: V
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly title: string
+type DrawingPropFieldFor<V> = [V] extends [boolean] ? DrawingBooleanField : [V] extends [DrawingLineStyle] ? DrawingLineStyleField | DrawingNumberField : [V] extends [number] ? DrawingLineWidthField | DrawingNumberField : [V] extends [readonly DrawingLevel[]] ? DrawingLevelsField : [V] extends [string] ? DrawingColorField<V> | DrawingSelectField<V> | DrawingTextField<V> : never
+interface DrawingSelectField<V extends string = string> extends DrawingPropFieldBase<V>
+  readonly default: V
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly options: readonly { readonly value: V; readonly title: string; }[]
+  readonly title: string
+  readonly type: 'select'
+interface DrawingTextField<V extends string = string> extends DrawingPropFieldBase<V>
+  readonly default: V
+  readonly description?: string | undefined
+  readonly group?: 'coordinates' | 'style' | 'text' | 'visibility' | undefined
+  readonly maxLength?: number | undefined
+  readonly multiline?: boolean | undefined
+  readonly title: string
+  readonly type: 'text'
 interface PriceRange
   max: number
   min: number

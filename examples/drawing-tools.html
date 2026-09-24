@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts - drawing tools</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; }
+    #wrap { position: absolute; inset: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="wrap"></div>
+  <script type="module">
+    // Every built-in drawing kind with non-default styles, in either theme
+    // (?theme=light). Used by tests/drawing-tools.spec.ts for goldens and
+    // pixel checks; drawings are placed relative to the visible data so they
+    // stay on screen whatever the synthetic walk does.
+    import { widget } from "../dist/charting_library.esm.js";
+    import { makeMockDatafeed, VISUAL_NOW } from "./mock-datafeed.mjs";
+
+    const light = new URLSearchParams(location.search).get("theme") === "light";
+    const datafeed = makeMockDatafeed({ bars: 400, startPrice: 6400, now: VISUAL_NOW, live: false });
+    const bars = await new Promise((resolve) => datafeed.getBars(
+      null, "1", { from: 0, to: VISUAL_NOW / 1000, countBack: 400, firstDataRequest: true }, resolve,
+    ));
+
+    const w = new widget({
+      symbol: "MOCK",
+      datafeed,
+      interval: "1",
+      container: document.getElementById("wrap"),
+      library_path: "/",
+      locale: "en",
+      theme: light ? "light" : "dark",
+      autosize: true,
+      timezone: "Etc/UTC",
+      custom_font_family: "Arial, Helvetica, sans-serif",
+      disabled_features: ["header_symbol_search", "popup_hints", "countdown"],
+      enabled_features: ["seconds_resolution"],
+    });
+
+    w.onChartReady(async () => {
+      const chart = w.activeChart();
+      const visible = bars.slice(-120);
+      const lo = Math.min(...visible.map((b) => b.low));
+      const hi = Math.max(...visible.map((b) => b.high));
+      const at = (fromEnd, fraction) => ({
+        time: Math.floor(bars[bars.length - 1 - fromEnd].time / 1000),
+        price: lo + (hi - lo) * fraction,
+      });
+
+      await chart.createMultipointShape([at(112, 0.12), at(88, 0.42)], {
+        shape: "trend_line",
+        overrides: { linecolor: "#ff00ff", linewidth: 2, linestyle: 2 },
+      });
+      await chart.createShape(at(84, 0.5), { shape: "vertical_line", overrides: { linecolor: "#ff9800", linestyle: 2 } });
+      await chart.createMultipointShape([at(80, 0.9), at(68, 0.72)], {
+        shape: "rectangle",
+        overrides: { linecolor: "#3355ff", backgroundColor: "#3355ff", transparency: 0 },
+      });
+      await chart.createMultipointShape([at(64, 0.08), at(52, 0.3)], {
+        shape: "rectangle",
+        overrides: { linecolor: "#26a69a", backgroundColor: "rgba(38,166,154,0.5)", transparency: 40, linestyle: 1 },
+      });
+      await chart.createMultipointShape([at(60, 0.2), at(40, 0.8)], { shape: "fib_retracement" });
+      await chart.createMultipointShape([at(34, 0.2), at(28, 0.3)], { shape: "ray", overrides: { linecolor: "#e57359" } });
+      await chart.createMultipointShape([at(34, 0.9), at(28, 0.85)], { shape: "extended_line", overrides: { linestyle: 3 } });
+      await chart.createMultipointShape([at(24, 0.15), at(8, 0.35)], { shape: "measure" });
+      await chart.createShape(at(116, 0.97), {
+        shape: "text",
+        text: "Breakout\nretest zone",
+        overrides: { fontsize: 16, bold: true, drawBorder: true },
+      });
+      await chart.createShape(at(0, 0.62), {
+        shape: "horizontal_line",
+        text: "Limit",
+        overrides: { linecolor: "#66d89e", linestyle: 1, showPrice: true },
+      });
+      window.__razeReady = true;
+    });
+  </script>
+</body>
+</html>

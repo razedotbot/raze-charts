@@ -81,8 +81,48 @@ export function buildTheme(opts: ChartingLibraryWidgetOptions): ThemeColors {
   theme.volUp = s("mainSeriesProperties.volumeStyle.upColor") ?? withAlpha(theme.candleUp, 0.5);
   theme.volDown = s("mainSeriesProperties.volumeStyle.downColor") ?? withAlpha(theme.candleDown, 0.5);
 
+  applyDrawingTokens(theme, s);
   return theme;
 }
+
+/**
+ * Override keys for the drawing tokens. They are Raze-specific (TradingView
+ * has no equivalent), so they live under their own `drawings.` prefix.
+ */
+export const DRAWING_THEME_OVERRIDES = Object.freeze({
+  drawingDefault: "drawings.defaultColor",
+  handleFill: "drawings.handleFillColor",
+  handleStroke: "drawings.handleBorderColor",
+  labelBackground: "drawings.labelBackgroundColor",
+  labelText: "drawings.labelTextColor",
+} as const);
+
+/** Dark and light label text colours; both keep >= 4.5:1 on their backdrop. */
+const LABEL_TEXT_ON_DARK = "#d1d4dc";
+const LABEL_TEXT_ON_LIGHT = "#131722";
+
+/**
+ * Fill the drawing tokens (seam: W1B-11). They derive from the pane so an
+ * overridden background still gets readable handles and labels:
+ * - `drawingDefault`: one default colour for UI- and API-created drawings.
+ * - `handleFill`: the pane background, so handles read as hollow rings.
+ * - `handleStroke`: left unset unless overridden; painters then use the
+ *   drawing's own colour (the accent border).
+ * - `labelBackground` / `labelText`: a near-opaque pane-coloured backdrop
+ *   with a text colour picked for >= 4.5:1 contrast against it.
+ */
+function applyDrawingTokens(theme: ThemeColors, s: (key: string) => string | undefined): void {
+  theme.drawingDefault = s(DRAWING_THEME_OVERRIDES.drawingDefault) ?? DEFAULT_DRAWING_COLOR;
+  theme.handleFill = s(DRAWING_THEME_OVERRIDES.handleFill) ?? theme.paneBackground;
+  const handleStroke = s(DRAWING_THEME_OVERRIDES.handleStroke);
+  if (handleStroke !== undefined) theme.handleStroke = handleStroke;
+  theme.labelBackground = s(DRAWING_THEME_OVERRIDES.labelBackground) ?? withAlpha(theme.paneBackground, 0.92);
+  theme.labelText = s(DRAWING_THEME_OVERRIDES.labelText)
+    ?? (isLightColor(theme.labelBackground) ? LABEL_TEXT_ON_LIGHT : LABEL_TEXT_ON_DARK);
+}
+
+/** Default drawing colour (TradingView's drawing blue), shared by UI and API drawings. */
+export const DEFAULT_DRAWING_COLOR = "#2962ff";
 
 /** Parse a #rgb / #rrggbb colour into channels, or null for other formats. */
 function parseHex(color: string): { r: number; g: number; b: number } | null {
