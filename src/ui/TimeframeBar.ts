@@ -1,10 +1,15 @@
+// Header range presets (1D … All) plus the "Go to date" action. Presets are
+// toggle buttons (aria-pressed); the date control is a plain action and is
+// always the last button, where the go-to-date popover anchors. Styling comes
+// from the shared header-button class (HEADER_STYLES).
+
 import type { ChartContext } from "../core/context";
 import { TIMEFRAME_PRESETS, type TimeframePreset } from "../core/timeframe";
-import { isCoarsePointer } from "./popup";
+import { t } from "../i18n";
+import { adoptHeaderStyles } from "./Toolbar";
 
 export class TimeframeBar {
   private buttons = new Map<string, HTMLButtonElement>();
-  private active: string | null = null;
 
   constructor(
     context: ChartContext,
@@ -13,8 +18,8 @@ export class TimeframeBar {
     private readonly onGoToDate: () => void,
   ) {
     this.el.setAttribute("role", "group");
-    this.el.setAttribute("aria-label", "Visible time range");
-    this.el.style.fontFamily = context.fontFamily;
+    this.el.setAttribute("aria-label", t("header.range.group", "Visible time range"));
+    adoptHeaderStyles(this.el, context);
     this.render();
   }
 
@@ -22,55 +27,25 @@ export class TimeframeBar {
     this.el.replaceChildren();
     this.buttons.clear();
     for (const preset of TIMEFRAME_PRESETS) {
-      this.el.appendChild(this.makeButton(preset, () => this.select(preset)));
+      const button = this.makeButton(preset, () => this.select(preset), t("header.range.button", "Range {label}", { label: preset }));
+      button.setAttribute("aria-pressed", "false");
+      this.buttons.set(preset, button);
+      this.el.appendChild(button);
     }
-    this.el.appendChild(this.makeButton("Date", () => this.onGoToDate(), "Go to date"));
+    this.el.appendChild(this.makeButton(t("header.range.date", "Date"), () => this.onGoToDate(), t("header.range.goToDate", "Go to date")));
   }
 
-  private makeButton(label: string, onClick: () => void, aria = `Range ${label}`): HTMLButtonElement {
+  private makeButton(label: string, onClick: () => void, name: string): HTMLButtonElement {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "raze-chart-focusable";
+    b.className = "raze-chart-header-btn raze-chart-focusable";
     b.textContent = label;
-    b.setAttribute("aria-label", aria);
-    b.style.cssText = this.btnCss();
+    b.setAttribute("aria-label", name);
     b.addEventListener("click", (ev) => {
       ev.stopPropagation();
       onClick();
     });
-    b.addEventListener("mouseenter", () => {
-      if (this.active !== label) {
-        b.style.background = "var(--tv-color-toolbar-button-background-hover, rgba(255,255,255,0.06))";
-      }
-    });
-    b.addEventListener("mouseleave", () => {
-      if (this.active !== label) b.style.background = "transparent";
-    });
-    this.buttons.set(label, b);
     return b;
-  }
-
-  private btnCss(): string {
-    const coarse = isCoarsePointer();
-    return [
-      "display:flex",
-      "align-items:center",
-      "justify-content:center",
-      coarse ? "height:30px" : "height:24px",
-      coarse ? "padding:0 8px" : "padding:0 6px",
-      "margin:0 1px",
-      "border-radius:4px",
-      "cursor:pointer",
-      "font-size:11px",
-      "font-family:inherit",
-      "line-height:normal",
-      "color:var(--tv-color-toolbar-button-text, #d1d4dc)",
-      "background:transparent",
-      "border:0",
-      "appearance:none",
-      "touch-action:manipulation",
-      "flex:0 0 auto",
-    ].join(";");
   }
 
   private select(preset: TimeframePreset): void {
@@ -78,15 +53,10 @@ export class TimeframeBar {
     this.onPreset(preset);
   }
 
+  /** Mark `preset` as the applied range (null clears it). */
   setActive(preset: string | null): void {
-    this.active = preset;
     for (const [label, b] of this.buttons) {
-      const on = label === preset;
-      b.setAttribute("aria-pressed", String(on));
-      b.style.background = on
-        ? "var(--tv-color-toolbar-button-background-active, rgba(255,255,255,0.1))"
-        : "transparent";
-      b.style.fontWeight = on ? "600" : "400";
+      b.setAttribute("aria-pressed", String(label === preset));
     }
   }
 

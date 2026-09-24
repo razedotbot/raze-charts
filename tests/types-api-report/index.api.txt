@@ -724,7 +724,7 @@ class IndicatorsMenu
 interface IntervalChangedParameters
   timeframe: TimeFrameValue
 class IntervalSelector
-  new (context: ChartContext, mount: HTMLElement, onSelect: (res: ResolutionString) => void, favorites?: string[] | undefined): IntervalSelector
+  new (context: ChartContext, mount: HTMLElement, onSelect: (res: ResolutionString) => void, favorites?: string[] | undefined, configuration?: (() => DatafeedConfiguration | null | undefined) | DatafeedConfiguration | null | undefined): IntervalSelector
   destroy(): void
   refresh(): void
   setActive(res: string): void

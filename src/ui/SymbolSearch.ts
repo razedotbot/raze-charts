@@ -1,6 +1,15 @@
+// Header symbol search: a combobox input with a listbox of datafeed results.
+// The active option follows the arrow keys and the moving mouse (pointer
+// movement, not enter events, which also fire when results scroll under a
+// still pointer) and is highlighted by the stylesheet, so keyboard users see
+// it too.
+
 import type { SearchSymbolResultItem } from "../types/charting_library";
 import type { ChartContext } from "../core/context";
-import { isCoarsePointer, openPopup, popupRow, type PopupHandle } from "./popup";
+import { t } from "../i18n";
+import { openPopup, popupRow, type PopupHandle } from "./popup";
+import { adoptStyles } from "./styles";
+import { adoptHeaderStyles, HEADER_CHUNKS } from "./Toolbar";
 
 export class SymbolSearch {
   readonly el: HTMLDivElement;
@@ -17,29 +26,17 @@ export class SymbolSearch {
     private readonly onPick: (symbol: string) => void,
   ) {
     this.el = document.createElement("div");
-    this.el.style.cssText = "display:flex;align-items:center;flex:0 0 auto;margin:0 4px 0 0;";
+    this.el.className = "raze-chart-symbol-search-field";
     this.input = document.createElement("input");
     this.input.type = "search";
-    this.input.className = "raze-chart-focusable";
+    this.input.className = "raze-chart-symbol-search-input raze-chart-focusable";
     this.input.setAttribute("role", "combobox");
-    this.input.setAttribute("aria-label", "Search symbols");
+    this.input.setAttribute("aria-label", t("header.symbolSearch.label", "Search symbols"));
     this.input.setAttribute("aria-autocomplete", "list");
     this.input.setAttribute("aria-haspopup", "listbox");
     this.input.setAttribute("aria-expanded", "false");
-    this.input.placeholder = "Symbol";
+    this.input.placeholder = t("header.symbolSearch.placeholder", "Symbol");
     this.input.autocomplete = "off";
-    const coarse = isCoarsePointer();
-    this.input.style.cssText = [
-      "width:88px",
-      coarse ? "height:30px" : "height:24px",
-      "padding:0 8px",
-      "border-radius:4px",
-      "border:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
-      "background:rgba(255,255,255,0.04)",
-      "color:inherit",
-      "font:inherit",
-      "font-size:12px",
-    ].join(";");
     this.input.value = context.symbol;
     this.input.addEventListener("focus", () => this.input.select());
     this.input.addEventListener("blur", () => {
@@ -92,6 +89,7 @@ export class SymbolSearch {
       }
     });
     this.el.appendChild(this.input);
+    adoptHeaderStyles(this.el, context);
   }
 
   setSymbol(symbol: string): void {
@@ -163,7 +161,7 @@ export class SymbolSearch {
       anchor: this.input,
       place: "below-start",
       role: "dialog",
-      label: "Symbol results",
+      label: t("header.symbolSearch.results", "Symbol results"),
       initialFocus: false,
       onClose: () => {
         if (this.popup === popup) {
@@ -175,6 +173,7 @@ export class SymbolSearch {
       },
     });
     popup.el.setAttribute("role", "listbox");
+    adoptStyles(popup.el, HEADER_CHUNKS);
     this.input.setAttribute("aria-haspopup", "listbox");
     this.popup = popup;
     this.resultOptions = [];
@@ -191,14 +190,16 @@ export class SymbolSearch {
       row.tabIndex = -1;
       row.textContent = item.detail ? `${item.symbol}  ${item.detail}` : item.symbol;
       row.addEventListener("mousedown", (event) => event.preventDefault());
-      row.addEventListener("mouseenter", () => this.setActiveIndex(index));
+      row.addEventListener("pointermove", (event) => {
+        if (event.pointerType === "mouse" && this.activeIndex !== index) this.setActiveIndex(index, false);
+      });
       popup.el.appendChild(row);
       this.resultOptions.push({ symbol: item.symbol, row });
     }
     popup.reposition();
   }
 
-  private setActiveIndex(index: number): void {
+  private setActiveIndex(index: number, reveal = true): void {
     if (!this.resultOptions.length) return;
     const next = Math.max(0, Math.min(this.resultOptions.length - 1, index));
     this.activeIndex = next;
@@ -207,7 +208,7 @@ export class SymbolSearch {
     }
     const row = this.resultOptions[next]!.row;
     this.input.setAttribute("aria-activedescendant", row.id);
-    row.scrollIntoView?.({ block: "nearest" });
+    if (reveal) row.scrollIntoView?.({ block: "nearest" });
   }
 
   private pick(symbol: string): void {

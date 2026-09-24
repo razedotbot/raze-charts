@@ -142,6 +142,83 @@ return a truthy result consumes the event. A handler that returns a session
 owns the drag: the session commits on the last pointer up, and it rolls back
 on pointer cancel or when a second finger turns the gesture into a pinch.
 
+### Chrome styling and tokens
+
+The header (`Toolbar`, `IntervalSelector`, `TimeframeBar`, `SymbolSearch`)
+and the price-scale toggles (`ScaleBar`) carry no inline presentation and no
+JavaScript hover handlers. Each module declares its rules as a `defineStyles()`
+chunk and adopts it, together with the token chunk, into whichever Document or
+ShadowRoot renders it (`adoptStylesOnConnect()` also covers a shadow root
+joined after construction; [the UI kit guide](./ui-kit.md#stylesheet-and-design-tokens)
+lists the cases it covers).
+Hover, pressed, focus and touch sizing come from `:hover` (inside
+`@media (hover: hover)`), `[aria-pressed="true"]`, `:focus-visible` and
+`@media (pointer: coarse)`, so a pointer change on a hybrid device resizes
+controls live and forced-colors rules can target state.
+
+Library-owned controls are matched as element plus class
+(`button.raze-chart-header-btn`, `input.raze-chart-symbol-search-input`,
+`button.raze-chart-scale-btn`). Page-wide resets such as Bootstrap's reboot or
+Tailwind's preflight (`button { padding: 0; … }`) therefore leave them alone.
+To restyle one on purpose, add a class: `.raze-chart-root
+.raze-chart-header-btn { padding: 0 10px }` overrides the base rule, and
+`.raze-chart-root .raze-chart-header-btn[aria-pressed="true"] { … }` overrides
+the pressed state. Tokens (below) are the lighter route for colours and sizes.
+The `createButton()` reset is `button:where(.raze-chart-toolbar-btn)`: it
+beats element selectors (the adopted sheet comes last in the cascade), and any
+class the host puts on its own button wins. The header font is the widget's
+`custom_font_family`, which each header module carries as `--raze-font`, so a
+module mounted outside the widget root keeps it too.
+
+| Class | Element |
+| --- | --- |
+| `.raze-chart-toolbar`, `.raze-chart-toolbar-rail`, `.raze-chart-toolbar-slot` | Header bar, its scrolling rail and the button groups |
+| `.raze-chart-toolbar-btn` | Every `createButton()` element: a neutral reset (no native chrome), so host code may replace `style.cssText` |
+| `.raze-chart-header-btn` | Shared header control: interval, range, overflow and `useTradingViewStyle` custom buttons |
+| `.raze-chart-symbol-search-input` | Header symbol search field |
+| `.raze-chart-interval-menu` | "More intervals" menu (`menuitemradio` rows) |
+| `.raze-chart-scale-bar`, `.raze-chart-scale-btn` | % / L / A toggles in the corner cell under the price axis |
+| `.raze-chart-scale-hit`, `.raze-chart-scale-menu` | Coarse pointers only: the whole bar as one target, 24px tall, and the "Price scale" menu it opens |
+
+Tokens are custom properties on `.raze-chart-root` (and kit portals). They
+default to the TradingView `--tv-color-*` variables, so
+`setCSSCustomProperty()` and existing overrides keep working, and a host rule
+such as `.raze-chart-root { --raze-accent: red }` recolours every pressed
+control. Every token read in the header and scale-toggle rules also carries
+the token's default as its fallback (`var(--raze-accent, var(--tv-color-…, #2962ff))`).
+So a header module mounted outside the widget root (they are public exports)
+keeps the same height, type size, radius and pressed colours, and there a
+token set on any ancestor, `body` included, still applies.
+
+| Token | Default | Used for |
+| --- | --- | --- |
+| `--raze-font-size` | `12px` | Header controls and menus |
+| `--raze-font-size-sm` | `11px` | Axis-adjacent chrome (scale toggles), matching the axis labels |
+| `--raze-control-height` / `--raze-touch-control-height` | `26px` / `32px` | Header control height for fine / coarse pointers |
+| `--raze-row-height` / `--raze-touch-row-height` | `32px` / `48px` | Menu and sheet rows |
+| `--raze-radius-sm` / `--raze-radius` / `--raze-radius-lg` | `4px` / `6px` / `12px` | Controls / popups / sheets |
+| `--raze-toolbar-text` | `--tv-color-toolbar-button-text` | Header text |
+| `--raze-toolbar-hover` | `--tv-color-toolbar-button-background-hover` | Header hover and press |
+| `--raze-active` | `--tv-color-toolbar-button-background-active` | Pressed background |
+| `--raze-accent` | `--tv-color-toolbar-button-text-hover` | Pressed text, checked marks, focus |
+| `--raze-border` | `--tv-color-toolbar-divider-background` | Header divider, field border |
+| `--raze-scale-bar-background` / `--raze-scale-bar-text` | the price-axis colours (`scalesProperties.backgroundColor` / `textColor`) | Scale toggles. The library never sets these tokens (the theme colours arrive through internal `--_raze-axis-*` properties), so a host rule on `.raze-chart-root` or `.raze-chart-scale-bar` wins |
+
+The kit's own tokens (surface, text, hover, focus, danger, shadow, duration,
+z-index) are listed in [the UI kit guide](./ui-kit.md#stylesheet-and-design-tokens).
+Programmatic motion (`scrollIntoView`) checks `prefersReducedMotion()` and
+jumps instead of animating when the user asked for reduced motion.
+
+The corner cell is 22px tall (`TIME_AXIS_H`), and its top few pixels belong
+to the lowest price label, so the toggles are at most 18px tall. With a mouse
+they are three direct toggles. Three separate 24×24 touch targets
+(WCAG 2.2 2.5.8) would not fit without covering the time axis. So under
+`@media (pointer: coarse)` the whole bar becomes one target, as wide as the
+bar and 24px tall, that opens a "Price scale" menu. The menu is a bottom sheet
+with full-size `menuitemcheckbox` rows. The extra height reaches up into the
+label clearance, never into the plot. Keyboard and screen-reader users keep
+the three toggles, and the glyphs still show the current state.
+
 ### Time is a logical bar axis
 
 Financial time is not a wall-clock ruler. A Friday bar and the next Monday bar
