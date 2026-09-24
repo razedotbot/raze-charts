@@ -228,8 +228,7 @@ export class DataManager {
     if (invalid.length) {
       this.warnOnce(
         `resolutions:${origin}`,
-        `[raze-charts] ${origin}.supported_resolutions contains invalid resolution(s) ${invalid.join(", ")}; `
-          + `they were ignored. Accepted forms: ${RESOLUTION_FORMS}.`,
+        `[raze-charts] ignored invalid ${origin}.supported_resolutions ${invalid.join(", ")}. Accepted forms: ${RESOLUTION_FORMS}.`,
       );
     }
     return valid;
@@ -252,35 +251,21 @@ export class DataManager {
     return { ...info, supported_resolutions: resolutions };
   }
 
-  /** Warn once when the configuration and the implemented methods disagree. */
+  /** Warn once per supports_* flag that disagrees with the implemented methods. */
   private checkCapabilities(): void {
-    const cfg = this.config ?? {};
-    const feed = this.context.datafeed;
-    const enabled = this.context.options.enabled_features ?? [];
-    if (cfg.supports_marks === true && typeof feed.getMarks !== "function") {
-      this.warnOnce(
-        "marks-missing",
-        "[raze-charts] configuration.supports_marks is true but the datafeed has no getMarks(); no bar marks will load.",
-      );
-    } else if (cfg.supports_marks === undefined && typeof feed.getMarks === "function") {
-      this.warnOnce(
-        "marks-unused",
-        "[raze-charts] the datafeed implements getMarks() but configuration.supports_marks is not true, so it is never called. "
-          + "Set supports_marks: true in the onReady configuration to show bar marks"
-          + (enabled.includes("mark_on_bars") ? ' (enabled_features "mark_on_bars" no longer turns them on).' : "."),
-      );
-    }
-    if (cfg.supports_timescale_marks === true && typeof feed.getTimescaleMarks !== "function") {
-      this.warnOnce(
-        "timescale-missing",
-        "[raze-charts] configuration.supports_timescale_marks is true but the datafeed has no getTimescaleMarks(); no timescale marks will load.",
-      );
-    } else if (cfg.supports_timescale_marks === undefined && typeof feed.getTimescaleMarks === "function") {
-      this.warnOnce(
-        "timescale-unused",
-        "[raze-charts] the datafeed implements getTimescaleMarks() but configuration.supports_timescale_marks is not true, so it is never called. "
-          + "Set supports_timescale_marks: true to show timescale marks.",
-      );
+    this.checkCapability("supports_marks", "getMarks", "no bar marks will load");
+    this.checkCapability("supports_timescale_marks", "getTimescaleMarks", "no timescale marks will load");
+    this.checkCapability("supports_time", "getServerTime", "the client clock is used");
+  }
+
+  private checkCapability(flag: string, method: string, effect: string): void {
+    const value = this.config?.[flag];
+    const implemented = typeof (this.context.datafeed as unknown as Record<string, unknown>)[method] === "function";
+    if (value === true && !implemented) {
+      this.warnOnce(flag, `[raze-charts] configuration.${flag} is true but the datafeed has no ${method}(); ${effect}.`);
+    } else if (value === undefined && implemented) {
+      // An explicit false is a deliberate TradingView setting and stays quiet.
+      this.warnOnce(flag, `[raze-charts] ${method}() is never called because configuration.${flag} is not true; set ${flag}: true to use it.`);
     }
   }
 
@@ -303,25 +288,8 @@ export class DataManager {
   }
 
   private startServerTimeSync(): void {
-    const cfg = this.config ?? {};
-    const hasMethod = typeof this.context.datafeed.getServerTime === "function";
-    if (cfg.supports_time !== true) {
-      if (hasMethod && cfg.supports_time === undefined) {
-        this.warnOnce(
-          "server-time-unused",
-          "[raze-charts] the datafeed implements getServerTime() but configuration.supports_time is not true, so it is never called "
-            + "and the client clock is used. Set supports_time: true to use the server clock.",
-        );
-      }
-      return;
-    }
-    if (!hasMethod) {
-      this.warnOnce(
-        "server-time-missing",
-        "[raze-charts] configuration.supports_time is true but the datafeed has no getServerTime(); using the client clock.",
-      );
-      return;
-    }
+    // checkCapabilities() reports a flag without a method and vice versa.
+    if (this.config?.supports_time !== true || typeof this.context.datafeed.getServerTime !== "function") return;
     this.serverTimeReady = this.syncServerTime();
     this.serverTimeTimer = setInterval(() => {
       void this.syncServerTime();
@@ -372,18 +340,12 @@ export class DataManager {
 
   private applyServerTime(unixTime: unknown, sentAt: number, receivedAt: number): void {
     if (typeof unixTime !== "number" || !Number.isFinite(unixTime) || unixTime <= 0) {
-      this.warnOnce(
-        "server-time-invalid",
-        `[raze-charts] getServerTime() returned ${String(unixTime)}; expected Unix seconds. Using the client clock.`,
-      );
+      this.warnOnce("server-time", `[raze-charts] ignored getServerTime() value ${String(unixTime)}; expected Unix seconds.`);
       return;
     }
     let serverMs: number;
     if (unixTime >= SECONDS_THRESHOLD) {
-      this.warnOnce(
-        "server-time-ms",
-        "[raze-charts] getServerTime() returned milliseconds; expected Unix seconds. The value was converted.",
-      );
+      this.warnOnce("server-time-ms", "[raze-charts] getServerTime() returned milliseconds; expected Unix seconds (converted).");
       serverMs = unixTime;
     } else {
       // Whole seconds are truncated, so the true instant is half a second later on average.
@@ -609,9 +571,8 @@ export class DataManager {
       if (!result || result.bars.length || result.nextTime === null) return result;
       if (result.nextTime >= params.to) {
         this.warnOnce(
-          "next-time-forward",
-          `[raze-charts] getBars returned nextTime ${result.nextTime}, which is not older than the requested \`to\` (${params.to}); `
-            + "it was ignored. nextTime must be the Unix time (seconds) where older data resumes.",
+          "next-time",
+          `[raze-charts] ignored getBars nextTime ${result.nextTime}: it must be older than the requested to (${params.to}).`,
         );
         return { ...result, nextTime: null };
       }
@@ -641,11 +602,7 @@ export class DataManager {
     // ±25% jitter keeps many charts on one failing backend from retrying in lockstep.
     const delay = Math.round(base * (0.75 + Math.random() * 0.5));
     this.historyRetryAt = this.context.now() + delay;
-    console.error(
-      `[raze-charts] history pagination failed (attempt ${this.historyFailures}); `
-        + `retrying no sooner than ${(delay / 1000).toFixed(1)}s from now`,
-      error,
-    );
+    console.error(`[raze-charts] history pagination failed; retrying in ${(delay / 1000).toFixed(1)}s`, error);
   }
 
   /** Called by the engine when the visible range nears the left edge. */
@@ -848,8 +805,7 @@ export class DataManager {
     } else {
       this.warnOnce(
         "live-order",
-        `[raze-charts] subscribeBars delivered a bar at ${bar.time}, older than the last bar (${last.time}); it was ignored. `
-          + "Live updates may only change the last bar or append a newer one.",
+        `[raze-charts] ignored a subscribeBars bar older than the last bar (${bar.time} < ${last.time}).`,
       );
       return;
     }
@@ -1065,10 +1021,8 @@ export class DataManager {
   refreshMarks(): void {
     if (this.config && !this.barMarksWanted() && !this.timescaleMarksWanted()) {
       this.warnOnce(
-        "refresh-marks-unsupported",
-        "[raze-charts] refreshMarks() has nothing to refresh: the datafeed configuration enables neither "
-          + "supports_marks (with getMarks) nor supports_timescale_marks (with getTimescaleMarks)"
-          + (barMarksOptedOut(this.context) ? ', and disabled_features contains "mark_on_bars".' : "."),
+        "refresh-marks",
+        "[raze-charts] refreshMarks() does nothing: the datafeed configuration enables neither supports_marks nor supports_timescale_marks.",
       );
     }
     this.refreshMarksFor(
@@ -1147,8 +1101,8 @@ export class DataManager {
     if (!window) {
       this.warnOnce(
         "interval-timeframe",
-        `[raze-charts] onIntervalChanged listener set timeframe to ${JSON.stringify(chosen)}; expected `
-          + '{ type: "time-range", from, to } in Unix seconds or { type: "period-back", value: "12M" }. It was ignored.',
+        `[raze-charts] ignored onIntervalChanged timeframe ${JSON.stringify(chosen)}; `
+          + 'use { type: "time-range", from, to } or { type: "period-back", value }.',
       );
       return;
     }

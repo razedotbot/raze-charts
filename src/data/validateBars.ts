@@ -187,31 +187,29 @@ const countBars = (n: number): string => `${n} bar${n === 1 ? "" : "s"}`;
  * example "getBars" or "subscribeBars".
  */
 export function describeBarIssue(issue: BarIssue, origin: string): string {
-  const where = `${origin} bar ${issue.index}`;
-  const affected = countBars(issue.count);
-  const hint = "set raze.coerce_bars: true to repair it automatically";
+  const at = `${origin} bar ${issue.index}`;
+  const n = countBars(issue.count);
+  const value = show(issue.value);
+  const repair = issue.repaired ? " (raze.coerce_bars)" : "; or set raze.coerce_bars: true";
   switch (issue.problem) {
     case "shape":
-      return `[raze-charts] ${where} is ${show(issue.value)}, not a Bar object; ${affected} dropped.`;
+      return `[raze-charts] ${at} is not a Bar object; dropped ${n}.`;
     case "time":
-      return `[raze-charts] ${where} has Bar.time ${show(issue.value)}; expected Unix milliseconds. ${affected} dropped.`;
     case "ohlc":
-      return `[raze-charts] ${where} has Bar.${issue.field} ${show(issue.value)}; open, high, low and close must be finite numbers. ${affected} dropped.`;
+      return `[raze-charts] ${at}: Bar.${issue.field} ${value} is not a finite number; dropped ${n}.`;
     case "string":
       return issue.repaired
-        ? `[raze-charts] ${where}: Bar.${issue.field} was the string ${show(issue.value)}; converted ${affected} with Number() (raze.coerce_bars).`
-        : `[raze-charts] ${where} has Bar.${issue.field} as the string ${show(issue.value)}; expected a number. ${affected} dropped. Convert with Number(), or ${hint}.`;
+        ? `[raze-charts] ${at}: Bar.${issue.field} is the string ${value}; converted ${n}${repair}.`
+        : `[raze-charts] ${at}: Bar.${issue.field} is the string ${value}, not a number; dropped ${n}. Use Number()${repair}.`;
     case "seconds":
-      return issue.repaired
-        ? `[raze-charts] Bar.time looks like seconds; expected milliseconds (${where}: ${show(issue.value)}). Multiplied ${affected} by 1000 (raze.coerce_bars).`
-        : `[raze-charts] Bar.time looks like seconds; expected milliseconds (${where}: ${show(issue.value)}, ${affected} below 1e11). Multiply by 1000, or ${hint}.`;
+      return `[raze-charts] Bar.time looks like seconds; expected milliseconds (${at}: ${value}, ${n}). `
+        + (issue.repaired ? `Multiplied by 1000${repair}.` : `Multiply by 1000${repair}.`);
     case "range": {
       const { low, high } = issue.value as { low: number; high: number };
-      return issue.repaired
-        ? `[raze-charts] ${where} has Bar.low (${low}) above Bar.high (${high}); swapped ${affected} (raze.coerce_bars).`
-        : `[raze-charts] ${where} has Bar.low (${low}) above Bar.high (${high}); ${affected} affected. Swap them in the feed, or ${hint}.`;
+      return `[raze-charts] ${at}: Bar.low ${low} is above Bar.high ${high} (${n}). `
+        + (issue.repaired ? `Swapped${repair}.` : `Swap them${repair}.`);
     }
     case "volume":
-      return `[raze-charts] ${where} has Bar.volume ${show(issue.value)}; expected a finite number or undefined. Volume removed from ${affected}.`;
+      return `[raze-charts] ${at}: Bar.volume ${value} is not a finite number; removed from ${n}.`;
   }
 }

@@ -375,7 +375,7 @@ async function loadFixture(bars, options = {}) {
   const { context, warnings } = await loadFixture(fixture);
   assert(context.bars.length === 2, "history bars with NaN or missing OHLC are dropped");
   assert(
-    warnings.length === 1 && warnings[0].includes("bar 1") && warnings[0].includes("Bar.high") && warnings[0].includes("2 bars dropped"),
+    warnings.length === 1 && warnings[0].includes("bar 1") && warnings[0].includes("Bar.high") && warnings[0].includes("dropped 2 bars"),
     "one aggregated warning names the field, the first bad index and the count",
   );
 }
@@ -421,7 +421,7 @@ async function loadFixture(bars, options = {}) {
   const inverted = series(3).map((b, i) => (i === 1 ? { ...b, high: b.low, low: b.high } : b));
   const { context, warnings } = await loadFixture(inverted);
   assert(
-    warnings.length === 1 && warnings[0].includes("bar 1") && warnings[0].includes("Bar.low") && warnings[0].includes("above Bar.high"),
+    warnings.length === 1 && warnings[0].includes("bar 1") && warnings[0].includes("Bar.low 102 is above Bar.high 100"),
     "an inverted high/low produces one warning with its index",
   );
   assert(context.bars[1].low > context.bars[1].high, "without coercion the inverted bar is kept as delivered");
