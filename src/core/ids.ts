@@ -39,7 +39,7 @@ export type IdFactory = (request: IdRequest) => string;
 export interface IdAllocatorOptions {
   /** Replaces the default `<label>_<sequence>` format. */
   factory?: IdFactory;
-  /** Upper bound on retries when candidates are taken. Defaults to 10,000. */
+  /** Upper bound on retries when candidates are taken: a positive safe integer. Defaults to 10,000. */
   maxAttempts?: number;
 }
 
@@ -50,9 +50,16 @@ export interface NextIdOptions {
   isTaken?: (id: string) => boolean;
 }
 
-/** Lowercase slug for a free-form label such as a study name (`Bollinger Bands` -> `bollinger_bands`). */
+/**
+ * Lowercase slug for a free-form label such as a study name
+ * (`Bollinger Bands` -> `bollinger_bands`). Every run of characters outside
+ * `[a-z0-9]` becomes one `_`, edges included, exactly like the historical
+ * StudyStore ids (`MACD (12, 26)` -> `macd_12_26_`), so adopting the allocator
+ * never changes the id a given name produces. Only a name with no characters
+ * at all falls back to `item`, because an allocator label cannot be empty.
+ */
 export function idSlug(value: string): string {
-  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "item";
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "_") || "item";
 }
 
 /**
@@ -67,7 +74,11 @@ export class IdAllocator {
 
   constructor(options: IdAllocatorOptions = {}) {
     const maxAttempts = options.maxAttempts ?? 10_000;
-    if (!(maxAttempts >= 1)) throw new RangeError("[raze-charts] IdAllocator maxAttempts must be a positive integer");
+    if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {
+      throw new RangeError(
+        `[raze-charts] IdAllocator maxAttempts must be a positive integer (got ${String(maxAttempts)}); omit it for the default of 10000`,
+      );
+    }
     this.factory = options.factory;
     this.maxAttempts = maxAttempts;
   }
