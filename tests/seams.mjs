@@ -89,6 +89,7 @@ export { AXIS_TAG_PRIORITY } from "./src/engine/paint/view";
 export { ChartEngine } from "./src/engine/ChartEngine";
 export { ChartRenderer } from "./src/engine/ChartRenderer";
 export { Widget } from "./src/core/Widget";
+export { createWidgetContext } from "./src/core/widget/runtime";
 export { compileChart, defineChart, line } from "./src/chart/index";
 export { buildTheme } from "./src/core/theme";
 export { createPriceFormatter } from "./src/util/format";
@@ -125,6 +126,7 @@ const {
   STUDY_SOURCES,
   VIEWPORT_CHANGE_REASONS,
   Widget,
+  createWidgetContext,
   anchorsComplete,
   buildFeatureSet,
   buildTheme,
@@ -510,20 +512,22 @@ function makeContext(overrides = {}, factoryOptions = {}) {
   };
   const container = window.document.createElement("div");
   window.document.body.appendChild(container);
-  const instance = new Widget({
+  const options = {
     symbol: "ETHUSD",
     interval: "1",
     container,
     datafeed: feed,
     timezone: "Europe/London",
     disabled_features: ["header_widget", "left_toolbar", "scale_bar"],
-  });
-  await instance.headerReady();
-  // The context is private in TypeScript; this contract test inspects it on purpose.
-  const context = instance.context;
+  };
+  // The widget's state is unreachable at runtime (W1A-07), so the context is
+  // checked through the runtime's own builder, which the Widget uses.
+  const context = createWidgetContext(options);
   assert(typeof context.setViewport === "function" && context.ids instanceof IdAllocator, "widget contexts are built by createChartContext");
   assert(context.timezone === "Europe/London", "widget contexts seed the timezone seam from options");
-  assert(context.overlayHost === container.querySelector(".raze-chart-overlay-host"), "the widget's engine mounts the overlay host");
+  const instance = new Widget(options);
+  await instance.headerReady();
+  assert(container.querySelectorAll(".raze-chart-overlay-host").length === 1, "the widget's engine mounts the overlay host");
   instance.remove();
   assert(!container.querySelector(".raze-chart-overlay-host"), "widget teardown removes the overlay host");
 }
