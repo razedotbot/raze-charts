@@ -122,6 +122,20 @@ items compiles unchanged. Code that reads `item.icon` back as a string, for
 example to inspect or serialise a sidebar configuration, now needs a check
 such as `typeof item.icon === "string"` before using it as one.
 
+### Custom financial shells
+
+A custom shell built from the root building blocks (`ChartEngine`,
+`ChartRenderer`, `DataManager` and the stores) creates its shared context with
+`createChartContext(state)` instead of an object literal. A `ChartContext` now
+carries reason-tagged setters and change delegates. A literal typed as
+`ChartContext` no longer compiles because it lacks them. Write the viewport
+with `setViewport(range, reason)`, the price scale with
+`setScaleMode(patch, reason)` and the series style with
+`setChartType(style, reason)`. Each setter validates its input, fires one
+change event and requests one repaint. The widget's own code is still moving
+from direct field writes to these setters. [Shared seams](./seams.md) lists
+every field.
+
 ## Recharts-shaped JSX
 
 The React entrypoint is a focused translation layer over the native chart

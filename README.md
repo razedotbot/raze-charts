@@ -353,8 +353,10 @@ The root also exports `DataManager`, `TimeIndex`, `ChartEngine`,
 resolution helpers, `defineDataSource` / `createDatafeed`, and the default UI
 chrome. These pieces are useful for a custom financial shell, but currently
 share the widget's mutable `ChartContext`; they are not separate package
-subpaths. The exception is indicator math: import it from
-`@razedotbot/charts/studies` to compute studies without bundling the widget.
+subpaths. Build that context with `createChartContext()`, and change the
+viewport, price scale and series style through its reason-tagged setters.
+The exception is indicator math: import it from `@razedotbot/charts/studies`
+to compute studies without bundling the widget.
 
 ```ts
 import { ema, StudyRegistry, type StudyDefinition } from "@razedotbot/charts/studies";

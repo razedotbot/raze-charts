@@ -363,6 +363,9 @@ built-in mark kind. Plugin-specific top-level options belong in the typed
   controls, `t(key, default)` strings, `--raze-*` tokens in a scoped
   stylesheet, and text-only rendering of untrusted strings (enforced by
   `node scripts/check-dom-sinks.mjs`).
+- Viewport, price-scale and chart-type writes go through the reason-tagged
+  context setters, and shared fields and plugin contracts are declared in
+  [seams](./seams.md) with their producer and consumers.
 
 ## Repository map
 

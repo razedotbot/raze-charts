@@ -42,6 +42,27 @@ export type {
   IndexRange,
   ThemeColors,
 } from "./core/context";
+// Context seams (W1A-06): reason-tagged setters and their change payloads.
+export { createChartContext } from "./core/context";
+export { IdAllocator } from "./core/ids";
+export type { IdAllocatorOptions, IdFactory, IdNamespace, IdRequest, NextIdOptions } from "./core/ids";
+export type {
+  ChartContextInit,
+  ChartContextState,
+  CreateChartContextOptions,
+  ChartContextSeams,
+  ChartTypeChange,
+  ChartTypeChangeReason,
+  PriceScaleMode,
+  ScaleChange,
+  ScaleChangeReason,
+  ScaleModePatch,
+  ScaleState,
+  SetViewportOptions,
+  TimezoneSetting,
+  ViewportChange,
+  ViewportChangeReason,
+} from "./core/context";
 
 // ── Data ────────────────────────────────────────────────────────────────────
 export { DataManager } from "./data/DataManager";
@@ -75,6 +96,7 @@ export type {
   ShapeHit,
   TradingHit,
 } from "./engine/paint/view";
+export type { AxisTag, AxisTagSourceKind, Rect, ScreenPoint, TimescaleMarkHit } from "./engine/paint/view";
 
 // ── Studies (indicator math is pure and dependency-free) ────────────────────
 export { bollinger, closesFromBars, ema, macd, rsi, sma, stdev, vwap } from "./studies/calc";
