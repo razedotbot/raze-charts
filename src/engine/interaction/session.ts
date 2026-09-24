@@ -1,8 +1,10 @@
 // The active drag: routes moves to the DragSession a handler claimed,
 // commits it on the final pointer up, and cancels it on pointer cancel, when
 // a pinch takes over, or on Escape. Escape is caught at the window while a
-// drag is live, so it works wherever focus is, and it is consumed so it does
-// not also clear the selection or the active tool. After a cancel, moves are
+// drag is live, so it works wherever focus is. When the cancel rolled
+// something back, Escape is consumed so it does not also clear the selection
+// or the active tool; a press that has not moved anything yet is dropped
+// quietly and Escape keeps its normal meaning. After a cancel, moves are
 // ignored until every pointer is up, so nothing is re-applied on release.
 
 import { t } from "../../i18n";
@@ -38,12 +40,16 @@ export class DragTracker {
     session?.commit?.();
   }
 
-  /** Roll the live session back. `hold` ignores later moves until every pointer is up. */
-  cancel(hold = false): void {
+  /**
+   * Roll the live session back. `hold` ignores later moves until every
+   * pointer is up. Returns whether a session was live and its cancel did not
+   * report that nothing had changed yet.
+   */
+  cancel(hold = false): boolean {
     const session = this.session;
     this.drop();
     this.cancelled = hold && !!session;
-    session?.cancel?.();
+    return !!session && session.cancel?.() !== false;
   }
 
   /** Forget the session without committing or rolling back (a pinch or long press took over). */
@@ -54,9 +60,9 @@ export class DragTracker {
 
   private readonly onKey = (e: KeyboardEvent): void => {
     if (e.key !== "Escape" || !this.session) return;
+    if (!this.cancel(true)) return;
     e.preventDefault();
     e.stopPropagation();
-    this.cancel(true);
     this.host.requestPaint();
     this.host.engine.announce(t("chart.announce.dragCancelled", "Drag cancelled."));
   };

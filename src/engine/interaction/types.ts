@@ -82,8 +82,13 @@ export interface DragSession {
   move(x: number, y: number): void;
   /** The gesture ended normally. */
   commit?(): void;
-  /** Roll every partial change back so no lifecycle is left half-applied. */
-  cancel?(): void;
+  /**
+   * Roll every partial change back so no lifecycle is left half-applied.
+   * Return false when the gesture had not changed anything yet (a press that
+   * never left the drag slop): Escape then keeps its normal meaning instead
+   * of being consumed as a cancelled drag.
+   */
+  cancel?(): boolean | void;
 }
 
 /**

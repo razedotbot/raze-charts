@@ -108,3 +108,12 @@ each gesture hit test.
 - **Subpath exports.** The plugin contract types become public through the
   `/drawings` and `/studies` subpath barrels that W1A-01 creates. The root
   entry exports only the context and view seam types.
+- **Temporary shim: drawing selection and tool events (W1B-10).**
+  `DrawingEventsController` observes `context.selectedShapeId` and
+  `context.drawingTool` by swapping them for accessors at attach (delegating
+  to an accessor the context already defines) and restores them on destroy.
+  It exists only because `context.ts` has no change delegates for these
+  fields. Follow-up for the `context.ts` owner (W1B-07, then the W2-02
+  viewport store): fire `selectionChanged` and `toolChanged` delegates from
+  the context's own setters, and switch the controller to subscribing to them
+  so it no longer redefines shared fields.

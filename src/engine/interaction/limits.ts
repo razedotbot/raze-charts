@@ -94,8 +94,14 @@ export function clampRange(h: GestureHost, next: IndexRange, previous: IndexRang
   return { from: next.from + allowed, to: next.to + allowed };
 }
 
-/** Clamp, write through the reason-tagged setter, and page in history when the left edge nears. */
-export function applyRange(h: GestureHost, next: IndexRange, reason: ViewportChangeReason, previous?: IndexRange): void {
+/**
+ * Clamp, write through the reason-tagged setter, and page in history when the
+ * left edge nears. Returns whether the viewport changed, so a cancelled pan
+ * that never moved reports that it had nothing to restore.
+ */
+export function applyRange(h: GestureHost, next: IndexRange, reason: ViewportChangeReason, previous?: IndexRange): boolean {
   const range = reason === "cancel" ? next : clampRange(h, next, previous);
-  if (h.context.setViewport(range, reason) && reason !== "cancel") void h.data.maybeLoadMoreHistory();
+  const changed = h.context.setViewport(range, reason);
+  if (changed && reason !== "cancel") void h.data.maybeLoadMoreHistory();
+  return changed;
 }

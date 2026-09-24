@@ -407,6 +407,37 @@ const snapshot = (shape) => JSON.stringify(shape.points);
     "Escape announces the cancelled drag and does not also clear the selection");
 }
 {
+  // A held press that never left the slop has nothing to roll back: Escape keeps its normal meaning.
+  const h = makeHost();
+  const { shape } = await withTrend(h);
+  const before = snapshot(shape);
+  const undo = h.undo();
+  h.events.length = 0;
+  h.host.canvas.dispatchEvent(pointer("pointerdown", 202.5, 150));
+  h.host.canvas.dispatchEvent(pointer("pointermove", 203.5, 151));
+  assert(h.context.selectedShapeId === shape.id, "pressing a drawing selects it");
+  h.host.canvas.focus();
+  h.host.canvas.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert(!h.events.some(([kind, message]) => kind === "announce" && message === "Drag cancelled."),
+    "Escape during a press that never moved does not announce a cancelled drag");
+  assert(h.context.selectedShapeId === null, "Escape during an unmoved press still clears the selection as usual");
+  h.host.canvas.dispatchEvent(pointer("pointermove", 262.5, 210));
+  window.dispatchEvent(pointer("pointerup", 262.5, 210));
+  const types = h.events.filter(([kind]) => kind === "drawing").map(([, , type]) => type);
+  assert(snapshot(shape) === before && h.undo() === undo && types.length === 0,
+    "after Escape the press is dropped: later moves drag nothing and release fires no click, change or undo entry");
+
+  const pan = makeHost({ range: { from: 100, to: 200 } });
+  pan.host.canvas.dispatchEvent(pointer("pointerdown", 100, 150));
+  pan.host.canvas.focus();
+  const escape = new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  pan.host.canvas.dispatchEvent(escape);
+  pan.host.canvas.dispatchEvent(pointer("pointermove", 300, 150));
+  window.dispatchEvent(pointer("pointerup", 300, 150));
+  assert(!pan.events.some(([kind, message]) => kind === "announce" && message === "Drag cancelled.") && pan.context.visibleRange.from === 100,
+    "Escape before an empty-plot press moves does not announce a cancelled pan, and later moves do not pan");
+}
+{
   const h = makeHost({ range: { from: 100, to: 200 } });
   h.host.canvas.dispatchEvent(pointer("pointerdown", 100, 150));
   h.host.canvas.dispatchEvent(pointer("pointermove", 200, 150));
@@ -430,6 +461,26 @@ const snapshot = (shape) => JSON.stringify(shape.points);
   window.dispatchEvent(pointer("pointerup", 103, 172));
   const point = h.host.draft.points[0];
   assert(point.time === bar.time / 1000 && point.price === bar.high, "with the magnet on, the anchor takes the snapped bar's time and nearest OHLC price");
+}
+{
+  // The magnet only works over bars: in the right offset an anchor keeps the
+  // extrapolated bar time and the raw price, so lines can project into the future.
+  const h = makeHost({ magnet: true, range: { from: 250, to: 350 } });
+  const { shape } = await withTrend(h);
+  const last = h.context.bars.at(-1);
+  // Anchor 2 (bar 260 @ 200) sits at x = (260.5 - 250) * 5 = 52.5, y = 300 - 200 = 100.
+  // x = 450 is logical index 250 + 90 - 0.5 = 339.5, forty bars past the last one.
+  drag(h, [52.5, 100], [450, 100]);
+  assert((shape.points[1].time - T0) / 60 === 340, "with the magnet on, an anchor dragged past the last bar keeps its future bar time");
+  assert(shape.points[1].price === 200 && ![last.open, last.high, last.low, last.close].includes(shape.points[1].price),
+    "the magnet does not snap a future anchor's price to the last bar's OHLC");
+  const early = makeHost({ magnet: true, range: { from: -50, to: 50 } });
+  early.context.drawingTool = "trend_line";
+  // x = 102 is logical index -50 + 20.4 - 0.5 = -30.1: thirty bars before the first one.
+  early.host.canvas.dispatchEvent(pointer("pointerdown", 102, 123));
+  window.dispatchEvent(pointer("pointerup", 102, 123));
+  const point = early.host.draft.points[0];
+  assert((point.time - T0) / 60 === -30 && point.price === 177, "before the first bar the magnet leaves the anchor on the extrapolated bar and the raw price");
 }
 {
   const h = makeHost();
@@ -553,6 +604,33 @@ assert(prompts.length === 0, "the text tool no longer calls window.prompt");
   empty.el.value = "   ";
   empty.el.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   assert(h.host.shapes.list().length === 0, "committing an empty label creates nothing");
+}
+{
+  // Teardown mid-edit: an open editor is discarded and a scheduled one never opens.
+  const h = makeHost();
+  h.context.drawingTool = "text";
+  h.host.canvas.dispatchEvent(pointer("pointerdown", 104, 150));
+  window.dispatchEvent(pointer("pointerup", 104, 150));
+  await tick();
+  const editor = activeInlineTextEditor(h.host.context.overlayHost);
+  editor.el.value = "Unsaved";
+  h.events.length = 0;
+  h.gestures.destroy();
+  editor.el.dispatchEvent(new window.Event("blur"));
+  await tick();
+  assert(!editor.open && !editor.el.isConnected && h.host.shapes.list().length === 0,
+    "destroying the chart with the text editor open removes it without creating a drawing");
+  assert(!h.events.some(([kind]) => kind === "toolDone") && h.context.drawingTool === "text",
+    "a destroyed chart's editor does not reset the tool or call onToolDone");
+
+  const pending = makeHost();
+  pending.context.drawingTool = "text";
+  pending.host.canvas.dispatchEvent(pointer("pointerdown", 104, 150));
+  window.dispatchEvent(pointer("pointerup", 104, 150));
+  pending.gestures.destroy();
+  await tick();
+  assert(!activeInlineTextEditor(pending.host.context.overlayHost) && !pending.events.some(([kind]) => kind === "toolDone")
+    && pending.context.drawingTool === "text", "destroying the chart before the scheduled editor opens cancels it");
 }
 
 // ── Timescale-mark tooltip ────────────────────────────────────────────────

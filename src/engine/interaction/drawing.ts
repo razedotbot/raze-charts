@@ -12,7 +12,7 @@ import type { StoredShape } from "../../core/ShapeStore";
 import type { DrawingHit } from "../../drawings/types";
 import { t } from "../../i18n";
 import type { ShapePoint } from "../../types/charting_library";
-import { openInlineTextEditor } from "../../ui/InlineTextEditor";
+import { openInlineTextEditor, type InlineTextEditorHandle } from "../../ui/InlineTextEditor";
 import { TimeIndex } from "../../data/TimeIndex";
 import { resolutionToMs } from "../../util/resolution";
 import { neededPoints, pointXY } from "../paint/shapes";
@@ -24,6 +24,32 @@ import type { DragSession, GestureHost, InteractionHandler } from "./types";
 /** A double-click this soon after placing a draft point belongs to the drafting clicks. */
 const DRAFT_DBLCLICK_MS = 600;
 const lastDraftPointAt = new WeakMap<GestureHost, number>();
+
+/** The text editor a host has scheduled or open. Callbacks from a session no longer listed here are dropped. */
+interface TextEditing {
+  timer?: number;
+  editor?: InlineTextEditorHandle;
+}
+const textEditing = new WeakMap<GestureHost, TextEditing>();
+
+function textSession(h: GestureHost): TextEditing {
+  let session = textEditing.get(h);
+  if (!session) textEditing.set(h, (session = {}));
+  return session;
+}
+
+/**
+ * Teardown: drop a scheduled text editor and discard an open one without
+ * creating, changing or resetting anything, so a chart destroyed mid-edit
+ * never writes into its torn-down stores or calls back into the widget.
+ */
+export function cancelTextEditing(h: GestureHost): void {
+  const session = textEditing.get(h);
+  if (!session) return;
+  textEditing.delete(h);
+  window.clearTimeout(session.timer);
+  session.editor?.cancel();
+}
 
 /** Places draft points while a drawing tool is armed; Escape cancels everything. */
 export const drawingDraftHandler: InteractionHandler = {
@@ -95,10 +121,15 @@ function finishDraft(h: GestureHost, x: number, y: number): void {
     const anchor = pointXY(h.financeView(), points[0]!) ?? { x, y };
     // Open after this press finishes: the browser focuses the canvas on the
     // mousedown that follows pointerdown, which would blur (commit) the editor.
-    window.setTimeout(() => editText(h, anchor, "", 12, (text) => {
-      if (text?.trim()) create(text);
-      resetTool();
-    }), 0);
+    const session = textSession(h);
+    window.clearTimeout(session.timer);
+    session.timer = window.setTimeout(() => {
+      session.timer = undefined;
+      editText(h, anchor, "", 12, (text) => {
+        if (text?.trim()) create(text);
+        resetTool();
+      });
+    }, 0);
   } else {
     if (tool !== "measure") create("");
     resetTool();
@@ -113,11 +144,17 @@ function editText(h: GestureHost, at: { x: number; y: number }, value: string, f
     if (h.canvas.isConnected) console.warn("[raze-charts] text editing needs a mounted chart overlay; nothing was edited.");
     return done(null);
   }
+  const session = textSession(h);
+  let editor: InlineTextEditorHandle | undefined;
   const finish = (text: string | null): void => {
+    // cancelTextEditing (teardown) removed the session: drop the result.
+    if (textEditing.get(h) !== session) return;
+    if (session.editor === editor) session.editor = undefined;
     done(text);
     h.requestPaint();
   };
-  openInlineTextEditor({
+  // Opening first commits an editor already open in this overlay; its `finish` runs before this assignment.
+  session.editor = editor = openInlineTextEditor({
     parent,
     x: at.x,
     y: at.y,
@@ -216,10 +253,12 @@ function shapeDrag(h: GestureHost, id: string, part: DrawingHit, x0: number, y0:
     },
     cancel() {
       // Put the captured points back in place: no drawing_event, no undo entry.
+      // A press still inside the slop moved nothing, so there is nothing to undo.
       const shape = h.shapes.get(id as never);
-      if (!dragging || !shape || !before) return;
+      if (!dragging || !shape || !before) return false;
       shape.points = before.points.map((point) => ({ ...point }));
       h.requestPaint();
+      return true;
     },
   };
 }

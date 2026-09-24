@@ -2,10 +2,18 @@
 // drawing fires drawing_event 'click', dragging fires 'move' then one
 // 'points_changed', and the new widget events drawing_selection_changed (ids)
 // and drawing_tool_changed (tool id) fire once per effective change from the
-// canvas, the keyboard, the sidebar and store removals.
+// canvas, the keyboard, the sidebar and store removals. The last section
+// checks, from source, that the controller's context shim is undone on destroy.
 // Run after the build: node build.mjs && node tests/drawing-events.mjs
 
+import { build } from "esbuild";
 import { JSDOM } from "jsdom";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(`Assertion failed: ${message}`);
@@ -159,4 +167,72 @@ chart.removeEntity(id);
 assert(log.some(([kind, ids]) => kind === "selection" && ids.length === 0), "removing the selected drawing reports an empty selection");
 
 instance.remove();
+
+// ── The observer shim is undone on destroy ────────────────────────────────
+// DrawingEventsController temporarily swaps two context fields for accessors
+// (see docs/seams.md). Destroy must put plain data properties back with the
+// current values, and an accessor the context already had is delegated to,
+// never shadowed.
+const scratch = mkdtempSync(join(tmpdir(), "raze-drawing-events-"));
+let source;
+try {
+  const outfile = join(scratch, "controller.mjs");
+  await build({
+    stdin: {
+      resolveDir: root,
+      loader: "ts",
+      contents: `
+        export { DrawingEventsController } from "./src/core/widget/DrawingEventsController";
+        export { createChartContext } from "./src/core/context";
+      `,
+    },
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    target: ["es2020"],
+    outfile,
+    logLevel: "silent",
+  });
+  source = await import(pathToFileURL(outfile).href);
+} finally {
+  rmSync(scratch, { recursive: true, force: true });
+}
+const makeContext = () => source.createChartContext({
+  options: { symbol: "T" }, bars: [], resolution: "1", symbolInfo: null, theme: {}, fontFamily: "sans-serif",
+  magnet: false, stayInDrawingMode: false, drawingTool: "cursor", visibleRange: { from: 0, to: 10 },
+  autoScalePrice: true, priceRange: null, logScale: false, percentScale: false,
+  selectedShapeId: null, selectedTradingLineId: null, requestPaint: () => {},
+});
+{
+  const emitted = [];
+  const context = makeContext();
+  const controller = new source.DrawingEventsController({ context, controllers: { events: { emit: (...args) => emitted.push(args) } } });
+  controller.attach();
+  context.selectedShapeId = "a";
+  context.selectedShapeId = "a";
+  context.drawingTool = "trend_line";
+  assert(JSON.stringify(emitted) === JSON.stringify([["drawing_selection_changed", ["a"]], ["drawing_tool_changed", "trend_line"]]),
+    "the observed fields emit once per effective change");
+  controller.destroy();
+  const selection = Object.getOwnPropertyDescriptor(context, "selectedShapeId");
+  const tool = Object.getOwnPropertyDescriptor(context, "drawingTool");
+  assert(selection.value === "a" && selection.writable && !selection.get && tool.value === "trend_line" && tool.writable && !tool.get,
+    "destroy restores plain data properties holding the current values");
+  context.selectedShapeId = "b";
+  assert(emitted.length === 2 && context.selectedShapeId === "b", "a destroyed controller emits nothing");
+}
+{
+  const emitted = [];
+  const context = makeContext();
+  let stored = "cursor";
+  const accessor = { configurable: true, enumerable: true, get: () => stored, set: (next) => { stored = next; } };
+  Object.defineProperty(context, "drawingTool", accessor);
+  const controller = new source.DrawingEventsController({ context, controllers: { events: { emit: (...args) => emitted.push(args) } } });
+  controller.attach();
+  context.drawingTool = "text";
+  assert(stored === "text" && JSON.stringify(emitted) === JSON.stringify([["drawing_tool_changed", "text"]]),
+    "an accessor the context already defines is delegated to, not shadowed");
+  controller.destroy();
+  assert(Object.getOwnPropertyDescriptor(context, "drawingTool").get === accessor.get, "destroy puts the original accessor back");
+}
 console.log("\nDRAWING EVENTS: PASS");

@@ -23,8 +23,11 @@ export function pointerXY(host: GestureHost, e: MouseEvent): { x: number; y: num
 /**
  * Unix time (seconds) and price under a canvas point. The time snaps to the
  * nearest bar centre (so anchors sit on a candle, not between two) unless
- * `raze.snap_drawings_to_bars` is false. With the magnet on, the point snaps
- * to the nearest bar in the data and to that bar's closest OHLC price.
+ * `raze.snap_drawings_to_bars` is false. With the magnet on, a point over a
+ * bar snaps to that bar's time and closest OHLC price. The magnet does not
+ * reach into empty space: before the first bar or in the right offset the
+ * point keeps the extrapolated bar time and the raw price, so lines can
+ * still be projected into the future.
  */
 export function timePriceAt(host: GestureHost, x: number, y: number): { unixTime: number; price: number } {
   const s = host.plotScale();
@@ -32,8 +35,9 @@ export function timePriceAt(host: GestureHost, x: number, y: number): { unixTime
   const price = priceForY(s, y);
   if (!bars.length) return { unixTime: 0, price };
   let idx = indexForX(s, x);
-  if (magnet) {
-    const bar = bars[Math.max(0, Math.min(bars.length - 1, Math.round(idx)))]!;
+  const nearest = Math.round(idx);
+  const bar = magnet && nearest >= 0 && nearest < bars.length ? bars[nearest] : undefined;
+  if (bar) {
     let best = bar.close;
     for (const candidate of [bar.open, bar.high, bar.low]) {
       if (Math.abs(price - candidate) < Math.abs(price - best)) best = candidate;

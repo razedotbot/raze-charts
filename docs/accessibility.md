@@ -57,7 +57,7 @@ When the Canvas has focus:
 | Up / Down Arrow | Move a selected editable trading line by one minimum tick (Shift = 10 ticks) |
 | `+` / `-` | Zoom in / out (announces when the zoom limit is reached) |
 | `F` | Fit all loaded data |
-| Escape | Cancel an in-progress drag (drawing, trading line, pan or axis), restoring the previous state; otherwise cancel the active drawing and clear selection |
+| Escape | Cancel an in-progress drag (drawing, trading line, pan or axis), restoring the previous state; otherwise (including a press that has not moved yet) cancel the active drawing and clear selection |
 | Delete / Backspace | Remove the selected drawing or cancel the selected trading order |
 | Ctrl/Cmd+Z | Undo the last drawing or study command |
 | Ctrl/Cmd+Shift+Z or Ctrl+Y | Redo |

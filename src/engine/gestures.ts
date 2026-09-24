@@ -5,6 +5,7 @@
 // behaviour live in ./interaction/*.
 
 import { pointerXY, timePriceAt, zoneAt } from "./interaction/coords";
+import { cancelTextEditing } from "./interaction/drawing";
 import { hitTestAt } from "./interaction/hitTest";
 import { leaveHover, trackCrosshair, updateHover } from "./interaction/hover";
 import { KeyboardFocus } from "./interaction/keyboard";
@@ -66,6 +67,7 @@ export class GestureController {
     this.touch.clearLongPress();
     this.drag.cancel();
     hideCanvasTooltip(this.host);
+    cancelTextEditing(this.host);
     for (const [target, type, fn] of this.bindings) target.removeEventListener(type, fn as EventListener);
     this.focus.onBlur();
   }
