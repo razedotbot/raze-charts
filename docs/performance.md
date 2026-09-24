@@ -65,8 +65,8 @@ npm run check:size
 
 | Entrypoint | Measurement | Contents | Gzip budget |
 | --- | --- | --- | ---: |
-| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
-| | Scenario: Widget only | `import { widget }` | 63 KiB |
+| Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 74 KiB |
+| | Scenario: Widget only | `import { widget }` | 64 KiB |
 | Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 44 KiB |
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 23 KiB |
@@ -104,6 +104,21 @@ uses (about 5.2 KiB), the context seams and id allocator (about 2.4 KiB), and
 the controller and interaction-handler split of the widget (about 2.1 KiB).
 72 KiB is a ceiling, not a target: AD-01 requires a later wave to win back at
 least 10 KiB of headroom.
+
+W1B-05 raised the root artifact budget to 74 KiB and the "Widget only"
+scenario to 64 KiB, 2 KiB and 1 KiB past the AD-01 cap, and this needs an
+orchestrator decision before it merges. The widget now draws its time axis,
+crosshair and session breaks through the shared time core
+(`FinancialTimeAxis`, the zone math and weighted tick selection), which
+`docs/architecture.md` sized at about 7.8 KiB as shipped. The rest is the
+widget side of the same work: display-zone resolution with `custom_timezones`
+and warn-once fallbacks, the chart timezone API (`timezone()`,
+`setTimezone()`, `onTimezoneChanged()`, `getTimezoneApi()`, about 0.7 KiB),
+`custom_formatters.tickMarkFormatter` / `dateFormatter` / `timeFormatter`
+(about 0.45 KiB), the synced and volume-pane crosshair, and zone-aware
+session breaks. The legacy UTC tick code in `plotScale.ts` is now dead
+(W1B-06 owns it), so deleting it wins back a little. Measured on this branch,
+the artifact is 73.7 KiB and the scenario 63.2 KiB.
 
 ## Dense native charts
 

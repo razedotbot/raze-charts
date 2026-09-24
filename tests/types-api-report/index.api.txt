@@ -57,9 +57,11 @@ class ChartApi implements IChartWidgetApi
   createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
   executeActionById(actionId: string): void
   getShapeById(entityId: EntityId): ILineDataSourceApi
+  getTimezoneApi(): ITimezoneApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
   onIntervalChanged(): ISubscription<(interval: ResolutionString, timeframeObj: unknown) => void>
+  onTimezoneChanged(): ISubscription<(timezone: string) => void>
   refreshMarks(): void
   removeAllShapes(): void
   removeAllTradingLines(): void
@@ -68,8 +70,10 @@ class ChartApi implements IChartWidgetApi
   resolution(): ResolutionString
   setResolution(resolution: ResolutionString, callback?: (() => void) | undefined): void
   setSymbol(symbol: string, callback?: (() => void) | undefined): void
+  setTimezone(timezone: string): void
   setVisibleRange(range: { from: number; to: number; }): Promise<void>
   symbol(): string
+  timezone(): string
 interface ChartApiDeps
   clearMarks(): void
   createBracketOrder(options: BracketOrderOptions): IBracketOrderAdapter
@@ -279,6 +283,7 @@ interface ChartingLibraryWidgetOptions
   container: HTMLElement | string
   custom_font_family?: string | undefined
   custom_formatters?: CustomFormatters | undefined
+  custom_timezones?: CustomAliasedTimezone[] | undefined
   datafeed: IBasicDataFeed
   debug?: boolean | undefined
   disabled_features?: string[] | undefined
@@ -337,9 +342,16 @@ interface Crosshair
   active: boolean
   x: number
   y: number
+interface CustomAliasedTimezone
+  alias: string
+  id: string
+  title?: string | undefined
 interface CustomFormatters
   [key: string]: unknown
+  dateFormatter?: ISymbolDateTimeFormatter | undefined
   priceFormatterFactory?: PriceFormatterFactory | undefined
+  tickMarkFormatter?: ((date: Date, tickMarkType: TickMarkType) => null | string) | undefined
+  timeFormatter?: ISymbolDateTimeFormatter | undefined
 interface CustomSymbolValueFormatter
   format(price: number, signPositive?: boolean | undefined): string
 const DEFAULT_INDICATOR_PRESETS: IndicatorPreset[]
@@ -504,9 +516,11 @@ interface IChartWidgetApi
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
   getShapeById(entityId: EntityId): ILineDataSourceApi
+  getTimezoneApi(): ITimezoneApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
   onIntervalChanged(): ISubscription<(interval: ResolutionString, timeframeObj: unknown) => void>
+  onTimezoneChanged(): ISubscription<(timezone: string) => void>
   refreshMarks(): void
   removeAllShapes(): void
   removeAllTradingLines(): void
@@ -515,8 +529,10 @@ interface IChartWidgetApi
   resolution(): ResolutionString
   setResolution(resolution: ResolutionString, callback?: (() => void) | undefined): void
   setSymbol(symbol: string, callback?: (() => void) | undefined): void
+  setTimezone(timezone: string): void
   setVisibleRange(range: { from: number; to: number; }): Promise<void>
   symbol(): string
+  timezone(): string
 interface IChartingLibraryWidget
   activeChart(): IChartWidgetApi
   chart(index?: number | undefined): IChartWidgetApi
@@ -550,6 +566,13 @@ interface ISubscription<TFunc extends (...args: never[]) => void = (...args: nev
   subscribe(obj: null | object, member: TFunc, singleshot?: boolean | undefined): void
   unsubscribe(obj: null | object, member: TFunc): void
   unsubscribeAll(obj: null | object): void
+interface ISymbolDateTimeFormatter
+  format(date: Date): null | string
+interface ITimezoneApi
+  availableTimezones(): TimezoneInfo[]
+  getTimezone(): TimezoneInfo
+  onTimezoneChanged(): ISubscription<(timezone: string) => void>
+  setTimezone(timezone: string): void
 interface ITradingLineAdapter
   cancel(): void
   getPrice(): number
@@ -816,6 +839,10 @@ interface SearchSymbolResultItem
   type: string
 type SearchSymbolsCallback = (items: SearchSymbolResultItem[]) => void
 type SeriesFormat = 'price' | 'volume'
+interface SessionBreakOptions
+  from?: number | undefined
+  timeZone?: WallClockZone | null | string | undefined
+  to?: number | undefined
 interface SetViewportOptions
   notify?: boolean | undefined
 interface ShapeHit
@@ -995,12 +1022,13 @@ interface ThemeColors
   wickDown: string
   wickUp: string
 type ThemeName = 'dark' | 'light'
+type TickMarkType = 'DayOfMonth' | 'Month' | 'Time' | 'TimeWithSeconds' | 'Year'
 class TimeIndex
   new (points: readonly TimePoint[], expectedStepMs?: number | undefined): TimeIndex
   indexAt(timeMs: number): null | number
   readonly length: number
   nearestIndex(timeMs: number): null | number
-  sessionBreaks(): number[]
+  sessionBreaks(options?: SessionBreakOptions | undefined): number[]
   timeAt(index: number): null | number
 interface TimePoint
   readonly time: number
@@ -1023,6 +1051,10 @@ interface TimescaleMarkHit
   x: number
   y: number
 type Timezone = string
+interface TimezoneInfo
+  id: string
+  offset?: number | undefined
+  title: string
 type TimezoneSetting = null | string
 class Toolbar
   new (context: ChartContext): Toolbar
@@ -1098,6 +1130,8 @@ interface ViewportChange
   readonly reason: 'api' | 'cancel' | 'fit' | 'initial' | 'keyboard' | 'load' | 'pan' | 'pinch' | 'preset' | 'realtime' | 'rebase' | 'reset' | 'resize' | 'sync' | 'timeframe' | 'zoom'
 type ViewportChangeReason = 'api' | 'cancel' | 'fit' | 'initial' | 'keyboard' | 'load' | 'pan' | 'pinch' | 'preset' | 'realtime' | 'rebase' | 'reset' | 'resize' | 'sync' | 'timeframe' | 'zoom'
 type VolumeMode = 'hidden' | 'overlay' | 'pane'
+interface WallClockZone
+  toWall(utcMs: number): number
 class Widget implements IChartingLibraryWidget
   new (options: ChartingLibraryWidgetOptions): Widget
   activeChart(): IChartWidgetApi

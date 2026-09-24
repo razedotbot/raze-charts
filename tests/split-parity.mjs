@@ -541,6 +541,10 @@ const CHART_API_METHODS = [
   "symbol",
   "executeActionById",
   "createCompare",
+  "timezone",
+  "setTimezone",
+  "onTimezoneChanged",
+  "getTimezoneApi",
 ];
 assert(
   sameList(Object.getOwnPropertyNames(widget.prototype), WIDGET_METHODS),

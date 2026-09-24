@@ -68,10 +68,41 @@ export type PriceFormatterFactory = (
   minTick: string,
 ) => CustomSymbolValueFormatter | null;
 
-/** Subset of TradingView `custom_formatters`. Only price formatting is wired. */
+/** TradingView time-axis label kinds passed to `tickMarkFormatter`. */
+export type TickMarkType = "Year" | "Month" | "DayOfMonth" | "Time" | "TimeWithSeconds";
+
+/**
+ * TradingView date/time formatter. `date` carries the displayed local time
+ * in its UTC fields: read it with `getUTCHours()` and friends.
+ */
+export interface ISymbolDateTimeFormatter {
+  /** Return `null` for the default text. */
+  format(date: Date): string | null;
+}
+
+/** Subset of TradingView `custom_formatters`: price, tick-mark and crosshair date/time labels. */
 export interface CustomFormatters {
   priceFormatterFactory?: PriceFormatterFactory;
+  /**
+   * Time-axis tick label. Return `null` for the default label; a throw or any
+   * other non-string return warns once and uses the default label too.
+   */
+  tickMarkFormatter?: (date: Date, tickMarkType: TickMarkType) => string | null;
+  /** Date half of the crosshair time label. */
+  dateFormatter?: ISymbolDateTimeFormatter;
+  /** Clock half of the crosshair time label (intraday resolutions). */
+  timeFormatter?: ISymbolDateTimeFormatter;
   [key: string]: unknown;
+}
+
+/** TradingView `custom_timezones` entry: an extra timezone id that displays as an IANA zone. */
+export interface CustomAliasedTimezone {
+  /** Id accepted by `timezone` and `setTimezone()`. */
+  id: string;
+  /** IANA zone the id displays as. */
+  alias: string;
+  /** Name for timezone menus; defaults to the alias city. */
+  title?: string;
 }
 
 // ── Options ─────────────────────────────────────────────────────────────────
@@ -124,6 +155,8 @@ export interface ChartingLibraryWidgetOptions {
   autosize?: boolean;
   fullscreen?: boolean;
   timezone?: Timezone | "exchange";
+  /** Extra timezone ids (aliases of IANA zones) accepted by `timezone` and `setTimezone()`. */
+  custom_timezones?: CustomAliasedTimezone[];
   custom_font_family?: string;
   loading_screen?: LoadingScreenOptions;
   overrides?: ChartOverrides;
@@ -139,7 +172,8 @@ export interface ChartingLibraryWidgetOptions {
    * TradingView drop-in custom formatters. Raze honours
    * `priceFormatterFactory` for every on-canvas price label (axis, last price,
    * OHLC legend, crosshair, shape tags). Return `null` from the factory to use
-   * `raze.format_price` or the built-in formatter.
+   * `raze.format_price` or the built-in formatter. `tickMarkFormatter`,
+   * `dateFormatter` and `timeFormatter` shape the time-axis and crosshair labels.
    */
   custom_formatters?: CustomFormatters;
   /** Raze-charts chrome configuration (ignored by the real TradingView library). */

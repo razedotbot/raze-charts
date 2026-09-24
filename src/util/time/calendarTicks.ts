@@ -152,7 +152,8 @@ function assertStep(unit: TickUnit, step: number): void {
   }
 }
 
-function assertWeekStart(weekStart: number): void {
+/** @internal Shared validators (also used by FinancialTimeAxis). */
+export function assertWeekStart(weekStart: number): void {
   if (!Number.isInteger(weekStart) || weekStart < 0 || weekStart > 6) {
     throw new RangeError(`weekStart must be an integer from 0 (Sunday) to 6 (Saturday); received ${weekStart}.`);
   }
@@ -250,6 +251,11 @@ function nextBoundary(wallMs: number, unit: TickUnit, step: number): number {
  * example the local Monday 00:00 of its week or the first of its quarter.
  * A local midnight that does not exist (a DST gap) resolves forward. Day
  * steps above 1 count days of the month (see {@link floorWall}).
+ *
+ * Sub-day periods inside the hour repeated when clocks fall back belong to
+ * the pass that contains `utcMs`: in New York on 3 Nov 2024, 06:30Z (01:30
+ * EST, the second 01:30) floors to the hour at 06:00Z (01:00 EST), not to
+ * 05:00Z (01:00 EDT) an hour earlier.
  */
 export function floorToCalendar(
   utcMs: number,
@@ -263,6 +269,12 @@ export function floorToCalendar(
   const tz = typeof zone === "object" && zone !== null ? zone : getTimeZone(zone);
   if (!Number.isFinite(utcMs)) return NaN;
   const floored = floorWall(tz.toWall(utcMs), unit, step, weekStart);
+  if (UNIT_MS[unit] < DAY_MS && tz.fixedOffset === null) {
+    // A repeated wall time has two instants; the later one starts the period
+    // when it is not after the instant (the second pass through the hour).
+    const later = tz.fromWall(floored, "later");
+    if (later <= utcMs && tz.toWall(later) === floored) return later;
+  }
   const utc = tz.fromWall(floored, "compatible");
   // Defensive: a period start resolved forward out of a DST gap must never
   // lie after the instant it contains.
@@ -548,11 +560,16 @@ interface Selector {
   labeler: TickLabeler;
 }
 
-function makeSelector(options: TickSelectionOptions): Selector {
-  const minSpacing = options.minSpacing ?? DEFAULT_TICK_SPACING;
+/** @internal */
+export function assertMinSpacing(minSpacing: number): void {
   if (!(minSpacing > 0) || !Number.isFinite(minSpacing)) {
     throw new RangeError(`minSpacing must be a positive number of pixels; received ${minSpacing}.`);
   }
+}
+
+function makeSelector(options: TickSelectionOptions): Selector {
+  const minSpacing = options.minSpacing ?? DEFAULT_TICK_SPACING;
+  assertMinSpacing(minSpacing);
   const maxTicks = options.maxTicks ?? Infinity;
   if (!(maxTicks >= 1)) throw new RangeError(`maxTicks must be at least 1; received ${maxTicks}.`);
   for (const key of ["measure", "format"] as const) {
@@ -707,11 +724,33 @@ function select(s: Selector, candidates: Candidate[], extent: Extent): Candidate
   if (rejectedFrom < weights.length && accepted.length < s.maxTicks) {
     const refused = weights.slice(rejectedFrom).map((w) => groups.get(w)!);
     // Room for two ticks means two ticks: a lone label cannot show a scale.
-    const wanted = Math.min(2, Math.floor((extent[1] - extent[0]) / s.minSpacing));
+    const wanted = Math.min(2, Math.floor((extent[1] - extent[0]) / s.minSpacing), s.maxTicks);
     if (accepted.length < wanted) accepted = fillSparse(s, accepted, refused, wanted);
+    if (accepted.length < wanted) accepted = spreadOut(s, weights.map((w) => groups.get(w)!), wanted) ?? accepted;
     accepted = fillHoles(s, accepted, refused, extent);
   }
   return accepted;
+}
+
+/**
+ * Last resort for a narrow axis where one heavy tick in the middle blocks
+ * every neighbour (a 2030 label on a 65 px axis of ten years, with 2026 and
+ * 2034 each 26 px away). Pool the levels heaviest first and pick ticks left
+ * to right, which fits the most labels a pool allows; the first pool that
+ * yields `wanted` ticks wins. Returns `null` when no pool does.
+ */
+function spreadOut(s: Selector, groups: Candidate[][], wanted: number): Candidate[] | null {
+  let pool: Candidate[] = [];
+  for (const group of groups) {
+    pool = mergeByX(pool, group);
+    const out: Candidate[] = [];
+    for (const c of pool) {
+      if (out.length >= s.maxTicks) break;
+      if (fits(s, out, c)) out.push(c);
+    }
+    if (out.length >= wanted) return out;
+  }
+  return null;
 }
 
 /**
@@ -882,6 +921,11 @@ export function calendarTicks(options: CalendarTickOptions): CalendarTick[] {
  * Every boundary in `[lo, hi]` of the rungs whose nominal spacing is at
  * least `minSpacing / depth` pixels, sorted by x. Each boundary carries the
  * weight of the heaviest rung it sits on.
+ *
+ * Levels are generated coarsest first and only whole: when the next finer
+ * rung would push the total past {@link MAX_CANDIDATES} it (and every finer
+ * rung) is left out. A very wide axis therefore loses its finest fallback
+ * rungs, never the right-hand part of its heavier ticks.
  */
 function rangeCandidates(s: Selector, zone: TimeZone, lo: number, hi: number, width: number, depth: number): Candidate[] {
   const pxPerMs = width / (hi - lo);
@@ -897,19 +941,16 @@ function rangeCandidates(s: Selector, zone: TimeZone, lo: number, hi: number, wi
   const pad = hi - lo >= 2 * DAY_MS ? DAY_MS : 0;
   const wallFrom = lo + Math.min(offLo, offHi) - pad;
   const wallTo = hi + Math.max(offLo, offHi) + pad;
-  for (let li = first; li < TICK_LEVELS.length; li++) {
+  for (let li = TICK_LEVELS.length - 1; li >= first; li--) {
     const level = TICK_LEVELS[li]!;
+    // Upper bound on this rung's boundaries (twice per repeated hour at most).
+    const estimate = (wallTo - wallFrom) / level.nominalMs + 3;
+    if (byTime.size + estimate > MAX_CANDIDATES) break;
     const subDay = UNIT_MS[level.unit] < DAY_MS;
-    let b = floorWall(wallFrom, level.unit, level.step, s.weekStart);
-    for (let guard = 0; b <= wallTo && guard < MAX_CANDIDATES; guard++, b = nextBoundary(b, level.unit, level.step)) {
+    for (let b = floorWall(wallFrom, level.unit, level.step, s.weekStart); b <= wallTo; b = nextBoundary(b, level.unit, level.step)) {
       for (const utc of instantsForWall(zone, b, subDay)) {
-        if (!(utc >= lo && utc <= hi)) continue;
-        const existing = byTime.get(utc);
-        if (existing) {
-          if (level.weight > existing.weight) existing.weight = level.weight;
-          continue;
-        }
-        if (byTime.size >= MAX_CANDIDATES) break;
+        // Coarser rungs were generated first, so a shared instant keeps its heavier weight.
+        if (!(utc >= lo && utc <= hi) || byTime.has(utc)) continue;
         const wall = zone.toWall(utc);
         byTime.set(utc, { time: utc, wall, prevWall: wall - 1, x: (utc - lo) * pxPerMs, weight: level.weight, index: -1, label: null, width: 0 });
       }
@@ -978,9 +1019,12 @@ export function barTicks(options: BarTickOptions): CalendarTick[] {
   const zone = typeof options.timeZone === "object" && options.timeZone !== null
     ? options.timeZone
     : getTimeZone(options.timeZone);
+  if (!Number.isFinite(options.from) || !Number.isFinite(options.to)) {
+    throw new RangeError(`barTicks needs a finite logical range; received [${options.from}, ${options.to}].`);
+  }
   const start = Math.max(0, Math.floor(options.from));
   const end = Math.min(bars.length - 1, Math.ceil(options.to));
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
+  if (end < start) return [];
 
   // One counting pass decides which weights can matter. A level with more
   // candidates than three times the axis capacity is far too dense to label,

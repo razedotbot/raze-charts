@@ -196,8 +196,9 @@ one is told apart from a duplicate by its UTC time and is weighted like the
 first, so the hour is labelled twice, as on a continuous axis. It never
 weighs a day, so the date is not repeated.
 
-The core is not wired into either runtime yet, so it costs nothing today.
-Adopting it will. Measured with the `build.mjs` settings and gzip level 9,
+The financial widget draws its time axis, crosshair time and session breaks
+through the core (see below); native `/chart` adopts `calendarTicks` in
+W1B-01. The cost of adopting it, measured with the `build.mjs` settings and gzip level 9,
 and net of the legacy tick code each runtime removes (about 0.4 KiB):
 
 | Entry | Core it pulls in | As shipped | Fully minified |
@@ -211,6 +212,25 @@ whitespace in the native artifact would drop its PURE annotations, which are
 part of its tree-shaking contract. Those budgets therefore have to rise when
 the core is adopted: native to at least 49 KiB and the root widget to at
 least 60 KiB, before any other growth in those packages.
+
+#### The widget's time axis
+
+`src/engine/paint/axes.ts` binds one `FinancialTimeAxis` to each chart
+context. Every frame it resolves the display zone from the live
+`context.timezone` seam (`chart.setTimezone()`, seeded from
+`options.timezone`): `"exchange"` or no setting follows
+`symbolInfo.timezone`, and `custom_timezones` ids map to their IANA alias. An
+unknown zone from options or the datafeed warns once and shows UTC instead of
+throwing mid-paint; `setTimezone()` rejects it with a `RangeError` up front.
+Ticks come from `computeTimeAxisTicks()`: pixels per bar decide the density
+(an 80 px minimum between labels, never the wall-clock span, so overnight and
+weekend gaps do not thin the axis), labels are measured so they never
+overlap, and label centres stay inside the plot so no text reaches the corner
+cell (`axisChromeRect`). Dates among times, months among days and years are
+drawn semi-bold. The ticks are cached until the bars, the view, the zone or the
+locale change, so pointer-only repaints reuse them. The crosshair time label,
+`custom_formatters.tickMarkFormatter` / `dateFormatter` / `timeFormatter`, and
+`TimeIndex.sessionBreaks({ timeZone })` use the same zone.
 
 ### Async ownership
 

@@ -1,6 +1,6 @@
 // The per-chart API returned by widget.activeChart() and widget.chart(index).
 
-import type { EntityId, ISubscription, ResolutionString } from "./common";
+import type { EntityId, ISubscription, ResolutionString, Timezone } from "./common";
 import type { CreateShapeOptions, ILineDataSourceApi, ShapePoint } from "./shapes";
 import type {
   BracketOrderOptions,
@@ -49,4 +49,35 @@ export interface IChartWidgetApi {
   symbol(): string;
   executeActionById?(actionId: "undo" | "redo" | "magnet" | string): void;
   createCompare?(symbol: string): Promise<EntityId>;
+  /** Display timezone setting: an IANA id, `"exchange"` (the symbol's zone) or a `custom_timezones` id. */
+  timezone(): string;
+  /**
+   * Show the time axis, crosshair and session breaks in another zone and
+   * repaint. Throws a RangeError with guidance for an unknown zone.
+   */
+  setTimezone(timezone: Timezone | "exchange"): void;
+  /** Fires `(timezone, previous)` after setTimezone() changes the setting. */
+  onTimezoneChanged(): ISubscription<(timezone: string) => void>;
+  /** TradingView's timezone API for this chart. */
+  getTimezoneApi(): ITimezoneApi;
+}
+
+// ── Timezone API ────────────────────────────────────────────────────────────
+/** A display timezone choice. */
+export interface TimezoneInfo {
+  /** IANA id, `"exchange"`, or a `custom_timezones` id. */
+  id: string;
+  /** Human-readable name, for example "(UTC-05:00) New York". */
+  title: string;
+  /** Current UTC offset in minutes (east positive), when known. */
+  offset?: number;
+}
+
+export interface ITimezoneApi {
+  /** Every zone setTimezone() accepts: "exchange", UTC, custom_timezones ids and the IANA zones Intl knows. */
+  availableTimezones(): TimezoneInfo[];
+  /** The current setting, with its title and current offset. */
+  getTimezone(): TimezoneInfo;
+  setTimezone(timezone: Timezone | "exchange"): void;
+  onTimezoneChanged(): ISubscription<(timezone: string) => void>;
 }

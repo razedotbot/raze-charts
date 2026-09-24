@@ -67,7 +67,7 @@ export type {
 // ── Data ────────────────────────────────────────────────────────────────────
 export { DataManager } from "./data/DataManager";
 export { TimeIndex } from "./data/TimeIndex";
-export type { TimePoint } from "./data/TimeIndex";
+export type { SessionBreakOptions, TimePoint, WallClockZone } from "./data/TimeIndex";
 export { createDatafeed, defineDataSource } from "./data/dataSource";
 export type {
   DefineDataSourceOptions,

@@ -348,6 +348,38 @@ new widget({
 Percent-scale ticks keep percent notation. Overlay studies may still own their
 legend value through `StudyDefinition.formatValue`.
 
+### Time zones and time labels
+
+`timezone` sets the zone of the time-axis labels, the crosshair time and the
+session breaks: an IANA zone, a fixed offset such as `"+05:30"`, `"exchange"`
+for the symbol's `timezone`, or an id from `custom_timezones`. Labels are
+DST-correct and calendar-aligned, and their density follows the pixels per
+bar, so gapped equity sessions stay readable. Daily and coarser bars keep
+their trading date in every zone.
+
+```ts
+const tzChart = new widget({
+  // ...required widget options
+  timezone: "America/New_York",
+  custom_timezones: [{ id: "desk", alias: "Europe/London", title: "Trading desk" }],
+  custom_formatters: {
+    // `date` carries the local time in its UTC fields; null keeps the default label.
+    tickMarkFormatter: (date, type) =>
+      type === "Year" ? `'${String(date.getUTCFullYear()).slice(2)}` : null,
+  },
+});
+
+tzChart.onChartReady(() => {
+  const chart = tzChart.activeChart();
+  chart.onTimezoneChanged().subscribe(null, (zone) => console.log("timezone", zone));
+  chart.setTimezone("Asia/Tokyo"); // throws a RangeError for an unknown zone
+});
+```
+
+`dateFormatter` and `timeFormatter` replace the two halves of the crosshair
+time label the same way. An unknown zone in the options or in
+`symbolInfo.timezone` warns once and shows UTC.
+
 The root also exports `DataManager`, `TimeIndex`, `ChartEngine`,
 `ChartRenderer`, `ShapeStore`, `TradingStore`, `StudyStore`, indicator math, formatting and
 resolution helpers, `defineDataSource` / `createDatafeed`, and the default UI
