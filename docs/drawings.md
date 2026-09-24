@@ -30,8 +30,10 @@ Conventions shared by every tool:
 - `linestyle` uses TradingView numbering: `0` solid, `1` dotted, `2` dashed,
   `3` large dashed and `4` sparse dotted. Dash lengths scale with `linewidth`.
 - An empty or unset colour follows the theme. Lines use the
-  `drawingDefault` token (`#2962ff`), which UI-created and API-created
-  drawings share. Text uses `labelText`.
+  `drawingDefault` token (`#2962ff`) and text uses `labelText`. Drawings
+  created through the API use the token now. Drawings created from the
+  toolbar still get an explicit colour (see Current limits), so the two
+  share one default colour only once the drafting interaction reads the token.
 - `transparency` runs from `0` (opaque) to `100` (invisible), as in TradingView.
 - Every drawing is clipped to the price plot. Rays and extended lines are
   clipped exactly at the plot edges (Liang-Barsky), so they stay visible at
@@ -39,7 +41,8 @@ Conventions shared by every tool:
 - Everything a tool paints can be hit: the extensions of rays and extended
   lines, every fib level line, a text label's measured box (never the empty
   space next to it) and a filled rectangle's interior.
-- Handles appear only while a drawing is hovered or selected. They are rings
+- Handles appear only while a drawing is hovered or selected, and hover
+  handles clear when the pointer leaves the chart. They are rings
   filled with the pane background and outlined in the drawing's colour. A
   selected drawing gets larger handles and a soft halo in its own colour.
 - Drawings paint in store z order (`zOrder`, then creation order) whatever
@@ -124,14 +127,26 @@ defineDrawingTool({
 - `hitTest` must hit what `paint` draws. The runtime publishes it as
   `ShapeHit.hitTest` with the drawing's `z`, so gestures can hit-test
   topmost-first against the geometry of the last frame.
-- The optional hooks are `handles` (defaults to the anchors), `constrain`
-  (adjusts a dragged or drafted anchor), `validateProps` and `describe`.
-- Registration throws a `TypeError` that names the problem. That covers an
-  invalid id, an id or alias that is already registered, icon markup with
-  scripts, event handlers, links or `url()`, a bad anchor spec, missing
+- The optional hooks are `handles` (defaults to the anchors) and `constrain`
+  (adjusts a dragged or drafted anchor). The contract also declares
+  `validateProps` and `describe`, but nothing calls them yet, and registering
+  a tool that defines either one logs a warning (see Current limits).
+- Registration throws a `TypeError` that names the problem. That covers a
+  missing, non-string or invalid id or alias, an id or alias that is already
+  registered, an icon outside the allowlist below, a bad anchor spec, missing
   `paint`/`hitTest`, and property defaults that do not match their field type.
   Registering an identical definition again (the same object, or the same
   field values) does nothing.
+- The sidebar inserts `icon` as trusted markup, so it is checked against an
+  allowlist, not a denylist. An icon is one `<svg>…</svg>` made only of `svg`,
+  `g`, `path`, `circle`, `ellipse`, `rect`, `line`, `polyline`, `polygon`,
+  `defs`, `linearGradient`, `radialGradient`, `stop`, `clipPath` and `mask`,
+  with geometry and presentation attributes (`viewBox`, `d`, `fill`,
+  `stroke-*`, `transform`, `opacity` and similar). Attributes are separated by
+  whitespace, and values contain no `<`, `>`, `&` or `\`. `url()` may only name
+  a fragment of the icon itself, as in `url(#gradient)`. Anything else is
+  rejected: event handlers, `style`, links, `use`, `script`, `foreignObject`,
+  comments, CDATA, and a `/` or a quote between attributes.
 - Development reloads (HMR) run your module again and build a new definition
   with new functions, which would throw as an id that is already registered.
   Pass `{ replace: true }` to swap it in place:
@@ -155,3 +170,14 @@ Other registry functions: `getDrawingTool(idOrAlias)`, `listDrawingTools()`,
   Once created, they select, drag, undo and save/load like built-ins.
 - Free-form tools (`anchors: { min, finish }`) collect points, but finishing
   them with a double-click or Enter depends on the drafting interaction.
+- Drawings created from the toolbar are still committed with an explicit
+  `linecolor` (`#66d89e`, or `#f5a623` for a fib) rather than the
+  `drawingDefault` token. Until the drafting interaction reads the token, set
+  `drawings.defaultColor` for API drawings and restyle toolbar drawings through
+  their properties if the two must match.
+- `validateProps` and `describe` are declared by the contract, but nothing
+  calls them yet. `createShape()` and `load()` pass props to `paint()`
+  unvalidated, and the objects tree names drawings by their tool id.
+  Registering a tool that defines either hook logs a warning that says so.
+  Until the store validates props, check untrusted props before you pass them
+  in, and write `paint()` to tolerate any value.

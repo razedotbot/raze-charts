@@ -4,13 +4,17 @@
 // built-in tools are bundled from source and exercised against a synthetic
 // FinanceView and a recording canvas context, so every assertion is about
 // geometry and paint calls rather than pixels:
-//   - registry validation, aliases, defaults and anchor counts;
+//   - registry validation (string ids and aliases, the icon allowlist against
+//     every HTML attribute separator), aliases, defaults and anchor counts,
+//     and the warning for contract hooks nothing calls yet;
 //   - hit geometry matches paint (ray/extended extensions, fib levels, text
 //     glyph boxes, filled rectangle interiors);
 //   - Liang-Barsky clipping reaches the plot from anchors far off-screen;
 //   - line style/width, rectangle fill, text style, TradingView fib direction,
 //     the formatted measure label, theme tokens and contrast;
-//   - handles only on hover/selection, store z order, queued axis tags;
+//   - handles only on hover (while the pointer is on the canvas) or
+//     selection, store z order, queued axis tags, and no hit target for a
+//     horizontal line without a price;
 //   - an external 3-anchor tool drafted with 3 clicks, dragged by a handle,
 //     undone, and round-tripped through the store snapshot (the widget's
 //     save()/load() and the objects tree are covered in a real browser by
@@ -194,8 +198,52 @@ const valid = { id: "probe_tool", title: "Probe", icon: triangleIcon, anchors: 2
 throwsLike(() => D.defineDrawingTool({ ...valid, id: "Bad Id" }), /id must match/, "invalid tool ids are rejected with the allowed pattern");
 throwsLike(() => D.defineDrawingTool({ ...valid, id: "trend_line" }), /already used by "trend_line"/, "built-in ids cannot be re-registered");
 throwsLike(() => D.defineDrawingTool({ ...valid, aliases: ["extended"] }), /already used by "extended_line"/, "aliases cannot shadow an existing alias");
-throwsLike(() => D.defineDrawingTool({ ...valid, icon: '<svg onload="alert(1)"></svg>' }), /icon must be/, "icons with event handlers are rejected");
-throwsLike(() => D.defineDrawingTool({ ...valid, icon: '<svg><script>x()</script></svg>' }), /icon must be/, "icons with scripts are rejected");
+throwsLike(() => D.defineDrawingTool({ ...valid, id: undefined }), /id must match/, "a definition without an id is rejected (not registered as \"undefined\")");
+throwsLike(() => D.defineDrawingTool({ ...valid, id: null }), /id must match/, "an id of null is rejected (not registered as \"null\")");
+throwsLike(() => D.defineDrawingTool({ ...valid, aliases: [null] }), /alias "null" must match/, "a non-string alias is rejected");
+throwsLike(() => D.defineDrawingTool({ ...valid, aliases: "probe_alias" }), /aliases must be an array/, "aliases must be an array (a string is not spread into one-letter aliases)");
+assert(
+  !D.listDrawingTools().some((tool) => typeof tool.id !== "string" || !/^[a-z][a-z0-9_]*$/.test(tool.id)) && D.getDrawingTool("undefined") === undefined,
+  "rejected definitions leave nothing behind in the catalogue",
+);
+// Icons are inserted as trusted SVG, so every way the HTML parser starts an
+// attribute or element must be caught, not only the whitespace-separated one.
+const hostileIcons = {
+  "a whitespace-separated handler": '<svg onload="alert(1)"></svg>',
+  "an uppercase handler": '<SVG ONLOAD=alert(1)></SVG>',
+  'a "/"-separated handler on an animation element': "<svg><animate/onbegin=alert(1) attributeName=x dur=1s></svg>",
+  'a "/"-separated handler on a path': '<svg><path/onmouseover="alert(1)" d="M1 1"/></svg>',
+  "a handler glued to a closing quote": '<svg><path d="M1 1"onmouseover="alert(1)"/></svg>',
+  "a handler after a non-HTML whitespace character": '<svg><path d="M1 1" onmouseover="alert(1)"/></svg>',
+  "a script element": "<svg><script>x()</script></svg>",
+  "a style element": "<svg><style>path{fill:url(https://example.com/x)}</style></svg>",
+  "a style attribute": '<svg><path style="fill:red" d="M1 1"/></svg>',
+  "a link": '<svg><a href="javascript:alert(1)"><path d="M1 1"/></a></svg>',
+  "an external use": '<svg><use href="https://example.com/sprite.svg#x"/></svg>',
+  "an xlink:href": '<svg><path xlink:href="https://example.com/x" d="M1 1"/></svg>',
+  "a foreignObject": "<svg><foreignObject><img src=x onerror=alert(1)></foreignObject></svg>",
+  "markup hidden in an attribute value for an HTML-parsed title": '<svg><desc><title><path d="</title><img src=x onerror=alert(1)>"/></title></desc></svg>',
+  "markup inside an attribute value": '<svg><g><path d="</g><img src=x onerror=alert(1)>"/></g></svg>',
+  "a comment": "<svg><!-- x --><path d=\"M1 1\"/></svg>",
+  "CDATA": "<svg><![CDATA[<img src=x onerror=alert(1)>]]></svg>",
+  "an external url() paint": '<svg><path fill="url(https://example.com/x.svg#g)" d="M1 1"/></svg>',
+  "an entity-encoded url()": '<svg><path fill="u&#114;l(https://example.com/x)" d="M1 1"/></svg>',
+  "a CSS-escaped url()": '<svg><path fill="u\\72l(https://example.com/x)" d="M1 1"/></svg>',
+  "markup outside the svg": '<svg></svg><img src=x onerror=alert(1)><svg></svg>',
+  "no svg root": '<path d="M1 1"/>',
+};
+for (const [name, icon] of Object.entries(hostileIcons)) {
+  throwsLike(() => D.defineDrawingTool({ ...valid, id: "probe_icon", icon }), /icon /, `icons with ${name} are rejected`);
+}
+assert(!D.getDrawingTool("probe_icon"), "no hostile icon was registered");
+assert(
+  D.drawingIconProblem(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">'
+      + '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2962ff"/></linearGradient></defs>'
+      + "<g transform='translate(1 1)'><circle cx=9 cy=9 r=3 fill=\"url(#g)\"/><rect x=\"2\" y=\"2\" width=\"4\" height=\"4\" rx=\"1\"/></g></svg>",
+  ) === "",
+  "a static icon with gradients, groups, single-quoted and unquoted values is accepted",
+);
 throwsLike(() => D.defineDrawingTool({ ...valid, anchors: 0 }), /anchors must be/, "anchor counts must be positive");
 throwsLike(() => D.defineDrawingTool({ ...valid, anchors: { min: 2, finish: "never" } }), /anchors must be/, "free-form tools need a finish gesture");
 throwsLike(() => D.defineDrawingTool({ ...valid, paint: undefined }), /paint\(\) and hitTest\(\) are required/, "paint and hitTest are required");
@@ -211,6 +259,21 @@ const probe = D.defineDrawingTool(valid);
 assert(D.defineDrawingTool(valid) === probe && changes === 1, "registering the same definition twice is an idempotent no-op");
 assert(D.removeDrawingTool("probe_tool") && !D.getDrawingTool("probe_tool") && changes === 2, "host tools can be removed and listeners hear about it");
 unsubscribe();
+{
+  // validateProps() and describe() are in the contract but not called yet: registration says so.
+  const before = warnings.length;
+  D.defineDrawingTool({ ...valid, id: "probe_hooks", validateProps: () => [], describe: () => "Probe" });
+  const heard = warnings.slice(before);
+  assert(
+    heard.length === 2
+      && heard.some((w) => w.includes('defineDrawingTool("probe_hooks"): validateProps() is not called yet'))
+      && heard.some((w) => w.includes('defineDrawingTool("probe_hooks"): describe() is not called yet')),
+    "a tool defining validateProps() or describe() is warned that they are not called yet (no silent no-op)",
+  );
+  D.defineDrawingTool(D.getDrawingTool("probe_hooks"));
+  assert(warnings.length === before + 2, "re-registering the same definition does not warn again");
+  D.removeDrawingTool("probe_hooks");
+}
 {
   // Development reloads (HMR) re-run a module and build a new definition with new functions.
   const first = D.defineDrawingTool({ ...valid, id: "probe_reload", aliases: ["probe_reload_alias"] });
@@ -482,10 +545,14 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
   const trend = await add(world, "trend_line", [[10, 100], [20, 150]], { linecolor: "#e91e63" });
   assert(world.paint().ops("arc").length === 0, "an unselected, unhovered drawing paints no handles");
   world.view.hoverShapeId = String(trend.id);
+  world.view.crosshair = { x: xOf(15), y: yOf(125), active: true };
   let arcs = world.paint().ops("arc");
   assert(arcs.length === 2 && arcs.every((call) => call.args[2] === 4), "hover shows the anchor handles");
   assert(world.ctx.ops("fill").filter((c) => c.state.fillStyle === "#ffffff").length === 2, "light theme: the handle fill equals paneBackground");
   assert(world.ctx.ops("stroke").slice(-2).every((c) => c.state.strokeStyle === "#e91e63"), "handles ring in the drawing's colour");
+  // Leaving the canvas clears the crosshair but not hoverShapeId (gestures keep the last hit).
+  world.view.crosshair = { ...world.view.crosshair, active: false };
+  assert(world.paint().ops("arc").length === 0, "a hover left behind when the pointer leaves the canvas shows no handles");
   world.view.hoverShapeId = null;
   world.view.selectedShapeId = String(trend.id);
   const selected = world.paint();
@@ -515,6 +582,21 @@ assert(D.buildTheme({ overrides: { "drawings.labelBackgroundColor": "#ffffff" } 
   assert(world.view.axisTags.length === 0, "showPrice:false hides the tag");
   assert(world.ctx.ops("fillText").some((call) => call.args[0] === "Limit"), "the horizontal line label is painted");
   assert(hitAt(world, bottom, 700, yOf(125))?.kind === "body" && hitAt(world, bottom, 795 - 6, yOf(125) - 8)?.kind === "label", "horizontal lines hit on the line and on their label");
+}
+{
+  // A horizontal line without a price paints nothing. Gestures match
+  // horizontal lines by y alone, so publishing one (at a fallback y) would
+  // hover and select an invisible line near the bottom of the plot.
+  const world = makeWorld();
+  const priceless = await world.shapes.createPoints([{ time: timeOf(50) }], { shape: "horizontal_line", overrides: {} });
+  const nan = await add(world, "horizontal_line", [[60, Number.NaN]]);
+  const ctx = world.paint();
+  assert(strokes(ctx).length === 0 && world.view.axisTags.length === 0, "a horizontal line without a finite price paints nothing");
+  assert(world.view.shapeScreen.length === 0, "and publishes no hit target");
+  assert(
+    hitAt(world, world.shapes.get(priceless), 400, 400) === null && hitAt(world, nan, 400, 400) === null,
+    "and cannot be hit at the plot bottom",
+  );
 }
 
 // ── Draft ghost ───────────────────────────────────────────────────────────────

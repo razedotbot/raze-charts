@@ -23,11 +23,40 @@ export interface RegisteredDrawingTool extends Omit<DrawingToolDefinition<Record
 const ID = /^[a-z][a-z0-9_]*$/;
 
 /**
- * Icon markup is inserted as trusted SVG by the sidebar, so anything that can
- * run script or load a resource is rejected: script-capable elements, event
- * handlers, links and CSS url()s.
+ * Icon markup is inserted as trusted SVG by the sidebar, so it is checked
+ * against an allowlist, not a denylist: static shape and paint elements only,
+ * presentation attributes separated by HTML whitespace, and values with no
+ * markup, entities or CSS escapes. url() may only name the icon's own
+ * fragments (`url(#gradient)`). Anything this tokenizer does not recognise
+ * rejects the icon: a comment, CDATA, a "/" or a quote between attributes, an
+ * unknown element or attribute. So the HTML parser never sees an element or
+ * attribute (an event handler, a link) that this check did not.
  */
-const UNSAFE_ICON = /<\s*(script|foreignobject|iframe|object|embed|image|use|style|a)\b|\son\w+\s*=|(href|src)\s*=|javascript:|url\s*\(/i;
+const ICON_ELEMENTS = /^(svg|g|path|circle|ellipse|rect|line|polyline|polygon|defs|lineargradient|radialgradient|stop|clippath|mask)$/i;
+// Geometry and presentation attributes. The prefix families (fill-*, stroke-*,
+// stop-*, clip-*, *units) hold only paint and layout properties.
+const ICON_ATTRIBUTES = /^(xmlns(:xlink)?|version|viewbox|preserveaspectratio|width|height|[xy][12]?|[cfr][xy]|r|d|points|pathlength|transform|id|class|role|aria-hidden|focusable|opacity|color|mask|offset|(fill|stroke|stop|clip)(-[a-z]+)?|vector-effect|shape-rendering|gradienttransform|spreadmethod|[a-z]*units)$/i;
+// Tag and attribute grammar with HTML's own whitespace ([\t\n\f\r ]), so a
+// character the HTML tokenizer does not treat as a separator never splits a
+// token here either.
+const ICON_TAG = /<\/?([a-z][a-z0-9]*)((?:[\t\n\f\r ]+[a-z][a-z0-9:-]*(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"[^"]*"|'[^']*'|[^\t\n\f\r "'=<>`]+))?)*)[\t\n\f\r ]*\/?>/gi;
+const ICON_ATTRIBUTE = /([a-z][a-z0-9:-]*)(?:[\t\n\f\r ]*=[\t\n\f\r ]*("[^"]*"|'[^']*'|[^\t\n\f\r "'=<>`]+))?/gi;
+
+/** Why icon markup is unsafe or malformed, or "" when it is a static inline SVG. */
+export function drawingIconProblem(icon: unknown): string {
+  if (typeof icon !== "string" || !/^\s*<svg[\t\n\f\r >][\s\S]*<\/svg>\s*$/i.test(icon)) return "must be one inline <svg>…</svg>";
+  let problem = "";
+  const text = icon.replace(ICON_TAG, (_tag, element: string, attributes: string) => {
+    if (!ICON_ELEMENTS.test(element)) problem ||= `<${element}> is not allowed`;
+    for (const [, name, value = ""] of attributes.matchAll(ICON_ATTRIBUTE)) {
+      // The value keeps its quotes, which never contain the characters checked here.
+      if (!ICON_ATTRIBUTES.test(name!)) problem ||= `attribute "${name}" is not allowed`;
+      else if (/[<>&\\]|url\s*\((?!\s*['"]?#)/i.test(value)) problem ||= `"${name}" has <, >, &, \\ or an external url()`;
+    }
+    return "";
+  });
+  return problem || (text.includes("<") ? "has a comment, CDATA or a malformed tag (separate attributes with spaces)" : "");
+}
 
 const tools = new Map<string, RegisteredDrawingTool>();
 const aliases = new Map<string, string>();
@@ -86,11 +115,12 @@ function fieldProblem(field: DrawingPropField): string {
 export function drawingToolProblem(def: RegisteredDrawingTool, replacing?: string): string {
   if (!def || typeof def !== "object") return "expects a tool definition object";
   const spec = def.anchors;
-  if (!ID.test(def.id)) return `id must match ${ID} (it is stored in saved layouts)`;
+  // typeof first: ID.test() would coerce a missing id to the string "undefined", which matches.
+  if (typeof def.id !== "string" || !ID.test(def.id)) return `id must match ${ID} (it is stored in saved layouts)`;
+  if (def.aliases !== undefined && !Array.isArray(def.aliases)) return "aliases must be an array of tool ids";
   if (typeof def.title !== "string" || !def.title) return "title must be a non-empty string";
-  if (typeof def.icon !== "string" || !/^\s*<svg[\s>][\s\S]*<\/svg>\s*$/i.test(def.icon) || UNSAFE_ICON.test(def.icon)) {
-    return "icon must be one static inline <svg> (no scripts, handlers, links or url())";
-  }
+  const iconIssue = drawingIconProblem(def.icon);
+  if (iconIssue) return `icon ${iconIssue} (icons are static SVG: no scripts, handlers, links or styles)`;
   if (typeof spec === "number"
     ? !(Number.isInteger(spec) && spec >= 1)
     : !(Number.isInteger(spec?.min) && spec.min >= 1
@@ -105,7 +135,7 @@ export function drawingToolProblem(def: RegisteredDrawingTool, replacing?: strin
     if (issue) return `props.${key}: ${issue}`;
   }
   for (const name of [def.id, ...(def.aliases ?? [])]) {
-    if (!ID.test(name)) return `alias "${name}" must match ${ID}`;
+    if (typeof name !== "string" || !ID.test(name)) return `alias "${String(name)}" must match ${ID}`;
     const owner = tools.get(name)?.id ?? aliases.get(name);
     if (owner && owner !== replacing) {
       return `"${name}" is already used by "${owner}"; tool ids are page-wide, so prefix yours (for example "acme_arrow")`
@@ -114,6 +144,12 @@ export function drawingToolProblem(def: RegisteredDrawingTool, replacing?: strin
   }
   return "";
 }
+
+/** Optional contract hooks the runtime does not call yet, with what that means for a host. */
+const UNWIRED_HOOKS = [
+  ["validateProps", "props reach paint() unvalidated"],
+  ["describe", "the objects tree shows the tool id"],
+] as const;
 
 function notify(): void {
   for (const listener of [...listeners]) listener();
@@ -159,6 +195,12 @@ export function defineDrawingTool<TProps extends object>(
     for (const alias of current?.aliases ?? []) aliases.delete(alias);
     add(erased);
     notify();
+    // Declared by the contract, but nothing calls them in this release: say so instead of silently ignoring them.
+    for (const [hook, effect] of UNWIRED_HOOKS) {
+      if (typeof erased[hook] === "function") {
+        console.warn(`[raze-charts] defineDrawingTool("${id}"): ${hook}() is not called yet (${effect}); see docs/drawings.md.`);
+      }
+    }
   }
   return tools.get(id) as unknown as DrawingToolDefinition<TProps>;
 }

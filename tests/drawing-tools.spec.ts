@@ -76,8 +76,18 @@ test("handles show only while a drawing is hovered or selected", async ({ page }
   await page.waitForTimeout(100);
   const hovered = await pixels(page, MAGENTA);
   expect(hovered.count).toBeGreaterThan(idle.count + 20);
-  // Somewhere empty inside the plot (leaving the canvas keeps the last hover).
+  // Leaving the canvas straight from the drawing (onto the chart's chrome) clears the handles.
   const box = (await page.locator(".raze-chart-root canvas").first().boundingBox())!;
+  const outside = { x: box.x + box.width / 2, y: Math.max(1, box.y - 6) };
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName, outside)).not.toBe("CANVAS");
+  await page.mouse.move(outside.x, outside.y);
+  await page.waitForTimeout(100);
+  const gone = await pixels(page, MAGENTA);
+  expect(Math.abs(gone.count - idle.count)).toBeLessThanOrEqual(4);
+  // Hover again, then move somewhere empty inside the plot.
+  await page.mouse.move(idle.x, idle.y);
+  await page.waitForTimeout(100);
+  expect((await pixels(page, MAGENTA)).count).toBeGreaterThan(idle.count + 20);
   const empty = { x: box.x + 30, y: box.y + box.height * 0.5 };
   await page.mouse.move(empty.x, empty.y);
   await page.waitForTimeout(100);

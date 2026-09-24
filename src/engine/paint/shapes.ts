@@ -258,15 +258,22 @@ export function drawShapes(ctx: CanvasRenderingContext2D, v: FinanceView): void 
     const geometry = geometryOf(frame, shape.points, v.priceMin);
     const env = paint(ctx, v, frame, tool, state, geometry, {
       selected: v.selectedShapeId === id,
-      hovered: v.hoverShapeId === id,
+      // hoverShapeId outlives the pointer (leaving the canvas only clears the
+      // crosshair), so a hover without an active pointer shows no handles.
+      hovered: v.hoverShapeId === id && v.crosshair.active,
       draft: false,
     });
     const anchors = geometry.anchors.filter((a): a is ScreenPoint => !!a);
     const price = shape.points[0]?.price;
+    const horizontal = tool.id === "horizontal_line";
+    // Gestures match a horizontal line by its y alone, so one without a price
+    // (painted as nothing) publishes no target rather than a fallback y that
+    // would hover and select an invisible line.
+    if (horizontal && !Number.isFinite(price)) return;
     v.shapeScreen.push({
       shape,
       // Horizontal lines keep their line y: gestures match them by y proximity.
-      y: tool.id === "horizontal_line" && Number.isFinite(price)
+      y: horizontal
         ? frame.priceToY(price!)
         : anchors.length ? anchors.reduce((sum, a) => sum + a.y, 0) / anchors.length : frame.plot.y + frame.plot.h / 2,
       hit: "body",
