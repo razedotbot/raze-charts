@@ -42,7 +42,7 @@ interface ChartLayoutSnapshot
   logScale: boolean
   magnet?: boolean | undefined
   percentScale: boolean
-  studies: { id?: string | undefined; name: string; length: number; color: string; lock?: boolean | undefined; forceOverlay?: boolean | undefined; inputs?: Record<string, number | string> | undefined; }[]
+  studies: { id?: string | undefined; name: string; length: number; color: string; lock?: boolean | undefined; forceOverlay?: boolean | undefined; inputs?: Record<string, number | string> | undefined; plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined; }[]
   symbol: string
   version: 1
   visibleRange: { from: number; to: number; }
@@ -345,11 +345,18 @@ interface StudyPaneLevel
   axisLabel?: boolean | undefined
   dashed?: boolean | undefined
   value: number
+interface StudyPlotStyleOverride
+  color?: string | undefined
+  lineWidth?: number | undefined
+  visible?: boolean | undefined
+type StudyPlotStyles = { readonly [x: string]: Readonly<StudyPlotStyleOverride>; }
 interface StudySeries
   color?: string | undefined
+  lineWidth?: number | undefined
   name?: string | undefined
   style?: StudySeriesStyle | undefined
   values: (null | number)[]
+  visible?: boolean | undefined
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
 type SubscribeBarsCallback = (bar: Bar) => void
 type ThemeName = 'dark' | 'light'

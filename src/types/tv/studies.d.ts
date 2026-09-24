@@ -18,6 +18,10 @@ export interface StudySeries {
   style?: StudySeriesStyle;
   color?: string;
   name?: string;
+  /** Line width in CSS pixels (default 1.25). */
+  lineWidth?: number;
+  /** `false` skips painting the plot; it still computes. */
+  visible?: boolean;
 }
 export interface StudyInputs {
   length: number;

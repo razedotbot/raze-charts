@@ -1,5 +1,5 @@
 import { xForIndex, yForPrice } from "../plotScale";
-import type { StudyDefinition } from "../../types/charting_library";
+import type { StudyDefinition, StudySeries } from "../../types/charting_library";
 import type { FinanceView } from "./view";
 
 export function strokeStudyLine(
@@ -10,6 +10,7 @@ export function strokeStudyLine(
   yFor: (val: number) => number,
   clipTop: number,
   clipBot: number,
+  lineWidth = 1.25,
 ): void {
   const bars = v.context.bars;
   if (!bars.length || values.length === 0) return;
@@ -22,7 +23,7 @@ export function strokeStudyLine(
   ctx.rect(v.plotL, clipTop, v.plotW, Math.max(1, clipBot - clipTop));
   ctx.clip();
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.25;
+  ctx.lineWidth = lineWidth;
   ctx.lineJoin = "round";
   ctx.beginPath();
   let drawing = false;
@@ -55,12 +56,14 @@ export function drawOverlayStudies(ctx: CanvasRenderingContext2D, v: FinanceView
 function paintStudySeries(
   ctx: CanvasRenderingContext2D,
   v: FinanceView,
-  s: { color: string; values: (number | null)[]; series?: { values: (number | null)[]; style?: string; color?: string }[] },
+  s: { color: string; values: (number | null)[]; series?: StudySeries[] },
   yFor: (val: number) => number,
   clipTop: number,
   clipBot: number,
 ): void {
-  const series = s.series?.length ? s.series : [{ values: s.values, style: "line", color: s.color }];
+  // `visible: false` (a createStudy / studies_overrides plot override) skips the plot.
+  const all: StudySeries[] = s.series?.length ? s.series : [{ values: s.values, style: "line", color: s.color }];
+  const series = all.filter((item) => item.visible !== false);
   const bands = series.filter((item) => item.style === "band");
   if (bands.length >= 2) {
     fillBand(ctx, v, bands[0]!.values, bands[1]!.values, bands[0]!.color || s.color, yFor, clipTop, clipBot);
@@ -70,9 +73,9 @@ function paintStudySeries(
     if (item.style === "histogram") {
       fillHistogram(ctx, v, item.values, color, yFor, clipTop, clipBot);
     } else if (item.style !== "band") {
-      strokeStudyLine(ctx, v, item.values, color, yFor, clipTop, clipBot);
+      strokeStudyLine(ctx, v, item.values, color, yFor, clipTop, clipBot, item.lineWidth);
     } else if (bands.length < 2) {
-      strokeStudyLine(ctx, v, item.values, color, yFor, clipTop, clipBot);
+      strokeStudyLine(ctx, v, item.values, color, yFor, clipTop, clipBot, item.lineWidth);
     }
   }
 }
@@ -158,9 +161,10 @@ export function subPaneRange(v: FinanceView, def: StudyDefinition): { min: numbe
   let lo = Infinity;
   let hi = -Infinity;
   for (const s of v.studies.paneStudies(def)) {
-    const series = s.series?.length ? s.series : [{ values: s.values }];
+    const series: StudySeries[] = s.series?.length ? s.series : [{ values: s.values }];
     const end = Math.min(s.values.length - 1, Math.ceil(to) + 1);
     for (const item of series) {
+      if (item.visible === false) continue;
       for (let i = start; i <= end; i++) {
         const val = item.values[i];
         if (val == null || !Number.isFinite(val)) continue;

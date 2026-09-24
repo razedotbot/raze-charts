@@ -4,11 +4,13 @@
 import {
   widget,
   type ChartActionId,
+  type ChartLayoutSnapshot,
   type ChartingLibraryWidgetOptions,
   type DrawingEventType,
   type EntityId,
   type IChartingLibraryWidget,
   type IChartWidgetApi,
+  type StudyPlotStyles,
   type TradingEventType,
   type TradingLineSnapshot,
   type WidgetListenerError,
@@ -71,6 +73,14 @@ if (false) {
   void chart.createStudy("EMA", false, false, { length: { value: 30 } });
   // @ts-expect-error Options are the TradingView CreateStudyOptions shape.
   void chart.createStudy("EMA", false, false, [30], {}, { disableUndo: "yes" });
+
+  // Per-plot styles: saved with each study in the layout snapshot.
+  const plotStyles: StudyPlotStyles = { 0: { lineWidth: 2 }, signal: { color: "#00ff00", visible: false } };
+  const layout: ChartLayoutSnapshot = instance.save();
+  layout.studies.push({ name: "MACD", length: 26, color: "#2962ff", plotStyles });
+  // @ts-expect-error Plot visibility is a boolean.
+  const badStyles: StudyPlotStyles = { signal: { visible: "no" } };
+  void badStyles;
 
   const interval = chart.onIntervalChanged();
   interval.subscribe(null, (resolution) => void String(resolution));

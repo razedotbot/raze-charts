@@ -35,18 +35,27 @@ globalThis.HTMLElement = window.HTMLElement;
 globalThis.Node = window.Node;
 window.devicePixelRatio = 1;
 
+// Every strokeStyle / fillStyle assigned, and each stroke() with its style and width.
 const strokes = [];
+const fills = [];
+const strokeCalls = [];
 const context2d = new Proxy(
-  { measureText: (value) => ({ width: String(value ?? "").length * 6 }), canvas: {} },
+  {
+    measureText: (value) => ({ width: String(value ?? "").length * 6 }),
+    canvas: {},
+    stroke() { strokeCalls.push(`${String(this.strokeStyle).toLowerCase()}@${this.lineWidth}`); },
+  },
   {
     get: (target, property) => (property in target ? target[property] : () => {}),
     set: (target, property, value) => {
       if (property === "strokeStyle") strokes.push(String(value).toLowerCase());
+      if (property === "fillStyle") fills.push(String(value).toLowerCase());
       target[property] = value;
       return true;
     },
   },
 );
+const resetPaint = () => { strokes.length = 0; fills.length = 0; strokeCalls.length = 0; };
 window.HTMLCanvasElement.prototype.getContext = () => context2d;
 for (const [name, value] of [["clientWidth", 800], ["clientHeight", 420]]) {
   Object.defineProperty(window.HTMLElement.prototype, name, { configurable: true, get: () => value });
@@ -254,6 +263,19 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
     "listener errors are logged, labelled with the view name, routed to the error handler, and the rest still run",
   );
   assert(throws(() => view.subscribe(null, 42), /needs a callback function/), "a consumer view rejects a non-function listener");
+
+  // Internal listeners registered before reportErrorsTo() relabels the
+  // delegate (ChartRenderer's dataChanged listener) report the new label.
+  const early = new Delegate();
+  early.subscribe(null, () => { throw new Error("early bug"); });
+  const earlyReports = [];
+  early.reportErrorsTo((error, label) => earlyReports.push(label), "dataChanged");
+  errors.length = 0;
+  early.fire();
+  assert(
+    earlyReports.join() === "dataChanged" && errors.some((entry) => /\[raze-charts\] dataChanged listener threw/.test(errorText(entry))),
+    "an internal listener added before reportErrorsTo() is reported under the delegate's new label",
+  );
 }
 
 // ── onIntervalChanged: unsubscribeAll(null) keeps the header in sync ───────
@@ -313,6 +335,20 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
     (await rejects(chart.createStudy("EMA", false, false, 30), /inputs must be an object or a positional array/)) instanceof TypeError,
     "a scalar inputs argument rejects with a TypeError",
   );
+  warnings.length = 0;
+  const typo = await chart.createStudy("EMA", false, false, { lenght: 50 });
+  await chart.createStudy("EMA", false, false, { lenght: 50 });
+  assert(
+    studyById(instance, typo)?.length === 9
+      && warnings.filter((text) => /createStudy\("EMA"\): input "lenght" has no effect; EMA inputs: length/.test(text)).length === 1,
+    "a typo'd input on a built-in warns once with the declared inputs instead of being ignored silently",
+  );
+  assert(
+    (await rejects(chart.createStudy("EMA", false, false, { in_0: 30, length: 10 }), /"in_0" and "length" both set input "length" to different values/)) instanceof TypeError,
+    "in_<n> and its named id with different values reject instead of one silently winning",
+  );
+  const same = await chart.createStudy("EMA", false, false, { in_0: 30, length: 30 });
+  assert(studyById(instance, same)?.length === 30, "in_<n> and its named id with the same value are accepted");
   const unknown = await rejects(chart.createStudy("Ichimoku Cloud"), /unknown study: Ichimoku Cloud; available studies: EMA, SMA, RSI/);
   assert(unknown instanceof Error, "an unknown study rejects and lists the available studies");
 
@@ -323,8 +359,12 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
     studyById(instance, flagged)?.length === 7 && lastInputs?.smooth === false && lastInputs?.length === 7,
     "positional inputs follow the declared order (length, then defaults) and booleans reach compute",
   );
+  warnings.length = 0;
   await chart.createStudy("Flagged", false, false, { length: 4, smooth: true, label: "x" });
-  assert(seenFlags.at(-1)?.smooth === true && seenFlags.at(-1)?.label === "x", "boolean and string object inputs are forwarded");
+  assert(
+    seenFlags.at(-1)?.smooth === true && seenFlags.at(-1)?.label === "x" && !warnings.some((text) => /has no effect/.test(text)),
+    "boolean and string object inputs are forwarded; a v1 custom study's undeclared keys are not flagged",
+  );
   const saved = instance.save().studies.find((study) => study.name === "Flagged" && study.length === 4);
   assert(saved?.inputs?.smooth === true, "boolean inputs round-trip through save()");
   instance.remove();
@@ -347,17 +387,65 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
   const both = await chart.createStudy("SMA", false, false, { color: "#00ff00" }, { "plot.color": "#0000ff" });
   assert(studyById(instance, both)?.color === "#0000ff", "an explicit override wins over inputs.color");
 
-  warnings.length = 0;
-  await chart.createStudy("EMA", false, false, [9], { "plot.linewidth": 3, "plot.color": "#abcdef" });
-  await chart.createStudy("EMA", false, false, [9], { "plot.linewidth": 3 });
-  const linewidthWarnings = warnings.filter((text) => /override "plot\.linewidth" has no effect/.test(text));
+  // Per-plot styles: colour, line width and visibility of any plot.
+  resetPaint();
+  const wide = await chart.createStudy("EMA", false, false, [9], { "plot.linewidth": 3, "plot.color": "#abcdef" });
+  flushFrames();
   assert(
-    linewidthWarnings.length === 1 && /\[raze-charts\]/.test(linewidthWarnings[0]) && /plot\.color/.test(linewidthWarnings[0]),
-    "an unsupported override key warns once with the supported key",
+    strokeCalls.includes("#abcdef@3") && studyById(instance, wide)?.plotStyles?.["0"]?.lineWidth === 3,
+    '{"plot.linewidth": 3} strokes the EMA 3px wide and is saved with the study',
   );
   warnings.length = 0;
-  await chart.createStudy("MACD", false, false, undefined, { "plot.color": "#ff0000" });
-  assert(warnings.some((text) => /MACD draws every plot in a fixed colour/.test(text)), "a colour override that cannot paint warns instead of succeeding silently");
+  await chart.createStudy("EMA", false, false, [9], { "plot.transparency": 50 });
+  await chart.createStudy("EMA", false, false, [9], { "plot.transparency": 50, "plot.color.1": "#ffffff" });
+  const unsupported = warnings.filter((text) => /override "plot\.transparency" has no effect/.test(text));
+  assert(
+    unsupported.length === 1 && /\[raze-charts\]/.test(unsupported[0]) && /<plot>\.color", "<plot>\.linewidth", "<plot>\.visible"/.test(unsupported[0])
+      && warnings.some((text) => /override "plot\.color\.1" has no effect: only a plot's first colour/.test(text)),
+    "an unsupported plot property warns once and lists the supported ones",
+  );
+  assert(
+    (await rejects(chart.createStudy("EMA", false, false, [9], { "plot.linewidth": "3" }), /override "plot\.linewidth" must be a positive number/)) instanceof TypeError
+      && (await rejects(chart.createStudy("EMA", false, false, [9], { "plot.visible": "no" }), /override "plot\.visible" must be a boolean/)) instanceof TypeError,
+    "wrong-typed linewidth and visible overrides reject with a TypeError",
+  );
+
+  warnings.length = 0;
+  resetPaint();
+  const redMacd = await chart.createStudy("MACD", false, false, undefined, { "plot.color": "#ff0000" });
+  flushFrames();
+  assert(
+    strokeCalls.some((call) => call.startsWith("#ff0000@")) && !warnings.some((text) => /MACD/.test(text)),
+    "a primary colour override paints the MACD line of a study whose plots have fixed colours",
+  );
+  chart.removeEntity(redMacd);
+  resetPaint();
+  const styledMacd = await chart.createStudy("MACD", false, false, undefined, {
+    "signal.color": "#00ff00",
+    "Signal.linewidth": 3,
+    "hist.visible": false,
+    "plot_0.linewidth": 2,
+  });
+  flushFrames();
+  const macdPainted = () => strokeCalls.includes("#00ff00@3") && strokeCalls.includes("#2962ff@2")
+    && !fills.includes("#66d89e") && !fills.includes("#e57359");
+  assert(macdPainted(), "named and positional plot overrides restyle MACD's Signal and MACD lines and hide its histogram");
+  assert(
+    JSON.stringify(studyById(instance, styledMacd)?.plotStyles)
+      === JSON.stringify({ 0: { lineWidth: 2 }, signal: { color: "#00ff00", lineWidth: 3 }, hist: { visible: false } }),
+    "save() keeps the per-plot styles",
+  );
+  chart.removeEntity(styledMacd);
+  chart.executeActionById("undo");
+  resetPaint();
+  flushFrames();
+  assert(macdPainted(), "undo of a removal restores the study with its plot styles");
+  warnings.length = 0;
+  await chart.createStudy("MACD", false, false, undefined, { "histogram.color": "#ffffff" });
+  assert(
+    warnings.some((text) => /createStudy\("MACD"\): override "histogram\.color" has no effect: MACD has no such plot; plots: MACD, Signal, Hist/.test(text)),
+    "a style for a plot the study does not have warns with the study's plot names",
+  );
   assert(
     (await rejects(chart.createStudy("EMA", false, false, [9], { "plot.color": 5 }), /must be a CSS colour string/)) instanceof TypeError,
     "a non-string colour override rejects",
@@ -395,13 +483,18 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
       "Moving Average Exponential.length": 12,
       "volume.volume.color.0": "#ffffff",
       "relative strength index.plot.linewidth": 2,
+      "relative strength index.plot.transparency": 40,
     },
   });
   assert(
     warnings.some((text) => /studies_overrides\["volume\.volume\.color\.0"\] matches no study/.test(text))
-      && warnings.some((text) => /studies_overrides\["relative strength index\.plot\.linewidth"\] has no effect/.test(text)),
+      && warnings.some((text) => /studies_overrides\["relative strength index\.plot\.transparency"\] has no effect/.test(text)),
     "studies_overrides keys with no effect warn at construction",
   );
+  resetPaint();
+  await chart.createStudy("RSI");
+  flushFrames();
+  assert(strokeCalls.includes("#7e57c2@2"), "a studies_overrides plot.linewidth applies to new RSIs");
   const ema = await chart.createStudy("EMA");
   assert(
     studyById(instance, ema)?.color === "#00f" && studyById(instance, ema)?.length === 12,
@@ -411,6 +504,50 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
   assert(
     studyById(instance, explicit)?.color === "#f00" && studyById(instance, explicit)?.length === 20,
     "createStudy arguments win over studies_overrides",
+  );
+  const inputColor = await chart.createStudy("EMA", false, false, { color: "#00ff00" });
+  assert(
+    studyById(instance, inputColor)?.color === "#00ff00" && !studyById(instance, inputColor)?.plotStyles,
+    "inputs.color also wins over a studies_overrides primary colour",
+  );
+  instance.remove();
+}
+
+// ── studies_overrides are defaults: a bad entry warns, never throws ────────
+{
+  warnings.length = 0;
+  let made;
+  let constructError = null;
+  try {
+    made = await makeWidget({
+      studies_overrides: {
+        "EMA.length": "30",
+        "EMA.plot.linewidth": "wide",
+        "MACD.histogram.color": "#ffffff",
+      },
+    });
+  } catch (error) {
+    constructError = error;
+  }
+  assert(made && constructError === null, 'a wrong-typed studies_overrides value ({"EMA.length": "30"}) does not stop the widget mounting');
+  const { instance, chart } = made;
+  assert(
+    warnings.filter((text) => /studies_overrides\["EMA\.length"\] must be a finite number; ignored/.test(text)).length === 1
+      && warnings.some((text) => /studies_overrides\["EMA\.plot\.linewidth"\] must be a positive number; ignored/.test(text))
+      && !warnings.some((text) => /createStudy/.test(text)),
+    "wrong-typed studies_overrides entries warn once at construction, naming studies_overrides",
+  );
+  const ema = await chart.createStudy("EMA");
+  const again = await chart.createStudy("EMA");
+  assert(
+    studyById(instance, ema)?.length === 9 && studyById(instance, again)?.length === 9 && !studyById(instance, ema)?.plotStyles
+      && warnings.filter((text) => /EMA\.length/.test(text)).length === 1,
+    "createStudy(\"EMA\") ignores the bad defaults (EMA(9)) without rejecting or re-warning",
+  );
+  await chart.createStudy("MACD");
+  assert(
+    warnings.some((text) => /studies_overrides\["MACD\.histogram\.color"\] has no effect: MACD has no such plot; plots: MACD, Signal, Hist/.test(text)),
+    "a studies_overrides style for a plot the study lacks warns when the study is created",
   );
   instance.remove();
 }
@@ -436,32 +573,70 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
   chart.executeActionById("stay_in_drawing_mode");
   assert(!chart.getCheckableActionState("stayInDrawingModeAction"), "the alias toggles it back");
 
-  // Drawings: hide all is a view toggle outside undo history.
+  // Drawings: hide all is a view toggle. It covers drawings created while it
+  // is on and never rewrites per-drawing `hidden` flags, save() or undo.
   const events = [];
   instance.subscribe("drawing_event", (id, type) => events.push(type));
-  const first = await chart.createShape({ time: BARS[250].time / 1000, price: 100 }, { shape: "horizontal_line" });
-  const second = await chart.createShape({ time: BARS[260].time / 1000, price: 101 }, { shape: "horizontal_line" });
-  events.length = 0;
-  chart.executeActionById("hideAllDrawingTools");
-  assert(
-    chart.getCheckableActionState("hideAllDrawingTools") && events.join() === "hide,hide"
-      && instance.save().drawings.every((drawing) => drawing.hidden),
-    "hideAllDrawingTools hides every drawing and reports the checked state",
+  const line = (index, color) => chart.createShape(
+    { time: BARS[index].time / 1000, price: 100 + index / 100 },
+    { shape: "horizontal_line", overrides: { linecolor: color } },
   );
+  const painted = (...colors) => {
+    resetPaint();
+    flushFrames();
+    return colors.map((color) => strokes.includes(color));
+  };
+  const first = await line(250, "#a1a1a1");
+  const second = await line(260, "#b2b2b2");
+  assert(painted("#a1a1a1", "#b2b2b2").join() === "true,true", "both drawings paint before hideAllDrawingTools");
   events.length = 0;
   chart.executeActionById("hideAllDrawingTools");
   assert(
-    !chart.getCheckableActionState("hideAllDrawingTools") && events.join() === "show,show"
-      && instance.save().drawings.every((drawing) => !drawing.hidden),
-    "running hideAllDrawingTools again shows them",
+    chart.getCheckableActionState("hideAllDrawingTools") && painted("#a1a1a1", "#b2b2b2").join() === "false,false",
+    "hideAllDrawingTools stops painting every drawing and reports the checked state",
+  );
+  assert(
+    events.length === 0 && instance.save().drawings.every((drawing) => drawing.hidden === false),
+    "hiding all is view state: no per-drawing hide events, and save() keeps each drawing's own visibility",
+  );
+  const third = await line(270, "#c3c3c3");
+  assert(
+    chart.getCheckableActionState("hideAllDrawingTools") && painted("#c3c3c3").join() === "false",
+    "a drawing created while hideAllDrawingTools is on is hidden too",
+  );
+  chart.executeActionById("hideAllDrawingTools");
+  assert(
+    !chart.getCheckableActionState("hideAllDrawingTools") && painted("#a1a1a1", "#b2b2b2", "#c3c3c3").join() === "true,true,true",
+    "running hideAllDrawingTools again shows every drawing, including the one created while hidden",
   );
   chart.executeActionById("undo");
   assert(
-    instance.save().drawings.map((drawing) => drawing.id).join() === String(first),
+    instance.save().drawings.map((drawing) => drawing.id).join() === [first, second].join(),
     "hide/show-all adds no undo entries: undo removes the last created drawing",
   );
   chart.executeActionById("redo");
-  assert(instance.save().drawings.some((drawing) => drawing.id === second), "redo restores it");
+  assert(instance.save().drawings.some((drawing) => drawing.id === third), "redo restores it");
+
+  // A layout with an individually hidden drawing round-trips while hidden-all.
+  const layout = instance.save();
+  layout.drawings.find((drawing) => drawing.id === String(first)).hidden = true;
+  await instance.load(layout);
+  chart.executeActionById("hideAllDrawingTools");
+  const whileHidden = instance.save();
+  assert(
+    whileHidden.drawings.length === 3 && whileHidden.drawings.every((drawing) => drawing.hidden === (drawing.id === String(first))),
+    "save() while hidden-all keeps the original per-drawing visibility",
+  );
+  await instance.load(whileHidden);
+  assert(
+    chart.getCheckableActionState("hideAllDrawingTools") && painted("#a1a1a1", "#b2b2b2", "#c3c3c3").join() === "false,false,false",
+    "the view toggle survives load(): the loaded drawings stay hidden and the state still reads true",
+  );
+  chart.executeActionById("hideAllDrawingTools");
+  assert(
+    painted("#a1a1a1", "#b2b2b2", "#c3c3c3").join() === "false,true,true",
+    "toggling after load() shows the drawings except the one hidden on its own",
+  );
 
   // Views: resets route through the viewport seam.
   await chart.createStudy("EMA");
@@ -493,7 +668,7 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
   const cleared = instance.save();
   assert(cleared.studies.length === 0 && cleared.drawings.length === 0, "paneRemoveAllStudiesDrawingTools removes every study and drawing");
   chart.executeActionById("undo");
-  assert(instance.save().drawings.length === 2, "undo restores the removed drawings");
+  assert(instance.save().drawings.length === 3, "undo restores the removed drawings");
   chart.executeActionById("undo");
   assert(instance.save().studies.length === 1, "a second undo restores the removed studies");
   instance.remove();

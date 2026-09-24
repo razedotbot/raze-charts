@@ -104,6 +104,7 @@ interface ChartContext extends ChartContextState, ChartContextSeams
   defaultVisibleBars(): number
   readonly drawingEvent: Delegate<[string, string]>
   drawingTool: SidebarToolId
+  drawingsHidden?: boolean | undefined
   features: Set<string>
   readonly fontFamily: string
   formatPrice: PriceFormatFn
@@ -171,6 +172,7 @@ interface ChartContextState
   readonly datafeed: IBasicDataFeed
   readonly drawingEvent: Delegate<[string, string]>
   drawingTool: SidebarToolId
+  drawingsHidden?: boolean | undefined
   features: Set<string>
   readonly fontFamily: string
   formatPrice: PriceFormatFn
@@ -219,7 +221,7 @@ interface ChartLayoutSnapshot
   logScale: boolean
   magnet?: boolean | undefined
   percentScale: boolean
-  studies: { id?: string | undefined; name: string; length: number; color: string; lock?: boolean | undefined; forceOverlay?: boolean | undefined; inputs?: Record<string, number | string> | undefined; }[]
+  studies: { id?: string | undefined; name: string; length: number; color: string; lock?: boolean | undefined; forceOverlay?: boolean | undefined; inputs?: Record<string, number | string> | undefined; plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined; }[]
   symbol: string
   version: 1
   visibleRange: { from: number; to: number; }
@@ -932,6 +934,7 @@ interface StudyInstance
   length: number
   lock: boolean
   name: string
+  plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined
   series: StudySeries[]
   values: (null | number)[]
 type StudyKind = string
@@ -939,6 +942,11 @@ interface StudyPaneLevel
   axisLabel?: boolean | undefined
   dashed?: boolean | undefined
   value: number
+interface StudyPlotStyleOverride
+  color?: string | undefined
+  lineWidth?: number | undefined
+  visible?: boolean | undefined
+type StudyPlotStyles = { readonly [x: string]: Readonly<StudyPlotStyleOverride>; }
 class StudyRegistry
   new (defs?: StudyDefinition[] | undefined): StudyRegistry
   list(): StudyDefinition[]
@@ -946,9 +954,11 @@ class StudyRegistry
   resolve(name: string): StudyDefinition | null
 interface StudySeries
   color?: string | undefined
+  lineWidth?: number | undefined
   name?: string | undefined
   style?: StudySeriesStyle | undefined
   values: (null | number)[]
+  visible?: boolean | undefined
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
 interface StudySpec
   color?: string | undefined
@@ -958,6 +968,7 @@ interface StudySpec
   length?: number | undefined
   lock?: boolean | undefined
   name: string
+  plotStyles?: Readonly<Record<string, Readonly<StudyPlotStyleOverride>>> | undefined
 class StudyStore
   new (context: ChartContext, registry?: StudyRegistry | undefined, commands?: CommandStack | undefined): StudyStore
   add(spec: StudySpec): EntityId | null

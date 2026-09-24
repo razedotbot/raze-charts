@@ -1,6 +1,7 @@
 // The widget's IChartWidgetApi: wires ChartApi to the kernel and controllers.
 
 import type { EntityId } from "../../types/charting_library";
+import { plotRefMatches } from "../../studies/StudyStore";
 import { ChartApi, type ChartApiDeps } from "../ChartApi";
 import type { WidgetController, WidgetHost } from "./host";
 import { overrideFor, parseCreateStudyArgs, type StudyArgsEnv } from "./StudyArgs";
@@ -20,13 +21,24 @@ export class ApiController implements WidgetController {
     this.api = new ChartApi(host.context, createApiDeps(host, this.warn));
   }
 
-  /** The registry (built-ins + custom studies) exists: flag studies_overrides keys that do nothing. */
+  /**
+   * The registry (built-ins + custom studies) exists: flag studies_overrides
+   * keys that do nothing. These are defaults, so this warns and never throws.
+   */
   attach(): void {
     const definitions = this.host.studies.registry.list();
     for (const [key, value] of Object.entries(this.host.options.studies_overrides ?? {})) {
       const definition = definitions.find((item) => overrideFor(item, key) !== null);
-      if (definition) parseCreateStudyArgs({ definition, studiesOverrides: { [key]: value }, warn: this.warn }, definition.name);
-      else this.warn(`studies_overrides:${key}`, `studies_overrides["${key}"] matches no study name or alias`);
+      if (!definition) {
+        this.warn(`studies_overrides:${key}`, `studies_overrides["${key}"] matches no study name or alias`);
+        continue;
+      }
+      try {
+        parseCreateStudyArgs({ definition, studiesOverrides: { [key]: value }, warn: this.warn }, definition.name);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.warn(`studies_overrides:${key}`, `studies_overrides["${key}"] was ignored: ${reason}`);
+      }
     }
   }
 }
@@ -92,12 +104,14 @@ function createStudy(
     const known = studies.registry.list().map((def) => def.name).join(", ");
     throw new Error(`[raze-charts] unknown study: ${name}; available studies: ${known}`);
   }
-  const study = parsed.colorKey ? studies.list().find((item) => item.id === id) : undefined;
-  if (study?.series.length && !study.series.some((series) => series.color === study.color)) {
-    warn(
-      `createStudy:${definition.name}:${parsed.colorKey}`,
-      `createStudy("${name}"): "${parsed.colorKey}" has no effect: ${definition.name} draws every plot in a fixed colour`,
-    );
+  // Plot names are known once the study has computed: flag styles for plots it lacks.
+  const study = parsed.plotKeys.size ? studies.list().find((item) => item.id === id) : undefined;
+  if (study?.series.length) {
+    const plots = study.series.map((series, index) => series.name ?? `plot_${index}`).join(", ");
+    for (const [ref, label] of parsed.plotKeys) {
+      if (study.series.some((series, index) => plotRefMatches(ref, index, series.name))) continue;
+      warn(`plot:${definition.name}:${label}`, `${label} has no effect: ${definition.name} has no such plot; plots: ${plots}`);
+    }
   }
   return id;
 }

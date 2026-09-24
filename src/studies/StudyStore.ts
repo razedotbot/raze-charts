@@ -3,7 +3,13 @@
 // Which studies exist at all is the StudyRegistry's business — this store only
 // tracks live instances.
 
-import type { Bar, EntityId, StudyDefinition, StudySeries } from "../types/charting_library";
+import type {
+  Bar,
+  EntityId,
+  StudyDefinition,
+  StudyPlotStyles,
+  StudySeries,
+} from "../types/charting_library";
 import type { ChartContext } from "../core/context";
 import type { CommandStack } from "../core/CommandStack";
 import { BUILTIN_STUDIES, StudyRegistry } from "./registry";
@@ -23,6 +29,8 @@ export interface StudySpec {
   lock?: boolean;
   forceOverlay?: boolean;
   inputs?: Record<string, number | string>;
+  /** Per-plot colour / width / visibility overrides (see StudyPlotStyles). */
+  plotStyles?: StudyPlotStyles;
 }
 
 export interface StudyInstance {
@@ -38,6 +46,8 @@ export interface StudyInstance {
   lock: boolean;
   forceOverlay: boolean;
   inputs: Record<string, number | string>;
+  /** Applied onto `series` after every compute. */
+  plotStyles?: StudyPlotStyles;
 }
 
 const FALLBACK_COLORS = ["#f5a623", "#26a69a", "#2962ff", "#e040fb", "#7E57C2"];
@@ -181,6 +191,7 @@ export class StudyStore {
       lock: spec.lock ?? false,
       forceOverlay: spec.forceOverlay ?? false,
       inputs: spec.inputs ?? {},
+      ...copyPlotStyles(def.name, spec.plotStyles),
     };
     this.initialiseRuntime(id, def);
     this.recompute(study);
@@ -283,6 +294,7 @@ export class StudyStore {
       if ((mutation === "append" || mutation === "replace-last")
           && this.updateBuiltinLastValue(study, mutation)) {
         study.series = [{ values: study.values, style: "line", color: study.color }];
+        applyPlotStyles(study);
         continue;
       }
       this.recompute(study);
@@ -303,6 +315,7 @@ export class StudyStore {
         }));
         study.values = study.series[0]?.values ?? [];
       }
+      applyPlotStyles(study);
       const runtime = this.runtimes.get(study.id);
       if (runtime) {
         runtime.rsi = runtime.kind === "rsi" ? this.buildRsiRuntime(study.length) : null;
@@ -486,4 +499,53 @@ export class StudyStore {
     this.items.clear();
     this.runtimes.clear();
   }
+}
+
+/**
+ * Whether plot reference `ref` names the series at `index`: an index ref
+ * ("0") matches by position, a name ref by the case-insensitive series name or
+ * its last word (`upper` matches `BB upper`).
+ */
+export function plotRefMatches(ref: string, index: number, name: string | undefined): boolean {
+  if (/^\d+$/.test(ref)) return Number(ref) === index;
+  const lower = name?.toLowerCase();
+  return !!lower && (lower === ref || lower.endsWith(` ${ref}`));
+}
+
+/** Paint the per-plot overrides onto freshly computed series. */
+function applyPlotStyles(study: StudyInstance): void {
+  const styles = study.plotStyles;
+  if (!styles) return;
+  study.series.forEach((series, index) => {
+    for (const [ref, style] of Object.entries(styles)) {
+      if (plotRefMatches(ref, index, series.name)) Object.assign(series, style);
+    }
+  });
+}
+
+/** A validated copy of `plotStyles` (refs lower-cased); invalid entries warn and are dropped. */
+function copyPlotStyles(study: string, styles: unknown): { plotStyles?: StudyPlotStyles } {
+  if (styles == null) return {};
+  const out = new Map<string, Record<string, unknown>>();
+  const invalid: string[] = [];
+  for (const [ref, style] of Object.entries(typeof styles === "object" ? styles : { plotStyles: styles })) {
+    if (typeof style !== "object" || !style) {
+      invalid.push(ref);
+      continue;
+    }
+    for (const [key, value] of Object.entries(style)) {
+      if (!validPlotStyle(key, value)) invalid.push(`${ref}.${key}`);
+      else out.set(ref.toLowerCase(), { ...out.get(ref.toLowerCase()), [key]: value });
+    }
+  }
+  if (invalid.length) {
+    console.warn(`[raze-charts] study "${study}": ignored invalid plotStyles entries: ${invalid.join(", ")}`);
+  }
+  return out.size ? { plotStyles: Object.fromEntries(out) as StudyPlotStyles } : {};
+}
+
+function validPlotStyle(key: string, value: unknown): boolean {
+  return key === "color" ? typeof value === "string" && value !== ""
+    : key === "lineWidth" ? typeof value === "number" && Number.isFinite(value) && value > 0
+      : key === "visible" && typeof value === "boolean";
 }

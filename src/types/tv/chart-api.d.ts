@@ -21,7 +21,9 @@ import type {
  * - `symbolSearch`: focus the header symbol search.
  * - `paneObjectTree` (alias `objects_tree`): toggle the objects tree.
  * - `stayInDrawingModeAction` (alias `stay_in_drawing_mode`), `magnet`: toggles.
- * - `hideAllDrawingTools`: hide every visible drawing; run again to show them.
+ * - `hideAllDrawingTools`: view toggle that hides every drawing, including
+ *   ones created while it is on. Each drawing's own `hidden` flag, `save()`
+ *   and undo history are untouched; run it again to show them.
  * - `paneRemoveAllStudiesDrawingTools`: remove every study and drawing (undo
  *   restores the drawings, then the studies).
  * - `volume_pane`: cycle the volume between overlay, pane and hidden.
@@ -64,10 +66,28 @@ export type CreateStudyInputs =
 
 /**
  * TradingView style overrides keyed `<plot>.<property>`, for example
- * `{ "plot.color": "#ff0000" }`. The primary plot's colour is supported;
- * other keys warn once.
+ * `{ "plot.color": "#ff0000", "plot.linewidth": 2, "signal.visible": false }`.
+ * `<plot>` is `plot` (or the study name) for the primary plot, `plot_<n>` by
+ * position, or a plot name such as MACD's `signal`. `color`, `linewidth` and
+ * `visible` are applied; other properties and unknown plots warn once.
  */
 export type CreateStudyOverrides = Readonly<Record<string, string | number | boolean>>;
+
+/** Style of one study plot, set through createStudy overrides or `studies_overrides`. */
+export interface StudyPlotStyleOverride {
+  color?: string;
+  /** Line width in CSS pixels. */
+  lineWidth?: number;
+  /** `false` hides the plot; it still computes. */
+  visible?: boolean;
+}
+
+/**
+ * Per-plot styles of one study, keyed by plot reference: the plot index
+ * (`"0"` is the primary plot) or the lower-case plot name (`"signal"`; a last
+ * word such as `"upper"` also matches `BB upper`). `save()` keeps them.
+ */
+export type StudyPlotStyles = Readonly<Record<string, Readonly<StudyPlotStyleOverride>>>;
 
 /** TradingView `createStudy` options. Unsupported options warn once. */
 export interface CreateStudyOptions {

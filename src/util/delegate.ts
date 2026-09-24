@@ -20,8 +20,8 @@ interface Listener {
   readonly obj: object | null;
   readonly fn: Fn;
   readonly once: boolean;
-  /** Name used when this listener's error is reported. */
-  readonly label: string;
+  /** Consumer-view name for error reports; null reports under the delegate's label at that time. */
+  readonly label: string | null;
 }
 
 /** Receives every listener error after it was logged; `label` names the event. */
@@ -37,7 +37,7 @@ export class Delegate<TArgs extends unknown[] = unknown[]> {
 
   /** Register an internal listener. Host code subscribes through `consumerView()` instead. */
   subscribe(obj: object | null, fn: (...args: never[]) => void, once = false): void {
-    this.add(this.internal, this.label, obj, fn, once);
+    this.add(this.internal, null, obj, fn, once);
   }
 
   /** Remove an internal listener; consumer registrations are untouched. */
@@ -53,18 +53,19 @@ export class Delegate<TArgs extends unknown[] = unknown[]> {
   /**
    * A public ISubscription over this delegate for host code. The view can only
    * see and remove registrations made through itself; `label` names them in
-   * error reports (for example `onIntervalChanged`). Callers cache the view.
+   * error reports (for example `onIntervalChanged`; the delegate's own label
+   * when omitted). Callers cache the view.
    */
   consumerView<TFunc extends (...args: never[]) => void = (...args: never[]) => void>(
-    label = this.label,
+    label?: string,
   ): ISubscription<TFunc> {
     const scope = {};
     return {
       subscribe: (obj, fn, once) => {
         if (typeof fn !== "function") {
-          throw new TypeError(`[raze-charts] ${label}().subscribe(obj, callback) needs a callback function`);
+          throw new TypeError(`[raze-charts] ${label ?? this.label}().subscribe(obj, callback) needs a callback function`);
         }
-        this.add(scope, label, obj, fn, !!once);
+        this.add(scope, label ?? null, obj, fn, !!once);
       },
       unsubscribe: (obj, fn) => this.remove(scope, (l) => l.obj === obj && l.fn === fn),
       unsubscribeAll: (obj) => this.remove(scope, (l) => l.obj === obj),
@@ -73,7 +74,8 @@ export class Delegate<TArgs extends unknown[] = unknown[]> {
 
   /**
    * Route listener errors to `handler` (after console.error). `label`, when
-   * given, renames the delegate's internal listeners in reports.
+   * given, renames the delegate's internal listeners in reports, including
+   * ones registered before this call.
    */
   reportErrorsTo(handler: ((error: unknown, label: string) => void) | null, label?: string): void {
     this.errorHandler = handler;
@@ -90,7 +92,7 @@ export class Delegate<TArgs extends unknown[] = unknown[]> {
       try {
         (l.fn as unknown as (...a: TArgs) => void)(...args);
       } catch (error) {
-        this.report(error, l.label);
+        this.report(error, l.label ?? this.label);
       }
     }
   }
@@ -104,7 +106,7 @@ export class Delegate<TArgs extends unknown[] = unknown[]> {
     this.errorHandler = null;
   }
 
-  private add(scope: object, label: string, obj: object | null, fn: Fn, once: boolean): void {
+  private add(scope: object, label: string | null, obj: object | null, fn: Fn, once: boolean): void {
     this.listeners.push({ scope, obj, fn, once, label });
   }
 

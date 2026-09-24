@@ -45,7 +45,7 @@ exports are the stable resolver contract.
 | `getMarks` | Supported | Async callback results are accepted and scoped to the active request. |
 | `createShape`, `createMultipointShape` | Supported subset | Use only the drawing kinds in the capability matrix. |
 | `getShapeById`, `removeEntity`, `removeAllShapes` | Supported | Shape point editing and removal are implemented. |
-| `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. `forceOverlay` / `lock` are stored but not separately enforced. Positional (`[30]`), `in_<n>` and boolean inputs are honoured; overrides support `plot.color`; options support `disableUndo` and `priceScale: "as-series"`. Everything else warns once. |
+| `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. `forceOverlay` / `lock` are stored but not separately enforced. Positional (`[30]`), `in_<n>` and boolean inputs are honoured; overrides support `<plot>.color`, `<plot>.linewidth` and `<plot>.visible` for any plot; options support `disableUndo` and `priceScale: "as-series"`. Everything else warns once. |
 | `subscribe` / `unsubscribe` | Supported subset | `drawing_event`, `trading_event` and `error`. Other event names throw instead of never firing. |
 | `executeActionById`, `getCheckableActionState` | Supported subset | See the `ChartActionId` union; unsupported ids such as `chartProperties` throw. |
 | `createButton` | Supported | Use it for small host actions; own complex UI outside the widget. |

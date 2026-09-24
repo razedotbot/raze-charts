@@ -5,7 +5,7 @@
 // id throws with the supported list, so a typo or a TradingView action Raze
 // Charts does not implement is never a silent no-op.
 
-import type { ChartActionId, CheckableChartActionId, EntityId } from "../../types/charting_library";
+import type { ChartActionId, CheckableChartActionId } from "../../types/charting_library";
 import type { WidgetController, WidgetHost } from "./host";
 
 declare module "./host" {
@@ -65,9 +65,15 @@ const ACTIONS: Readonly<Record<ChartActionId, ActionDefinition>> = {
     run: (_, { context }) => { context.magnet = !context.magnet; },
     checked: (_, { context }) => context.magnet,
   },
+  // A view toggle, like TradingView's: it covers drawings created while it is
+  // on and never rewrites a drawing's own `hidden` flag, save() or undo history.
   hideAllDrawingTools: {
-    run: (c) => c.toggleDrawingsHidden(),
-    checked: (c) => !!c.hiddenDrawings,
+    run: (_, { context }) => {
+      context.drawingsHidden = !context.drawingsHidden;
+      // Delete must not remove a drawing the user cannot see.
+      if (context.drawingsHidden) context.selectedShapeId = null;
+    },
+    checked: (_, { context }) => !!context.drawingsHidden,
   },
   paneRemoveAllStudiesDrawingTools: {
     run: (_, { shapes, studies }) => {
@@ -86,8 +92,6 @@ const ids = (filter?: (definition: ActionDefinition) => unknown): string =>
   Object.keys(ACTIONS).filter((id) => !filter || filter(ACTIONS[id as ChartActionId])).join(", ");
 
 export class ActionController implements WidgetController {
-  /** Drawings hidden by `hideAllDrawingTools`, shown again when it toggles off. */
-  hiddenDrawings: EntityId[] | null = null;
   warnedSearch = false;
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     if (!(e.ctrlKey || e.metaKey)) return;
@@ -135,19 +139,6 @@ export class ActionController implements WidgetController {
     const count = Math.min(n, context.defaultVisibleBars());
     if (count > 0) {
       context.setViewport({ from: n - count, to: n - 1 + Math.max(2, Math.floor(count * 0.08)) }, "reset");
-    }
-  }
-
-  /** Hide every visible drawing, or show the ones this action hid. View state, not undo history. */
-  toggleDrawingsHidden(): void {
-    const { commands, shapes } = this.host;
-    const resume = commands.suspend();
-    try {
-      const hidden = this.hiddenDrawings;
-      this.hiddenDrawings = hidden ? null : shapes.list().filter((shape) => !shape.hidden).map((shape) => shape.id);
-      for (const id of hidden ?? this.hiddenDrawings!) shapes.setHidden(id, !hidden);
-    } finally {
-      resume();
     }
   }
 

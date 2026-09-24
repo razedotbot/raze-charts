@@ -172,6 +172,8 @@ export function drawComplexShape(ctx: CanvasRenderingContext2D, v: FinanceView, 
 
 export function drawShapes(ctx: CanvasRenderingContext2D, v: FinanceView): void {
   v.shapeScreen.length = 0;
+  // hideAllDrawingTools: nothing painted also means nothing to hit-test.
+  if (v.context.drawingsHidden) return;
   const pricescale = v.context.symbolInfo?.pricescale ?? 100;
   const hLines: { shape: StoredShape; price: number; y: number; labelY: number }[] = [];
 

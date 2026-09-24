@@ -19,7 +19,10 @@ export interface CreateButtonOptions {
 // ── Widget events ───────────────────────────────────────────────────────────
 /** Payload of the `error` widget event. */
 export interface WidgetListenerError {
-  /** Stable error code: a listener registered by host code threw. */
+  /**
+   * Stable error code: an event or subscription listener threw. That covers
+   * host listeners and the widget's own internal listeners on the same events.
+   */
   readonly code: "listener_threw";
   /** The event or subscription whose listener threw, e.g. `drawing_event` or `onIntervalChanged`. */
   readonly event: string;

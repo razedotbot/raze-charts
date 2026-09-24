@@ -34,9 +34,11 @@ class StudyRegistry
   resolve(name: string): StudyDefinition | null
 interface StudySeries
   color?: string | undefined
+  lineWidth?: number | undefined
   name?: string | undefined
   style?: StudySeriesStyle | undefined
   values: (null | number)[]
+  visible?: boolean | undefined
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
 function bollinger(closes: number[], length: number, multiplier?: number | undefined): { mid: (null | number)[]; upper: (null | number)[]; lower: (null | number)[]; }
 function closesFromBars(bars: Bar[]): number[]
