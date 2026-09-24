@@ -227,10 +227,15 @@ Ticks come from `computeTimeAxisTicks()`: pixels per bar decide the density
 weekend gaps do not thin the axis), labels are measured so they never
 overlap, and label centres stay inside the plot so no text reaches the corner
 cell (`axisChromeRect`). Dates among times, months among days and years are
-drawn semi-bold. The ticks are cached until the bars, the view, the zone or the
-locale change, so pointer-only repaints reuse them. The crosshair time label,
-`custom_formatters.tickMarkFormatter` / `dateFormatter` / `timeFormatter`, and
-`TimeIndex.sessionBreaks({ timeZone })` use the same zone.
+drawn semi-bold, and every label is measured at that weight. The ticks are
+cached until the bars, the view, the zone, the locale, the tick-mark formatter
+or the measured font metrics change, so pointer-only repaints reuse them. The
+crosshair time label, the `custom_formatters` time formatters
+(`tickMarkFormatter`, `dateFormatter`, `timeFormatter`),
+`TimeIndex.sessionBreaks({ timeZone })` and the corner caption use the same
+zone. Session breaks split a session at local midnights only when it runs
+round the clock (a gap-free run of bars longer than a day, such as a forex
+week); shorter sessions break only at their open.
 
 ### Async ownership
 

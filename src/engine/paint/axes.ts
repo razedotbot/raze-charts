@@ -1,6 +1,7 @@
 import { PRICE_AXIS_W_MAX, PRICE_AXIS_W_MIN, TIME_AXIS_H } from "../layout";
 import { barSpacing, formatAxisPrice, fromDisplay, indexForX, xForIndex, yForPrice } from "../plotScale";
 import { parseResolution } from "../../util/resolution";
+import { resolveLocale } from "../../util/intl";
 import { UTC_ZONE_ID, type TickFormatInput, type TickUnit } from "../../util/time";
 import { FinancialTimeAxis, resolveDisplayTimeZone, type TimeAxisResolutionKind, type TimeAxisTick } from "../timeAxis";
 import type { ChartContext } from "../../core/context";
@@ -73,11 +74,13 @@ const TIME_LABEL_EDGE = 16;
 
 interface TimeAxisBinding {
   axis: FinancialTimeAxis;
+  /** What the zone and locale were resolved from: setting, symbol zone, locale, options. */
+  inputs: readonly unknown[];
+  /** The resolved display zone id (Etc/UTC for an unknown zone). */
   zone: string;
-  locale: string;
   /** Warnings already printed for this chart (paint runs every frame). */
   warned: Set<string>;
-  ticks: { key: string; source: unknown; ticks: TimeAxisTick[] } | null;
+  ticks: { key: string; source: unknown; formatter: unknown; ticks: TimeAxisTick[] } | null;
 }
 
 const bindings = new WeakMap<object, TimeAxisBinding>();
@@ -88,24 +91,16 @@ function warnOnce(binding: TimeAxisBinding, key: string, message: string): void 
   console.warn(`[raze-charts] ${message}`);
 }
 
-/** The configured timezone setting: the live seam when present, else `options.timezone`. */
-function timezoneSetting(context: ChartContext): string | null {
-  const live = (context as Partial<Pick<ChartContext, "timezone">>).timezone;
-  if (live !== undefined) return live;
-  return context.options.timezone ?? null;
-}
-
 function bindingOf(context: ChartContext): TimeAxisBinding {
   let binding = bindings.get(context);
   if (!binding) {
-    binding = { axis: new FinancialTimeAxis({ minSpacing: TIME_LABEL_MIN_SPACING }), zone: UTC_ZONE_ID, locale: "", warned: new Set(), ticks: null };
+    binding = { axis: new FinancialTimeAxis({ minSpacing: TIME_LABEL_MIN_SPACING }), inputs: [], zone: UTC_ZONE_ID, warned: new Set(), ticks: null };
     bindings.set(context, binding);
   }
   return binding;
 }
 
-function resolveDisplayZone(context: ChartContext, binding: TimeAxisBinding): string {
-  const setting = timezoneSetting(context);
+function resolveDisplayZone(context: ChartContext, binding: TimeAxisBinding, setting: string | null): string {
   const zone = resolveDisplayTimeZone(setting, context.symbolInfo?.timezone, context.options);
   if (!zone.valid) {
     const source = zone.custom
@@ -121,10 +116,9 @@ function resolveDisplayZone(context: ChartContext, binding: TimeAxisBinding): st
 }
 
 /** Intl-safe form of the widget locale (TradingView spells some with "_": "zh_TW"). */
-function axisLocale(context: ChartContext): string {
-  const tag = String(context.locale || "en").replace(/_/g, "-");
+function axisLocale(locale: string): string {
   try {
-    return Intl.getCanonicalLocales(tag)[0] ?? "en";
+    return resolveLocale(String(locale || "en").replace(/_/g, "-"));
   } catch {
     return "en";
   }
@@ -134,24 +128,33 @@ function axisLocale(context: ChartContext): string {
  * The financial time axis of a chart, synchronised with its display zone
  * (`setTimezone()` / `options.timezone`, `"exchange"` following
  * `symbolInfo.timezone`, `custom_timezones` aliases) and locale. An unknown
- * zone warns once and falls back to UTC instead of throwing mid-paint.
+ * zone warns once and falls back to UTC instead of throwing mid-paint. The
+ * zone and locale are only resolved again when one of their inputs changes.
  */
 export function timeAxisOf(context: ChartContext): FinancialTimeAxis {
   const binding = bindingOf(context);
-  const zone = resolveDisplayZone(context, binding);
-  const locale = axisLocale(context);
-  if (zone !== binding.zone || locale !== binding.locale) {
-    binding.axis.setOptions({ timeZone: zone, locale });
+  // The live setTimezone() seam when present, else options.timezone.
+  const setting = (context as Partial<Pick<ChartContext, "timezone">>).timezone ?? context.options.timezone ?? null;
+  const inputs = [setting, context.symbolInfo?.timezone, context.locale, context.options];
+  if (inputs.some((value, i) => value !== binding.inputs[i])) {
+    const zone = resolveDisplayZone(context, binding, setting);
+    binding.axis.setOptions({ timeZone: zone, locale: axisLocale(context.locale) });
+    binding.inputs = inputs;
     binding.zone = zone;
-    binding.locale = locale;
     binding.ticks = null;
   }
   return binding.axis;
 }
 
-/** The resolved IANA id of a chart's display zone. */
+/**
+ * A chart's display zone as resolved (the symbol's zone for `"exchange"`, a
+ * `custom_timezones` alias, `Etc/UTC` for an unknown zone), in the spelling
+ * it was configured with. The time axis, crosshair, session breaks and the
+ * corner caption all show this zone.
+ */
 export function displayTimeZoneId(context: ChartContext): string {
-  return timeAxisOf(context).timeZone.id;
+  timeAxisOf(context);
+  return bindingOf(context).zone;
 }
 
 /** Resolution kind of the chart's bars (decides which calendar the bar times belong to). */
@@ -203,8 +206,7 @@ function callFormatter(context: ChartContext, name: string, call: () => unknown,
  * `format` hook. Like TradingView, `date` carries the local time in its UTC
  * fields (read it with `getUTCHours()` and friends).
  */
-function tickMarkFormat(context: ChartContext): ((tick: TickFormatInput, fallback: string) => string) | undefined {
-  const formatter = formatters(context).tickMarkFormatter;
+function tickMarkFormat(context: ChartContext, formatter: unknown): ((tick: TickFormatInput, fallback: string) => string) | undefined {
   if (typeof formatter !== "function") return undefined;
   return (tick, fallback) => callFormatter(
     context,
@@ -269,15 +271,18 @@ export function computeTimeAxisTicks(ctx: CanvasRenderingContext2D, v: FinanceVi
   if (!(spacing > 0) || !Number.isFinite(spacing)) return [];
   const from = indexForX(v, v.plotL + TIME_LABEL_EDGE);
   const to = indexForX(v, v.plotL + v.plotW - TIME_LABEL_EDGE);
-  const format = tickMarkFormat(context);
+  const formatter = formatters(context).tickMarkFormatter;
+  // Labels are measured in the heavier weight dates and months are drawn in.
+  // The probe width is part of the key, so a web font that finishes loading
+  // re-measures them. A zone or locale change clears the cache on its own.
+  ctx.font = `600 11px ${v.fontFamily}`;
   const key = [
-    bars.length, bars[0]!.time, bars[bars.length - 1]!.time, from, to, spacing, kind,
-    binding.zone, binding.locale, v.fontFamily, format ? "custom" : "",
+    bars.length, bars[0]!.time, bars[bars.length - 1]!.time, from, to, spacing, kind, ctx.font, ctx.measureText("0").width,
   ].join("|");
   const cached = binding.ticks;
-  if (cached && cached.key === key && cached.source === bars) return cached.ticks;
+  if (cached && cached.key === key && cached.source === bars && cached.formatter === formatter) return cached.ticks;
 
-  ctx.font = `11px ${v.fontFamily}`;
+  const format = tickMarkFormat(context, formatter);
   const widths = new Map<string, number>();
   const measure = (label: string): number => {
     let width = widths.get(label);
@@ -291,7 +296,7 @@ export function computeTimeAxisTicks(ctx: CanvasRenderingContext2D, v: FinanceVi
     warnOnce(binding, "ticks", `time-axis ticks failed (${String(error)}); the axis is left blank for this frame.`);
     ticks = [];
   }
-  binding.ticks = { key, source: bars, ticks };
+  binding.ticks = { key, source: bars, formatter, ticks };
   return ticks;
 }
 

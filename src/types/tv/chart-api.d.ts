@@ -67,7 +67,7 @@ export interface IChartWidgetApi {
 export interface TimezoneInfo {
   /** IANA id, `"exchange"`, or a `custom_timezones` id. */
   id: string;
-  /** Human-readable name, for example "(UTC-05:00) New York". */
+  /** Human-readable name: the zone's city ("New York"), "UTC", "Exchange" or a `custom_timezones` title. */
   title: string;
   /** Current UTC offset in minutes (east positive), when known. */
   offset?: number;

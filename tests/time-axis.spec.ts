@@ -118,8 +118,8 @@ test.describe("time axis and crosshair", () => {
     expect(Math.max(...pillRows), "the pill stays inside the volume band").toBeLessThanOrEqual(bandTop + volumeH);
   });
 
-  // The same bars in two zones: New York labels its own local times (00:20 to
-  // 07:00 on 15 Jan) where UTC shows 05:20 to 12:00.
+  // The same bars in two zones: New York labels its own local times (05:10 to
+  // 07:00 on 15 Jan) where UTC shows 10:10 to 12:00.
   for (const [name, zone] of [["utc", "Etc/UTC"], ["new-york", "America/New_York"]] as const) {
     test(`time axis golden in ${zone}`, async ({ page }) => {
       await openFixture(page, "single", zone);

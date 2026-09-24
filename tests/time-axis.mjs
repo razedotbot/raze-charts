@@ -26,6 +26,7 @@ export { TimeIndex } from "./src/data/TimeIndex.ts";
 export * from "./src/engine/paint/axes.ts";
 export { drawCrosshair, formatVolumeLabel } from "./src/engine/paint/crosshair.ts";
 export { drawSessionBreaks } from "./src/engine/paint/session.ts";
+export { drawAxisChrome } from "./src/engine/paint/chrome.ts";
 export { createChartContext, buildFeatureSet } from "./src/core/context.ts";
 export { ChartApi } from "./src/core/ChartApi.ts";
 export { buildTheme } from "./src/core/theme.ts";
@@ -72,6 +73,7 @@ const {
   drawCrosshair,
   drawPriceAxis,
   drawSessionBreaks,
+  drawAxisChrome,
   drawTimeAxis,
   floorToCalendar,
   floorWall,
@@ -423,6 +425,13 @@ if (fingerprintOnly) {
   assert.equal(formatCrosshairTimeLabel(ctx, Date.UTC(2024, 0, 15, 12)), "15 Jan '24 13:00");
 }
 
+/** The corner caption drawAxisChrome paints (the zone, then the countdown when it is on). */
+function caption(ctx) {
+  const rec = recorder();
+  drawAxisChrome(rec.ctx, makeView(ctx));
+  return rec.texts()[0]?.split("  ")[0];
+}
+
 // An unknown configured zone warns once with guidance and shows UTC; nothing throws mid-paint.
 {
   const warnings = [];
@@ -437,6 +446,21 @@ if (fingerprintOnly) {
     assert.equal(formatCrosshairTimeLabel(ctx, Date.UTC(2024, 0, 15, 12)), "15 Jan '24 12:00");
     assert.equal(warnings.length, 1, `one warning, not one per frame (${warnings.length})`);
     ok(/Mars\/Olympus_Mons/.test(warnings[0]) && /IANA/.test(warnings[0]) && /Etc\/UTC/.test(warnings[0]), `the warning names the zone and the fallback: ${warnings[0]}`);
+    assert.equal(caption(ctx), "Etc/UTC", "the caption names the zone the axis shows, not the rejected one");
+    // The rejected zone is not validated again on every paint and crosshair move.
+    const IntlDateTimeFormat = Intl.DateTimeFormat;
+    let constructed = 0;
+    Intl.DateTimeFormat = function (...args) {
+      constructed++;
+      return new IntlDateTimeFormat(...args);
+    };
+    try {
+      for (let i = 0; i < 20; i++) formatCrosshairTimeLabel(ctx, bars[i % bars.length].time);
+      paintAxis(v);
+    } finally {
+      Intl.DateTimeFormat = IntlDateTimeFormat;
+    }
+    assert.equal(constructed, 0, "an unchanged invalid setting is resolved once");
     const bad = makeContext({ options: { timezone: "exchange" }, bars, resolution: "60", symbolInfo: { timezone: "Nowhere/City" } }).ctx;
     formatCrosshairTimeLabel(bad, bars[0].time);
     ok(/symbolInfo\.timezone.*"Nowhere\/City"/.test(warnings[1] ?? ""), "a bad symbol zone names symbolInfo.timezone");
@@ -572,6 +596,34 @@ if (fingerprintOnly) {
   ctx.setTimezone("Asia/Tokyo");
   const b = computeTimeAxisTicks(rec.ctx, makeView(ctx));
   ok(b !== a && b.map((t) => t.label).join() !== a.map((t) => t.label).join(), "a new zone recomputes the labels");
+
+  // Labels are measured in the bold weight dates and months are drawn in, so
+  // a bold label never crowds its neighbour.
+  const fonts = [];
+  const measuring = recorder();
+  const measureText = measuring.ctx.measureText;
+  measuring.ctx.measureText = (text) => (fonts.push(measuring.ctx.font), measureText(text));
+  computeTimeAxisTicks(measuring.ctx, makeView(ctx, { from: 1, to: bars.length }));
+  ok(fonts.length > 1 && fonts.every((font) => font.startsWith("600 11px")), `labels are measured bold (${[...new Set(fonts)]})`);
+
+  // A web font that finishes loading (other glyph widths) re-measures the labels.
+  const view = makeView(ctx);
+  const before = computeTimeAxisTicks(measuring.ctx, view);
+  assert.equal(computeTimeAxisTicks(measuring.ctx, view), before, "unchanged metrics reuse the ticks");
+  measuring.ctx.measureText = (text) => ({ width: String(text).length * CHAR_W * 1.2 });
+  ok(computeTimeAxisTicks(measuring.ctx, view) !== before, "new glyph widths recompute the ticks");
+}
+
+// A replaced tickMarkFormatter relabels the axis even when the view is unchanged.
+{
+  const bars = series(Date.UTC(2024, 0, 15, 0), Date.UTC(2024, 0, 17, 0), HOUR_MS);
+  const custom_formatters = { tickMarkFormatter: () => "A" };
+  const { ctx } = makeContext({ options: { custom_formatters }, bars, resolution: "60" });
+  const rec = recorder();
+  const v = makeView(ctx, { plotW: bars.length * 40 });
+  ok(computeTimeAxisTicks(rec.ctx, v).every((t) => t.label === "A"), "first formatter");
+  custom_formatters.tickMarkFormatter = () => "B";
+  ok(computeTimeAxisTicks(rec.ctx, v).every((t) => t.label === "B"), "the new formatter is used without a view change");
 }
 
 // custom_formatters.tickMarkFormatter / dateFormatter / timeFormatter.
@@ -741,6 +793,65 @@ function crosshairLines(ops) {
   const futBreaks = new TimeIndex(fut, 5 * MIN).sessionBreaks({ timeZone: ny });
   ok(futBreaks.length === 3 && futBreaks.every((i) => ny.wallParts(fut[i].time).hour === 18), `futures break at 18:00 opens only (${futBreaks.map((i) => ny.wallParts(fut[i].time).hour)})`);
 
+  // The live futures session (open at 18:00, not closed yet) is judged by the complete one before it.
+  const live = fut.slice(0, fut.length - 12 * 60 / 5);
+  const liveBreaks = new TimeIndex(live, 5 * MIN).sessionBreaks({ timeZone: ny });
+  ok(liveBreaks.every((i) => ny.wallParts(live[i].time).hour === 18) && liveBreaks.length === 3, "a live futures session is not split at midnight");
+
+  // Forex 24x5 (Sunday 17:00 to Friday 17:00 New York): a break at the Sunday open and at every
+  // local midnight inside the week, Monday included, in every week and every display zone.
+  const fx = [];
+  for (let t = Date.UTC(2024, 0, 7, 22); t < Date.UTC(2024, 0, 27); t += 5 * MIN) {
+    const { weekday, hour } = ny.wallParts(t);
+    if (!(weekday === 6 || (weekday === 5 && hour >= 17) || (weekday === 0 && hour < 17))) fx.push({ time: t });
+  }
+  const fxIdx = new TimeIndex(fx, 5 * MIN);
+  const label = (zone, i) => {
+    const p = zone.wallParts(fx[i].time);
+    return `${"SMTWTFS"[p.weekday]}${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
+  };
+  const week = (open, midnights) => [open, ...midnights.map((d) => `${d}00:00`)];
+  const nyWeeks = fxIdx.sessionBreaks({ timeZone: ny }).map((i) => label(ny, i));
+  assert.deepEqual(
+    nyWeeks,
+    ["M00:00", "T00:00", "W00:00", "T00:00", "F00:00", ...week("S17:00", ["M", "T", "W", "T", "F"]), ...week("S17:00", ["M", "T", "W", "T", "F"])],
+    "forex in New York breaks at every in-session midnight, Monday included",
+  );
+  const tokyoWeeks = fxIdx.sessionBreaks({ timeZone: tokyo }).map((i) => label(tokyo, i));
+  assert.deepEqual(
+    tokyoWeeks,
+    ["T00:00", "W00:00", "T00:00", "F00:00", "S00:00", ...week("M07:00", ["T", "W", "T", "F", "S"]), ...week("M07:00", ["T", "W", "T", "F", "S"])],
+    "forex in Tokyo breaks at every in-session Tokyo midnight",
+  );
+  // Windowing reads the same verdicts as a whole-series walk.
+  const fxAll = fxIdx.sessionBreaks({ timeZone: ny });
+  for (let from = 0; from < fx.length; from += 211) {
+    const to = from + 400;
+    assert.deepEqual(
+      fxIdx.sessionBreaks({ timeZone: ny, from, to }),
+      fxAll.filter((i) => i >= from && i <= to),
+      `a window from ${from} matches the full walk`,
+    );
+  }
+
+  // 24x7 crypto with a 30-minute outage keeps the midnight breaks on the days either side of it.
+  const utc = getTimeZone("Etc/UTC");
+  const crypto = series(Date.UTC(2024, 0, 1), Date.UTC(2024, 0, 6), 5 * MIN)
+    .filter((b) => !(b.time >= Date.UTC(2024, 0, 3, 12) && b.time < Date.UTC(2024, 0, 3, 12, 30)));
+  const cryptoBreaks = new TimeIndex(crypto, 5 * MIN).sessionBreaks({ timeZone: utc });
+  assert.deepEqual(
+    cryptoBreaks.map((i) => new Date(crypto[i].time).toISOString().slice(5, 16)),
+    ["01-02T00:00", "01-03T00:00", "01-03T12:30", "01-04T00:00", "01-05T00:00"],
+    "an outage opens a session without erasing the nearby midnights",
+  );
+  // Less than a day of gapless bars has no complete session to judge by: it counts as round-the-clock.
+  const short = series(Date.UTC(2024, 0, 1, 18), Date.UTC(2024, 0, 2, 6), MIN);
+  assert.deepEqual(
+    new TimeIndex(short, MIN).sessionBreaks({ timeZone: utc }).map((i) => new Date(short[i].time).toISOString().slice(11, 16)),
+    ["00:00"],
+    "a short gapless window still breaks at midnight",
+  );
+
   // Daily bars keep gap-only breaks.
   const daily = series(Date.UTC(2024, 0, 1), Date.UTC(2024, 1, 1), DAY_MS, { weekdays: true });
   const dailyIdx = new TimeIndex(daily, DAY_MS);
@@ -782,6 +893,7 @@ function crosshairLines(ops) {
   assert.equal(formatCrosshairTimeLabel(ctx, Date.UTC(2024, 0, 15, 12)), "15 Jan '24 21:00", "the crosshair follows the new zone");
   const { ticks } = paintAxis(makeView(ctx, { plotW: bars.length * 90 }));
   assert.equal(ticks.find((t) => t.time === Date.UTC(2024, 0, 15, 12))?.label, "21:00", "the axis follows the new zone");
+  assert.equal(caption(ctx), "Asia/Tokyo", "the corner caption follows the new zone");
 
   chart.setTimezone("Asia/Tokyo");
   assert.equal(seen.length, 1, "an unchanged zone fires nothing");
@@ -789,6 +901,7 @@ function crosshairLines(ops) {
   assert.equal(formatCrosshairTimeLabel(ctx, Date.UTC(2024, 0, 15, 12)), "15 Jan '24 06:00", "exchange uses symbolInfo.timezone (Chicago)");
   chart.setTimezone("desk");
   assert.equal(displayTimeZoneId(ctx), "Europe/Berlin", "custom_timezones ids are accepted");
+  assert.equal(caption(ctx), "Europe/Berlin", "the caption names the zone a custom id displays");
   chart.setTimezone("+05:30");
   assert.equal(formatCrosshairTimeLabel(ctx, Date.UTC(2024, 0, 15, 12)), "15 Jan '24 17:30", "fixed offsets are accepted");
 
