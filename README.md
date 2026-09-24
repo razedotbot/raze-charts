@@ -416,6 +416,12 @@ when users need exact values. The implemented behavior and integration
 checklist live in the [accessibility guide](./docs/accessibility.md). Raze
 Charts does not claim a blanket WCAG conformance certification.
 
+On phones and narrow viewports the widget's menus open as bottom sheets with
+touch-sized rows. The chrome also works under a strict Content Security
+Policy: styles need no `'unsafe-inline'`, and library markup goes only
+through a `raze-charts` Trusted Types policy. See
+[UI kit, CSP and localization](./docs/capabilities.md#ui-kit-csp-and-localization).
+
 ## Compatibility and migration
 
 - [Capability matrix](./docs/capabilities.md) — what each entrypoint supports.

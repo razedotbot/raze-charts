@@ -19,7 +19,7 @@ export class TimeframeBar {
   }
 
   private render(): void {
-    this.el.innerHTML = "";
+    this.el.replaceChildren();
     this.buttons.clear();
     for (const preset of TIMEFRAME_PRESETS) {
       this.el.appendChild(this.makeButton(preset, () => this.select(preset)));

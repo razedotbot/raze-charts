@@ -16,6 +16,7 @@ import {
   popupRow,
   type PopupHandle,
 } from "./popup";
+import { setMarkup, trustedMarkup } from "./kit/safe";
 
 export const LEFT_SIDEBAR_W = 42;
 
@@ -260,7 +261,7 @@ export class LeftSidebar {
     b.title = title;
     b.setAttribute("aria-label", title);
     b.className = "raze-chart-focusable";
-    b.innerHTML = svg;
+    setMarkup(b, trustedMarkup(svg));
     for (const icon of b.querySelectorAll("svg")) {
       icon.setAttribute("aria-hidden", "true");
       icon.setAttribute("focusable", "false");
@@ -323,7 +324,7 @@ export class LeftSidebar {
     if (!this.styleBtn) return;
     const def = this.chartStyles.find((s) => s.id === style) ?? ALL_CHART_STYLES.find((s) => s.id === style);
     if (!def) return;
-    this.styleBtn.innerHTML = def.svg;
+    setMarkup(this.styleBtn, trustedMarkup(def.svg));
     this.styleBtn.title = `Chart type: ${def.title}`;
     this.styleBtn.setAttribute("aria-label", `Chart type: ${def.title}`);
     for (const icon of this.styleBtn.querySelectorAll("svg")) {

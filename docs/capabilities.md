@@ -110,6 +110,17 @@ value exploration, custom-theme contrast, product copy, focus placement, and
 an alternative data table remain integration responsibilities. See the
 [accessibility guide](./accessibility.md).
 
+## UI kit, CSP and localization
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Phone and narrow-viewport menus | **Yes** | Menus opened by `openPopup()` (Indicators, chart type, objects tree, context menu) render as bottom sheets when the primary pointer is coarse or the viewport is narrower than 520px. Sheets are full width, at most 70% of the viewport height, safe-area padded, with 48px rows and scroll lock. A backdrop tap, the handle, a swipe down or Escape closes a sheet and restores focus. `PopupOptions.presentation` overrides the choice and `PopupHandle.presentation` reports it. |
+| Scoped stylesheet in shadow roots | **Subset** | `ensureBaseStyles(target?, { nonce? })` installs the chrome sheet into the Document or ShadowRoot that renders `target`. The widget itself still calls it for the document. Kit overlays adopt their styles wherever they render. |
+| Strict CSP `style-src` | **Subset** | Chrome styles use constructable stylesheets, which need no `'unsafe-inline'`. Without them, the `<style>` fallback takes a nonce from `ensureBaseStyles(…, { nonce })` or `<meta property="csp-nonce" nonce="…">`. |
+| Trusted Types (`require-trusted-types-for 'script'`) | **Subset** | The financial widget writes library-owned icon markup only through the `raze-charts` policy, so allow `trusted-types raze-charts`. The `/chart` SVG mount still assigns SVG markup directly and is not yet Trusted Types compatible. `SidebarCustomItem.icon` is host-authored markup written through the same policy: never build it from user input. |
+| Localized built-in chrome | **No** | Built-in labels are English. An internal `t(key, default)` runtime with lazy locale packs is in place, and chrome strings move to it before a public locale API ships. |
+| Overlays in element fullscreen | **Subset** | Bottom sheets and kit overlays follow the fullscreen element and shadow roots. Anchored desktop menus still portal to `document.body`. |
+
 ## How compatibility changes
 
 Before adding a compatibility-shaped export, it must do one of two things:

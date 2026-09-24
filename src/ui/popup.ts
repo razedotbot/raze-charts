@@ -1,7 +1,18 @@
 // Shared floating-popup container. Every menu the chrome opens (context menu,
 // Indicators panel, chart-type picker) uses this so
 // styling, stacking, viewport clamping, keyboard flow and dismissal stay
-// consistent — and are implemented once.
+// consistent — and are implemented once. On phones and narrow viewports menus
+// render as kit bottom sheets instead of anchored flyouts.
+
+import { lockScroll } from "./kit/focus";
+import { isCoarsePointer } from "./kit/media";
+import { resolvePresentation } from "./kit/Popover";
+import { createPortal, mirrorTheme, type Portal } from "./kit/portal";
+import { setMarkup, trustedMarkup } from "./kit/safe";
+import { createSheetFrame, SHEET_STYLES, type SheetFrame } from "./kit/Sheet";
+import { adoptStyles, BASE_STYLES, TOKEN_STYLES, type StyleOptions } from "./styles";
+
+export { isCoarsePointer };
 
 export interface PopupOptions {
   fontFamily: string;
@@ -25,6 +36,12 @@ export interface PopupOptions {
   label?: string;
   /** Move focus to the first interactive row after contents are appended. */
   initialFocus?: boolean;
+  /**
+   * `auto` renders a bottom sheet (backdrop, drag handle, 48px rows) when the
+   * primary pointer is coarse or the viewport is narrower than 520px.
+   * Defaults to `auto` for menus and `anchored` for dialog-role popups.
+   */
+  presentation?: "auto" | "anchored" | "sheet";
   onClose?: () => void;
 }
 
@@ -36,47 +53,21 @@ export interface PopupHandle {
   reposition: () => void;
   /** Focus a row by index (clamped to the available interactive rows). */
   focusItem: (index?: number) => void;
+  /** How the popup is presented (`sheet` on phones / narrow viewports). */
+  presentation: "anchored" | "sheet";
 }
 
 let popupId = 0;
 
-/** Coarse pointer (touch device) → bigger tap targets across the chrome.
- *  maxTouchPoints covers environments where the media query isn't emulated
- *  (and hybrids, where finger-sized targets are the safe choice). */
-export function isCoarsePointer(): boolean {
-  try {
-    if (typeof window === "undefined") return false;
-    if (window.matchMedia?.("(pointer: coarse)").matches) return true;
-    if (window.matchMedia?.("(any-pointer: coarse)").matches) return true;
-    return (navigator.maxTouchPoints ?? 0) > 0;
-  } catch {
-    return false;
-  }
-}
-
-/** One-time stylesheet for behaviours inline styles cannot express. */
-export function ensureBaseStyles(): void {
-  if (typeof document === "undefined" || document.getElementById("raze-chart-base-css")) return;
-  const style = document.createElement("style");
-  style.id = "raze-chart-base-css";
-  style.textContent =
-    ".raze-chart-left-sidebar{scrollbar-width:none}" +
-    ".raze-chart-left-sidebar::-webkit-scrollbar{display:none}" +
-    ".raze-chart-toolbar-scroll{scrollbar-width:none}" +
-    ".raze-chart-toolbar-scroll::-webkit-scrollbar{display:none}" +
-    ".raze-chart-toolbar{scrollbar-width:none}" +
-    ".raze-chart-toolbar::-webkit-scrollbar{display:none}" +
-    ".raze-chart-toolbar[data-scroll-left=\"true\"]::before,.raze-chart-toolbar[data-scroll-right=\"true\"]::after{position:absolute;top:0;bottom:1px;width:24px;display:flex;align-items:center;z-index:1;pointer-events:none;font-size:18px;font-weight:400;color:var(--tv-color-toolbar-button-text,#d1d4dc)}" +
-    ".raze-chart-toolbar[data-scroll-left=\"true\"]::before{content:\"‹\";left:0;padding-left:4px;background:linear-gradient(90deg,var(--tv-color-pane-background,#131722) 55%,transparent)}" +
-    ".raze-chart-toolbar[data-scroll-right=\"true\"]::after{content:\"›\";right:0;justify-content:flex-end;padding-right:4px;background:linear-gradient(90deg,transparent,var(--tv-color-pane-background,#131722) 45%)}" +
-    ".raze-chart-root,.raze-chart-canvas{user-select:none;-webkit-user-select:none}" +
-    ".raze-chart-root input,.raze-chart-root textarea{user-select:text;-webkit-user-select:text}" +
-    ".raze-chart-canvas:focus,.raze-chart-canvas:focus-visible{outline:none}" +
-    ".raze-chart-focusable:focus{outline:none}" +
-    ".raze-chart-focusable:focus-visible{outline:2px solid var(--tv-color-toolbar-button-text-hover,#2962ff);outline-offset:1px}" +
-    "@media (forced-colors:active){.raze-chart-focusable:focus-visible{outline-color:Highlight}}" +
-    "@media (prefers-reduced-motion:reduce){.raze-chart-loading-screen{transition:none!important}.raze-chart-loading-spinner{animation:none!important}.raze-chart-toolbar{scroll-behavior:auto!important}}";
-  document.head.appendChild(style);
+/**
+ * Install the chrome stylesheet (design tokens plus behaviour rules) into the
+ * Document or ShadowRoot that renders `target` (default: the document). Pass a
+ * CSP `nonce` when the page forbids inline styles and the browser lacks
+ * constructable stylesheets.
+ */
+export function ensureBaseStyles(target?: Node, options?: StyleOptions): void {
+  if (typeof document === "undefined") return;
+  adoptStyles(target ?? document, [TOKEN_STYLES, BASE_STYLES], options);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -95,6 +86,9 @@ function popupItems(el: HTMLElement): HTMLElement[] {
 }
 
 export function openPopup(opts: PopupOptions): PopupHandle {
+  const role = opts.role ?? "menu";
+  const presentation = resolvePresentation(opts.presentation ?? (role === "menu" ? "auto" : "anchored"), opts.anchor);
+  const sheet = presentation === "sheet";
   const el = document.createElement("div");
   el.id = `raze-chart-popup-${++popupId}`;
   if (opts.className) el.className = opts.className;
@@ -102,50 +96,35 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   el.setAttribute("aria-label", opts.label ?? "Chart menu");
   if ((opts.role ?? "menu") === "menu") el.setAttribute("aria-orientation", "vertical");
   el.tabIndex = -1;
-  el.style.cssText = [
-    "position:fixed",
-    `min-width:${opts.minWidth ?? 140}px`,
-    `padding:${opts.padding ?? "4px 0"}`,
-    "border-radius:6px",
-    "border:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
-    "background:var(--tv-color-popup-background, var(--tv-color-pane-background, #1e222d))",
-    "box-shadow:var(--tv-color-popup-shadow, 0 12px 24px -10px rgba(0,0,0,0.6))",
-    "z-index:2147483640",
-    `font-family:${opts.fontFamily}`,
-    "font-size:12px",
-    "color:var(--tv-color-popup-element-text, #d1d4dc)",
-  ].join(";");
+  el.dataset.presentation = presentation;
+  el.style.cssText = sheet
+    ? [
+      "padding:4px 8px 8px",
+      `font-family:${opts.fontFamily}`,
+      "font-size:14px",
+      "color:var(--tv-color-popup-element-text, #d1d4dc)",
+      "outline:none",
+    ].join(";")
+    : [
+      "position:fixed",
+      `min-width:${opts.minWidth ?? 140}px`,
+      `padding:${opts.padding ?? "4px 0"}`,
+      "border-radius:6px",
+      "border:1px solid var(--tv-color-toolbar-divider-background, #363a45)",
+      "background:var(--tv-color-popup-background, var(--tv-color-pane-background, #1e222d))",
+      "box-shadow:var(--tv-color-popup-shadow, 0 12px 24px -10px rgba(0,0,0,0.6))",
+      "z-index:2147483640",
+      `font-family:${opts.fontFamily}`,
+      "font-size:12px",
+      "color:var(--tv-color-popup-element-text, #d1d4dc)",
+    ].join(";");
 
   // Popups live under document.body so they can escape the clipped chart
   // viewport. Mirror the widget's custom properties explicitly; CSS variables
   // would otherwise stop at the portal boundary and light/custom themes would
   // fall back to the dark palette.
   const themeRoot = opts.themeRoot ?? opts.anchor?.closest<HTMLElement>(".raze-chart-root");
-  if (themeRoot) {
-    const names = new Set<string>([
-      "--tv-color-pane-background",
-      "--tv-color-platform-background",
-      "--tv-color-toolbar-button-background",
-      "--tv-color-toolbar-button-background-hover",
-      "--tv-color-toolbar-button-background-active",
-      "--tv-color-toolbar-button-text",
-      "--tv-color-toolbar-button-text-hover",
-      "--tv-color-toolbar-divider-background",
-      "--tv-color-popup-background",
-      "--tv-color-popup-element-text",
-      "--tv-color-popup-element-background-hover",
-      "--tv-color-popup-shadow",
-    ]);
-    for (let index = 0; index < themeRoot.style.length; index++) {
-      const name = themeRoot.style.item(index);
-      if (name.startsWith("--")) names.add(name);
-    }
-    const computed = typeof getComputedStyle === "function" ? getComputedStyle(themeRoot) : null;
-    for (const name of names) {
-      const value = themeRoot.style.getPropertyValue(name) || computed?.getPropertyValue(name) || "";
-      if (value.trim()) el.style.setProperty(name, value.trim());
-    }
-  }
+  if (!sheet) mirrorTheme(el, themeRoot);
 
   const activeElement = document.activeElement;
   const returnFocus = opts.anchor ?? (activeElement instanceof HTMLElement ? activeElement : null);
@@ -154,7 +133,28 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     opts.anchor.setAttribute("aria-expanded", "true");
     opts.anchor.setAttribute("aria-controls", el.id);
   }
-  document.body.appendChild(el);
+
+  // Bottom sheet: a kit portal (follows fullscreen and shadow roots) holding
+  // a backdrop and a full-width surface. Tapping the backdrop, activating the
+  // handle, or swiping down closes the menu and restores focus.
+  let portal: Portal | null = null;
+  let frame: SheetFrame | null = null;
+  let unlockScroll: (() => void) | null = null;
+  if (sheet) {
+    portal = createPortal({
+      anchor: opts.anchor ?? (returnFocus?.isConnected ? returnFocus : null),
+      themeRoot,
+      fontFamily: opts.fontFamily,
+      className: opts.className ? `${opts.className}-sheet` : undefined,
+    });
+    portal.adopt(SHEET_STYLES);
+    frame = createSheetFrame(portal.el, { content: el, onDismiss: () => close() });
+    unlockScroll = lockScroll(document);
+  } else {
+    document.body.appendChild(el);
+  }
+  // Pointer/focus containment covers the whole sheet (backdrop and handle).
+  const surface: HTMLElement = portal?.el ?? el;
 
   const focusItem = (index = 0): void => {
     const items = popupItems(el);
@@ -167,6 +167,7 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   };
 
   const reposition = (): void => {
+    if (sheet) return; // sheets are laid out by the kit stylesheet
     let left = opts.x ?? 0;
     let top = opts.y ?? 0;
     const pw = el.offsetWidth || opts.minWidth || 140;
@@ -198,6 +199,9 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     document.removeEventListener("keydown", onKey, true);
     el.removeEventListener("keydown", onMenuKey);
     el.removeEventListener("focusout", onFocusOut);
+    frame?.destroy();
+    portal?.destroy();
+    unlockScroll?.();
     el.remove();
     if (opts.anchor) {
       opts.anchor.setAttribute("aria-expanded", "false");
@@ -213,13 +217,13 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   const onAway = (e: PointerEvent): void => {
     const target = e.target;
     if (!(target instanceof Node)) return;
-    if (el.contains(target)) return;
+    if (surface.contains(target)) return;
     if (opts.anchor?.contains(target)) return; // let the anchor's own toggle run
     close({ restoreFocus: false });
   };
   const onKey = (e: KeyboardEvent): void => {
     if (e.key !== "Escape") return;
-    if (!el.contains(document.activeElement) && document.activeElement !== opts.anchor) return;
+    if (!surface.contains(document.activeElement) && document.activeElement !== opts.anchor) return;
     e.preventDefault();
     e.stopPropagation();
     close();
@@ -258,7 +262,7 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   }, 0);
 
   reposition();
-  return { el, close, reposition, focusItem };
+  return { el, close, reposition, focusItem, presentation };
 }
 
 /** Standard hover-highlighted popup row. ≥40px tall on touch devices. */
@@ -275,7 +279,7 @@ export function popupRow(
 ): HTMLButtonElement {
   const row = document.createElement("button");
   row.type = "button";
-  if (options?.trustedHtml) row.innerHTML = content;
+  if (options?.trustedHtml) setMarkup(row, trustedMarkup(content));
   else row.textContent = content;
   row.className = "raze-chart-focusable";
   row.setAttribute("role", options?.role ?? "menuitem");

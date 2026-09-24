@@ -42,7 +42,7 @@ export class IntervalSelector {
   }
 
   private render(): void {
-    this.mount.innerHTML = "";
+    this.mount.replaceChildren();
     this.buttons.clear();
     for (const res of this.ordered()) {
       this.mount.appendChild(this.makeButton(res));

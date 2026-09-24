@@ -100,6 +100,17 @@ This separation makes it obvious which configuration can travel with an
 existing widget integration and which configuration intentionally couples to
 Raze.
 
+### Content Security Policy
+
+TradingView's library renders inside an iframe. Raze renders in your page,
+so your page's CSP applies to it. Chrome styles use constructable stylesheets
+and need no `'unsafe-inline'`. Where those are unavailable, provide a nonce
+through `<meta property="csp-nonce" nonce="…">` or
+`ensureBaseStyles(target, { nonce })`. With Trusted Types enforced, allow the
+`raze-charts` policy (`trusted-types raze-charts`). The
+[capability matrix](./capabilities.md#ui-kit-csp-and-localization) lists the
+remaining gaps.
+
 ## Recharts-shaped JSX
 
 The React entrypoint is a focused translation layer over the native chart

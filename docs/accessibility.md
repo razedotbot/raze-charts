@@ -85,8 +85,19 @@ Opening moves focus into the popup. Arrow Up/Down and Home/End navigate,
 Escape closes and returns focus, and focus-out/outside click dismisses. An
 indicator menu rerender preserves focus on the corresponding row.
 
-Animation on the loading state respects `prefers-reduced-motion`. Built-in
-focus styles remain visible in forced-color mode.
+On phones (coarse primary pointer) and viewports narrower than 520px, menus
+open as bottom sheets with 48px rows. A named drag handle ("Close"), a
+backdrop tap, a swipe down or Escape closes a sheet and returns focus to the
+button that opened it. The page behind a sheet does not scroll.
+
+Animation on the loading state and on sheets respects
+`prefers-reduced-motion`. Built-in focus styles remain visible in
+forced-color mode.
+
+New settings surfaces are built on the internal [UI kit](./ui-kit.md). Its
+modal dialogs trap Tab and Shift+Tab, cancel on Escape and restore focus to
+their opener. Its tab lists, radio groups, spin buttons and colour palette
+follow the ARIA keyboard patterns.
 
 ## Integration responsibilities
 
