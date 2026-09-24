@@ -335,7 +335,9 @@ await check("legend entries are keyboard-reachable toggle buttons with pressed s
   assert.equal(fixture.el.legend.getAttribute("role"), "group", "toggles are grouped");
   assert.deepEqual(buttons.map((button) => button.getAttribute("aria-label")), ["Alpha", "Beta"], "toggles are named by series");
   assert(buttons.every((button) => button.getAttribute("aria-pressed") === "true"), "visible series are pressed");
-  assert(buttons.every((button) => button.style.cursor === "pointer"), "toggles show the pointer cursor");
+  // Pointers hit the painted entry, so a toggle never stacks a second hit
+  // target over it (tests/native-legend-toggles.mjs covers the cursor).
+  assert(buttons.every((button) => button.style.pointerEvents === "none"), "toggles take no pointer events");
   buttons[1].dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert(!fixture.handle.getScene().samples.some((sample) => sample.series === "Beta"), "clicking a toggle hides its series");
   fixture.handle.update(pairDefinition, { hiddenSeries: [] });

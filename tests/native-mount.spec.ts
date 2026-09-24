@@ -124,7 +124,11 @@ test.describe("native mount overlay", () => {
     });
     const alpha = page.getByRole("button", { name: "Alpha" });
     await expect(alpha).toHaveAttribute("aria-pressed", "true");
-    await alpha.click();
+    // The pointer lands on the painted Canvas entry under the toggle; the
+    // toggle itself takes no pointer events (one hit target per entry).
+    const box = (await alpha.boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(alpha).toHaveAttribute("aria-pressed", "false");
     expect(await series()).toEqual(["Beta"]);
     const beta = page.getByRole("button", { name: "Beta" });
     await beta.focus();

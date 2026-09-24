@@ -109,7 +109,7 @@ function rowSvg(layout: SceneLegendLayout, row: SceneLegendRow, c: CompiledChart
   if (!box) return "";
   const { theme } = c;
   const state = row.hidden ? ` data-hidden="true" opacity="${HIDDEN_OPACITY}"` : "";
-  // The markup is static: a mount's toggle buttons carry the pointer cursor.
+  // The markup is static: a mount shows the pointer cursor over the painted entry.
   const open = `<g data-series="${esc(row.id)}"${state} transform="translate(${round(box.x)},${round(box.y)})">`;
   const full = row.label !== undefined && row.label !== row.name ? `<title>${esc(row.name)}</title>` : "";
   if (layout.rowStyle === "stacked") {

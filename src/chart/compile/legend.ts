@@ -2,6 +2,7 @@
 // colours, hidden series, legend rows, and the measured legend layout
 // (wrapping top rows, a compacting side column, and `+N more`).
 
+import { t } from "../../i18n";
 import type { SceneLegendBox, SceneLegendLayout, SceneLegendRow } from "../sceneTypes";
 import { chartPalette, type DashboardTheme } from "../theme";
 import { isPluginMark, type ChartMark } from "./marks";
@@ -389,8 +390,12 @@ export function swatchWidth(symbol: LegendSymbol): number {
   return symbol === "line" ? 12 : 8;
 }
 
+/**
+ * Summary for `count` rows that did not fit. Translated when the layout is
+ * measured, so the reserved width fits the label the renderers paint.
+ */
 function moreLabel(count: number): string {
-  return `+${count} more`;
+  return t("chart.legend.more", "+{count} more", { count });
 }
 
 interface TopFlow {

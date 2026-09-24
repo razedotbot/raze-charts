@@ -900,59 +900,59 @@
       "tooltips": "4f53cda18c2baa0c0354bb5f"
     },
     "mount/time-svg": {
-      "dom": "ff64f0b334cccb0893cb11e7",
+      "dom": "e95ff7970a3a8524f46e1397",
       "events": "f3c4e020f576aeeca6105c08"
     },
     "mount/time-chrome-svg": {
-      "dom": "eb8c0acbaaf5d3c449195f14",
+      "dom": "7498cac29d41ab871656c39b",
       "events": "dc47c00a7fb575cd5c11a64d"
     },
     "mount/time-static-svg": {
-      "dom": "b7b692297787cb36f5324476",
+      "dom": "5c519c8a45b42356280aed13",
       "events": "76c2aadd460cbee15baabfd6"
     },
     "mount/basic-mixed-svg": {
-      "dom": "ff89f3364c92e060322080d6",
+      "dom": "76f8b8731ebc3ca3d6edda6c",
       "events": "ef31628e050a7007c3a63cbb"
     },
     "mount/stacked-svg": {
-      "dom": "93711e4b74aaf3225e1bf7f1",
+      "dom": "22285b0d5048edf731f8269b",
       "events": "7e2c30f5bfe69bb693661566"
     },
     "mount/area-points-svg": {
-      "dom": "2478bd561d2a1481ea1f749c",
+      "dom": "2f0ed95e6ee0a696d01aae54",
       "events": "33ce59a199cfa75daa1aae57"
     },
     "mount/plugin-lollipop-svg": {
-      "dom": "c977014597c9542dde44eea7",
+      "dom": "36b53781b65630c0ada449cb",
       "events": "748172de6c0b468d6f4cf913"
     },
     "mount/plugin-band-probe-svg": {
-      "dom": "ae61e6228aa52856e9725549",
+      "dom": "08e8d765c644bbc63326a435",
       "events": "e69a2c4f1127b88b2692bd5f"
     },
     "mount/plugin-annotations-svg": {
-      "dom": "7269a769569359770c36f125",
+      "dom": "42379739ff1f5914d5b278d6",
       "events": "ef8ddf42497b716940932b49"
     },
     "mount/dense-128-svg": {
-      "dom": "82d1f861e9d9e9e2c133873e",
+      "dom": "6c516b261575aea8bfe34ba5",
       "events": "362d2fb85e2a2631b83bde83"
     },
     "mount/hidden-series-svg": {
-      "dom": "3ce29f4eb96c2e35f70d087b",
+      "dom": "ec21f93bbf2c0d717f8de7fa",
       "events": "01929fad599fa52cc10f303a"
     },
     "mount/curves-svg": {
-      "dom": "83ca05728d71423ae6fb65e5",
+      "dom": "f3d80ae4bd40446f86cf179c",
       "events": "b142f9eb7fc36904179ab291"
     },
     "mount/rule-x-svg": {
-      "dom": "2f7278d74bf018c17cf25039",
+      "dom": "8c67b570fc06bbecb4e770ca",
       "events": "3f5dc395672707f7a199eae6"
     },
     "mount/typed-categories-svg": {
-      "dom": "7f49358e73d3fff65356bb28",
+      "dom": "f78836d249aca73e36fde249",
       "events": "1d6510fb82abe85a5c796fc5"
     },
     "mount/heatmap-basic-svg": {
@@ -964,11 +964,11 @@
       "events": "126b33cc50ebb6e0725334d4"
     },
     "mount/bars-negative-svg": {
-      "dom": "3d5af974a6d385f43c965453",
+      "dom": "4560e71297732d2fae3ca0cf",
       "events": "5bba9c742240c9a920a310a9"
     },
     "mount/bars-numeric-svg": {
-      "dom": "8801c96edd4a5087b81a7312",
+      "dom": "4115c449e24fff4c9544a034",
       "events": "8a106976a0ab8ec378016425"
     },
     "mount/histogram-fade-svg": {
@@ -980,11 +980,11 @@
       "events": "ef2d0e908179b345cb8c276a"
     },
     "mount/pie-dashboard-svg": {
-      "dom": "e6f6b50d8dd79186c0105c77",
+      "dom": "8edf7377996d67f9775d1118",
       "events": "941dc3fd09ccf67eec035c51"
     },
     "mount/radar-multi-svg": {
-      "dom": "b3d12c70cac4f6a7653e3a76",
+      "dom": "5226fc884a0322c860d95ca8",
       "events": "08b231695015a8a2190f19f4"
     },
     "mount/radar-dashboard-svg": {
@@ -992,15 +992,15 @@
       "events": "fb1b9bbd904957ea5626b551"
     },
     "mount/log-y-svg": {
-      "dom": "133e047dce22e88c8e99c493",
+      "dom": "314574da8c093a73a0bf7264",
       "events": "b3de3efb6d1aa735f5999b66"
     },
     "mount/theme-light-svg": {
-      "dom": "b3dac357eda67a46dcba0eac",
+      "dom": "a6994b51348afda4f5ab9ae3",
       "events": "ba94d79991c05c9b130e4911"
     },
     "mount/theme-custom-svg": {
-      "dom": "56d9403c639d6b7de22460ee",
+      "dom": "55b4e2d3a4a1eaff771cc82b",
       "events": "31d5efd700dad7ca662edf80"
     },
     "mount/dashboard-scatter-svg": {
@@ -1012,63 +1012,63 @@
       "events": "e30e587eb66d5f82d906fea7"
     },
     "mount/single-point-line-svg": {
-      "dom": "6b2aee1f6fbab0a0fec74537",
+      "dom": "92537a71c254998fb38f8005",
       "events": "a93eb8f97eefa641ea6c1402"
     },
     "mount/time-canvas": {
-      "dom": "e8b30ffeed88bd9697096e81",
+      "dom": "b883a16f2d85c9c4dba98f70",
       "events": "e9a795bc7c8d491aae388f4a"
     },
     "mount/time-chrome-canvas": {
-      "dom": "9d09f4037b32793829c2e300",
+      "dom": "8482a6945ee94ed85c4bccbe",
       "events": "ce945320a5dedee243228cd1"
     },
     "mount/time-static-canvas": {
-      "dom": "5c7282d17537d91ca14f79a9",
+      "dom": "4d86454fba097a91427a245b",
       "events": "76c2aadd460cbee15baabfd6"
     },
     "mount/basic-mixed-canvas": {
-      "dom": "689b194b7397b27945bc5e40",
+      "dom": "d72514ef9d800a6344bafa67",
       "events": "5bcacb0365c3ef4db72da6f0"
     },
     "mount/stacked-canvas": {
-      "dom": "d400635d55474a9615cc527b",
+      "dom": "09a7a304e8eac151b13706a9",
       "events": "e12eaf55d3a6c8be463ccd4e"
     },
     "mount/area-points-canvas": {
-      "dom": "e4936e2c94dd19447d30c0e7",
+      "dom": "3b8bec9bcca83e54639870af",
       "events": "2f141687173f6e8febd589d0"
     },
     "mount/plugin-lollipop-canvas": {
-      "dom": "a8dc22793891344c49622a2a",
+      "dom": "9eed508a500ebdcb7e5d7bf7",
       "events": "c4c1260e81c9da4e3c57b10f"
     },
     "mount/plugin-band-probe-canvas": {
-      "dom": "36be1bfcebe6adeb5e967905",
+      "dom": "a6d5910a10dcb84e89629d75",
       "events": "2dd670757756093fdb9ee447"
     },
     "mount/plugin-annotations-canvas": {
-      "dom": "99db105e50d349b7018e6a99",
+      "dom": "27dcf26805d1e6d286696819",
       "events": "ac29a213a1cec10c2c315867"
     },
     "mount/dense-128-canvas": {
-      "dom": "c7476ac942d03843d8da5bdc",
+      "dom": "448f9dfa6054f12d62641451",
       "events": "8762931dd0560a8dada98816"
     },
     "mount/hidden-series-canvas": {
-      "dom": "9ad973e9ce831df831a16644",
+      "dom": "5e5bc8ce1676b1926647cea7",
       "events": "1e274912ed02c2730ba43182"
     },
     "mount/curves-canvas": {
-      "dom": "c75cdd8a106d9e86d237a2c2",
+      "dom": "b80a770e5eda27b7820f577e",
       "events": "7565e958a514c54d070be935"
     },
     "mount/rule-x-canvas": {
-      "dom": "8895decaeec575952bcc12e0",
+      "dom": "1326ba9a586b86c8b18c0ed5",
       "events": "22fccd6ca3e7b4550f6931e6"
     },
     "mount/typed-categories-canvas": {
-      "dom": "77ac7adcf2fb0e0ddfca24e8",
+      "dom": "0c413fd778b7813d71377341",
       "events": "afa136d23e937344dc0c4a62"
     },
     "mount/heatmap-basic-canvas": {
@@ -1080,11 +1080,11 @@
       "events": "126b33cc50ebb6e0725334d4"
     },
     "mount/bars-negative-canvas": {
-      "dom": "bd3a1342c7c503e0ed56b3b6",
+      "dom": "1181e5198424a6a5e93ec604",
       "events": "d69caa175cdc07eb10edfaf2"
     },
     "mount/bars-numeric-canvas": {
-      "dom": "4bdc6eb6609832f76a3cd714",
+      "dom": "b9a1b4a00482f2b2fc5137d9",
       "events": "75ea9cffbbfdc7c0e27ce390"
     },
     "mount/histogram-fade-canvas": {
@@ -1096,11 +1096,11 @@
       "events": "ef2d0e908179b345cb8c276a"
     },
     "mount/pie-dashboard-canvas": {
-      "dom": "281d51ed08943a267764c8e8",
+      "dom": "bbb2a66bc2762c830dade63c",
       "events": "941dc3fd09ccf67eec035c51"
     },
     "mount/radar-multi-canvas": {
-      "dom": "8080efca2be1bc4678cc52eb",
+      "dom": "a327e15a352baaf61d164f1e",
       "events": "08b231695015a8a2190f19f4"
     },
     "mount/radar-dashboard-canvas": {
@@ -1108,15 +1108,15 @@
       "events": "fb1b9bbd904957ea5626b551"
     },
     "mount/log-y-canvas": {
-      "dom": "8156d8aeeb0f83dd7ea3ec80",
+      "dom": "c6e1a0865ca7cbd6e4e94e18",
       "events": "7aedaa0c85d770976b6ec2f4"
     },
     "mount/theme-light-canvas": {
-      "dom": "bed65e4eb2d1f22a9c803f92",
+      "dom": "37769d988311e571ccc59757",
       "events": "eaf96a1fec57e99cf42e3585"
     },
     "mount/theme-custom-canvas": {
-      "dom": "0d5b05c03c0c73c37fb9af70",
+      "dom": "99e6bc2e2d576c73232141fa",
       "events": "612a31bd3413656a2c786738"
     },
     "mount/dashboard-scatter-canvas": {
@@ -1128,11 +1128,11 @@
       "events": "e30e587eb66d5f82d906fea7"
     },
     "mount/single-point-line-canvas": {
-      "dom": "0debc6961dc409f1f368a784",
+      "dom": "74627cbe3b1b76cb5ba8ce3e",
       "events": "0b2bbb82b4e36bd120c0ff6f"
     },
     "mount/auto-ids": {
-      "dom": "7bba07ff02483a75e183dba5",
+      "dom": "e4879ebaa02a453bdb134f60",
       "events": "4f53cda18c2baa0c0354bb5f"
     }
   }

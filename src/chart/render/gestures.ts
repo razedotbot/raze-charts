@@ -74,6 +74,8 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
   let lastPanClientX = 0;
   let wheelRaf = 0;
   let pendingWheel: [number, number] | null = null;
+  /** The current press toggled a legend entry, so its release selects nothing. */
+  let legendPress = false;
 
   const setDrag = (next: typeof drag): void => {
     drag = next;
@@ -204,32 +206,46 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
     }
   };
 
-  const toggleFromEvent = (ev: PointerEvent, compiled: CompiledChart): boolean => {
+  /**
+   * Key of the painted legend entry under a pointer event: the SVG row it
+   * targets, else the row box at its coordinates (Canvas, or an SVG gap).
+   * This is the legend's only pointer hit-test; the toggle buttons over the
+   * entries serve keyboard and assistive technology and take no pointer events.
+   */
+  const legendKeyAt = (ev: MouseEvent, compiled: CompiledChart): string | null => {
     const target = ev.target as Element | null;
     const marked = target?.closest?.("[data-series]");
     if (marked && stage.contains(marked)) {
       const key = marked.getAttribute("data-series");
-      if (key && layoutLegend(compiled).toggleable) {
-        rt.toggleSeries(key);
-        return true;
-      }
+      if (key && layoutLegend(compiled).toggleable) return key;
     }
     const frame = rt.frame();
-    if (!frame) return false;
+    if (!frame) return null;
     const { x, y } = clientToScene(frame, ev.clientX, ev.clientY);
-    const entry = legendEntryAt(compiled, x, y);
-    if (!entry) return false;
-    rt.toggleSeries(entry.key);
-    return true;
+    return legendEntryAt(compiled, x, y)?.key ?? null;
+  };
+
+  /** Show the pointer cursor over a painted legend entry (the static markup carries none). */
+  const syncLegendCursor = (ev: MouseEvent | null): void => {
+    const compiled = state.scene;
+    const over = !!ev && !!compiled && !rt.isChromeEvent(ev) && legendKeyAt(ev, compiled) !== null;
+    const cursor = over ? "pointer" : "";
+    if (stage.style.cursor !== cursor) stage.style.cursor = cursor;
   };
 
   const onPointerDown = (ev: PointerEvent): void => {
+    legendPress = false;
     if (rt.isChromeEvent(ev)) return;
     flushWheel();
     const compiled = state.scene;
     const interact = rt.flags();
     if (!compiled) return;
-    if (toggleFromEvent(ev, compiled)) return;
+    const legendKey = legendKeyAt(ev, compiled);
+    if (legendKey !== null) {
+      legendPress = true;
+      rt.toggleSeries(legendKey);
+      return;
+    }
     if (compiled.polar || compiled.heatmap) return;
     const frame = rt.frame();
     if (!frame) return;
@@ -303,7 +319,11 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
   };
 
   const onPointerUp = (ev: PointerEvent): void => {
+    const pressedLegend = legendPress;
+    legendPress = false;
     if (!drag && rt.isChromeEvent(ev)) return;
+    // The press toggled a series; its release is not also a data selection.
+    if (pressedLegend && !drag) return;
     const compiled = state.scene;
     const finished = drag;
     setDrag(null);
@@ -331,6 +351,7 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
   };
 
   const onPointerCancel = (): void => {
+    legendPress = false;
     const cancelled = drag;
     setDrag(null);
     cancelPanRaf();
@@ -354,13 +375,16 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
       onPointerDrag(ev);
       return;
     }
+    syncLegendCursor(ev);
     hover.move(ev);
   };
 
   const onPointerLeave = (): void => {
+    syncLegendCursor(null);
     hover.leave();
   };
 
+  /** Enter or Space on a toggle button (they take no pointer events, see legendKeyAt). */
   const onLegendClick = (ev: MouseEvent): void => {
     const button = (ev.target as Element | null)?.closest?.("button[data-series]");
     const key = button?.getAttribute("data-series");
