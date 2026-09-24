@@ -46,12 +46,33 @@ window.devicePixelRatio = 1;
 const recorders = new WeakMap();
 function recorderFor(canvas, options) {
   const counts = new Map();
+  const count = (name) => counts.set(name, (counts.get(name) ?? 0) + 1);
+  // Style properties assigned through the proxy, saved and restored like a
+  // real 2D context's state stack (painters that unwind to their own save
+  // level by reading the state back rely on it).
+  const styles = new Map();
+  const stack = [];
   const target = {
     canvas,
     options,
     counts,
     calls: (name) => counts.get(name) ?? 0,
     reset: () => counts.clear(),
+    save() {
+      count("save");
+      stack.push(new Map(styles));
+    },
+    restore() {
+      count("restore");
+      const saved = stack.pop();
+      if (!saved) return;
+      for (const key of styles.keys()) if (!saved.has(key)) delete target[key];
+      styles.clear();
+      for (const [key, value] of saved) {
+        styles.set(key, value);
+        target[key] = value;
+      }
+    },
     measureText: (value) => ({ width: String(value ?? "").length * 6, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2 }),
     createLinearGradient: () => ({ addColorStop() {} }),
     createRadialGradient: () => ({ addColorStop() {} }),
@@ -70,6 +91,7 @@ function recorderFor(canvas, options) {
     },
     set(t, property, value) {
       t[property] = value;
+      if (typeof property === "string" && typeof value !== "function") styles.set(property, value);
       return true;
     },
   });

@@ -102,6 +102,11 @@ equal(L.formatStudyLabel(byName("Bollinger Bands"), { length: 30, mult: 2.5 }), 
 equal(L.formatStudyLabel(byName("MACD"), { length: 26 }), "MACD 12 26 9", "MACD shows fast, slow and signal, not the unused length");
 equal(L.formatStudyLabel(byName("MACD"), { fast: 5, slow: 35, signal: 5 }), "MACD 5 35 5", "MACD label follows named inputs");
 equal(L.formatStudyLabel(byName("MACD"), { in_0: 14, in_1: 30, in_2: 9 }), "MACD 14 30 9", "MACD label accepts TradingView in_N ids");
+// Built-in labels read the same input resolution compute() uses (W1B-14's declared inputs).
+equal(L.formatStudyLabel(byName("MACD"), { length: 30 }), "MACD 12 30 9", "the MACD length shorthand sets (and labels) the slow length");
+equal(L.formatStudyLabel(byName("MACD"), { "Fast Length": 8 }), "MACD 8 26 9", "MACD label follows TradingView input titles");
+equal(L.formatStudyLabel(byName("EMA"), { length: 9, src: "hl2" }), "EMA 9 hl2", "a changed source (by its src alias) joins the label");
+equal(L.formatStudyLabel(byName("EMA"), { length: 9, offset: 3 }), "EMA 9", "the offset input stays out of the label");
 equal(L.formatStudyLabel(byName("Bollinger Bands"), { length: 20 }, { showInputs: false }), "BB", "showInputs: false keeps the short title");
 
 const hl2 = { name: "HL2", pane: "overlay", defaults: { length: 1, color: "#8ecae6" }, compute: (bars) => bars.map((b) => (b.high + b.low) / 2) };

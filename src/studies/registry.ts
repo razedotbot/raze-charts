@@ -330,6 +330,7 @@ export const BUILTIN_STUDIES: StudyDefinition[] = /* @__PURE__ */ (() => [
   builtin(
     {
       name: "Bollinger Bands",
+      shortTitle: "BB",
       aliases: ["bb", "bollinger"],
       keywords: ["volatility"],
       pane: "overlay",

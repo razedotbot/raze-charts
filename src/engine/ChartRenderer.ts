@@ -33,7 +33,7 @@ import {
   toDisplay,
 } from "./plotScale";
 import { adjustPriceAxisWidth, computeTimeAxisTicks } from "./paint/axes";
-import { composeLegendSnapshot } from "./paint/legend";
+import { paintLegendForExport } from "./paint/legend";
 import type {
   Crosshair,
   DraftShape,
@@ -290,13 +290,14 @@ export class ChartRenderer implements GestureHost {
     view.tradingScreen = [];
     view.timescaleMarkScreen = [];
     paintFinanceScene(ctx, view, this.priceTicks, this.timeTicks);
+    // The on-screen legend is DOM, outside both canvases: paint it into the export.
+    paintLegendForExport(ctx, view);
     return out;
   }
 
   takeScreenshot(): void {
     try {
-      // The DOM legend is not in the canvas bitmap; paint it into the export.
-      composeLegendSnapshot(this.snapshot(), this.financeView()).toBlob((blob) => {
+      this.snapshot().toBlob((blob) => {
         if (!blob) {
           console.warn("[raze-charts] takeScreenshot: the chart has no pixels to export yet (zero-size container?)");
           return;

@@ -8,11 +8,14 @@
 // Precedence for one definition:
 //   1. `formatLabel(inputs)` when the definition provides it;
 //   2. the v2 input schema (`inputs`), honouring each input's `inLabel`;
-//   3. the built-in table below, for the v1 built-ins that predate the schema;
+//   3. a built-in's declared inputs (registry.ts), read through the same
+//      resolution compute() uses, so aliases, `in_N` ids and the `length`
+//      shorthand (MACD's slow length) label exactly what is plotted;
 //   4. the v1 shorthand: every numeric `defaults` entry, in declaration order,
 //      but only when `compute` reads its inputs argument at all.
 
-import { BUILTIN_STUDIES } from "./registry";
+import type { StudyDefinition, StudyInputs } from "../types/charting_library";
+import { builtinInputSchema, resolveBuiltinInputs } from "./registry";
 
 /** One input descriptor as the label builder reads it (v2 map value or array item). */
 export interface StudyLabelInput {
@@ -44,38 +47,6 @@ export interface StudyLabelInstance {
   readonly inputs?: { readonly [key: string]: unknown };
 }
 
-interface BuiltinInput {
-  /** Accepted input ids, canonical first (TradingView `in_N` ids included). */
-  readonly keys: readonly string[];
-  readonly default: number;
-}
-
-interface BuiltinLabel {
-  readonly shortTitle?: string;
-  readonly inputs: readonly BuiltinInput[];
-}
-
-const LENGTH = (fallback: number): BuiltinInput => ({ keys: ["length", "in_0"], default: fallback });
-
-/** Labels for the v1 built-ins; a definition's own metadata always wins. */
-const BUILTIN_LABELS: Readonly<Record<string, BuiltinLabel>> = {
-  ema: { inputs: [LENGTH(9)] },
-  sma: { inputs: [LENGTH(20)] },
-  rsi: { inputs: [LENGTH(14)] },
-  vwap: { inputs: [] },
-  "bollinger bands": {
-    shortTitle: "BB",
-    inputs: [LENGTH(20), { keys: ["mult", "multiplier", "stdDev", "stddev", "in_1"], default: 2 }],
-  },
-  macd: {
-    inputs: [
-      { keys: ["fast", "fastLength", "in_0"], default: 12 },
-      { keys: ["slow", "slowLength", "in_1"], default: 26 },
-      { keys: ["signal", "signalLength", "in_2"], default: 9 },
-    ],
-  },
-};
-
 const warned = new WeakSet<object>();
 
 /** Compact, locale-independent input token: 20, 2, 0.5, 1.25. */
@@ -92,21 +63,7 @@ export function formatLabelToken(value: unknown): string | null {
 /** The title a label starts with: `shortTitle`, else the canonical name. */
 export function studyShortTitle(def: StudyLabelDefinition): string {
   const short = typeof def.shortTitle === "string" ? def.shortTitle.trim() : "";
-  return short || builtinLabel(def)?.shortTitle || def.name;
-}
-
-/** Table entry for an unmodified v1 built-in definition object. */
-function builtinLabel(def: StudyLabelDefinition): BuiltinLabel | undefined {
-  return (BUILTIN_STUDIES as readonly object[]).includes(def) ? BUILTIN_LABELS[def.name.toLowerCase()] : undefined;
-}
-
-function pick(values: { readonly [key: string]: unknown }, keys: readonly string[]): unknown {
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(values, key) && values[key] !== undefined && values[key] !== "") {
-      return values[key];
-    }
-  }
-  return undefined;
+  return short || def.name;
 }
 
 function schemaEntries(inputs: NonNullable<StudyLabelDefinition["inputs"]>): [string, StudyLabelInput][] {
@@ -180,14 +137,11 @@ export function studyLabelTokens(
   values: { readonly [key: string]: unknown } = {},
 ): string[] {
   if (def.inputs && typeof def.inputs === "object") return schemaTokens(def.inputs, values);
-  const builtin = builtinLabel(def);
-  if (builtin) {
-    const tokens: string[] = [];
-    for (const input of builtin.inputs) {
-      const token = formatLabelToken(pick(values, input.keys) ?? input.default);
-      if (token) tokens.push(token);
-    }
-    return tokens;
+  const builtin = def as unknown as StudyDefinition;
+  const schema = builtinInputSchema(builtin);
+  if (schema) {
+    const effective = resolveBuiltinInputs(builtin, values as unknown as StudyInputs) ?? values;
+    return schemaTokens(schema as unknown as NonNullable<StudyLabelDefinition["inputs"]>, effective);
   }
   return v1Tokens(def, values);
 }

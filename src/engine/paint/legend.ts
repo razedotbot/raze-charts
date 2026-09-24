@@ -426,6 +426,18 @@ export function paintLegendModel(ctx: CanvasRenderingContext2D, v: FinanceView, 
 }
 
 /**
+ * Paint the legend into an export that the whole scene was just repainted
+ * into (ChartRenderer.snapshot()). With a DOM legend attached the scene's
+ * drawLegend() mark renders the DOM instead of the canvas, so the export
+ * would otherwise lack it; without one the scene already painted it.
+ */
+export function paintLegendForExport(ctx: CanvasRenderingContext2D, v: FinanceView): void {
+  if (!views.has(v.context)) return;
+  const model = buildLegendModel(v);
+  if (model) paintLegendModel(ctx, v, model);
+}
+
+/**
  * The canvas to export as a screenshot. When the DOM legend is active the
  * canvas has no legend pixels, so a copy is returned with the legend painted
  * in; otherwise `source` itself (it already carries the canvas legend).

@@ -107,15 +107,10 @@ export function paintFinanceMark(
       drawShapes(ctx, v);
       break;
     case "draft":
-      // On the single canvas the draft painted below the axes, which hid any
-      // part of it outside the plot. The overlay paints above the axes, so
-      // the draft is clipped to the main plot instead.
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(v.plotL, v.plotT, v.plotW, v.plotH);
-      ctx.clip();
+      // The overlay paints above the axes; drawDraft() clips the ghost (and
+      // its handles) to the main plot itself, like every drawing, so no part
+      // of it paints over the axis labels.
       drawDraft(ctx, v);
-      ctx.restore();
       break;
     case "barMarks":
       drawMarks(ctx, v);
