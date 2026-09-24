@@ -372,20 +372,28 @@ test.describe("header controls", () => {
         const toolbar = document.querySelector<HTMLElement>(".raze-chart-toolbar")!;
         const last = [...toolbar.querySelectorAll<HTMLElement>("button")].at(-1)!;
         const before = toolbar.scrollLeft;
-        // preventScroll: the browser's own focus scrolling (always instant)
-        // stays out of it, so only the toolbar's reveal handler can scroll.
-        last.focus({ preventScroll: true });
-        return { before, after: toolbar.scrollLeft, focused: document.activeElement === last, overflow: toolbar.scrollWidth > toolbar.clientWidth };
+        // Record what the reveal handler asks for. Whether "smooth" actually
+        // animates is the platform's call: Chromium scrolls instantly when the
+        // OS disables animations, as on the Windows CI runners.
+        const requested: (ScrollBehavior | undefined)[] = [];
+        const original = HTMLElement.prototype.scrollIntoView;
+        HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, arg?: boolean | ScrollIntoViewOptions) {
+          if (this === last) requested.push(typeof arg === "object" ? arg.behavior : undefined);
+          return original.call(this, arg);
+        };
+        try {
+          // preventScroll: the browser's own focus scrolling stays out of it,
+          // so only the toolbar's reveal handler can scroll.
+          last.focus({ preventScroll: true });
+        } finally {
+          HTMLElement.prototype.scrollIntoView = original;
+        }
+        return { before, requested, focused: document.activeElement === last, overflow: toolbar.scrollWidth > toolbar.clientWidth };
       });
       expect(scroll).toMatchObject({ before: 0, focused: true, overflow: true });
-      if (reducedMotion === "reduce") {
-        // Read synchronously after focus(): an animated scroll has not moved yet.
-        expect(scroll.after).toBeGreaterThan(0);
-      } else {
-        // Smooth: nothing has moved synchronously, and the rail then gets there.
-        expect(scroll.after).toBe(0);
-        await expect.poll(readScroll).toBeGreaterThan(0);
-      }
+      expect(scroll.requested).toEqual([reducedMotion === "reduce" ? "auto" : "smooth"]);
+      // Either way the control ends up revealed.
+      await expect.poll(readScroll).toBeGreaterThan(0);
     });
   }
 
