@@ -73,9 +73,9 @@ npm run check:size
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
 | | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 52 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
-| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 5 KiB |
+| Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 10 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
-| | Scenario: Registry with built-ins | `import { StudyRegistry }` | 3 KiB |
+| | Scenario: Registry with built-ins | `import { StudyRegistry }` | 7 KiB |
 
 <!-- bundle-budgets:end -->
 
@@ -195,6 +195,22 @@ the custom time formatters (0.13 KiB). The legacy UTC tick code in
 `plotScale.ts` is already tree-shaken out of the artifact, so deleting it
 saves nothing here. Moving the timezone API and the formatters out of the root
 would therefore still leave the artifact above 72 KiB.
+
+The study kernels artifact budget grew from 5 to 10 KiB and the "Registry with
+built-ins" scenario from 3 to 7 KiB in wave 1B (W1B-14). Session-anchored VWAP
+needs the shared DST-aware time core (`src/util/time/zone.ts` plus the Intl
+cache, about 2.3 KiB gzip) instead of UTC-day arithmetic; the kernels gained
+gap handling, source selection, offsets and O(n) rolling moments that stay
+exact through bad prints and price-level changes (about 1.5 KiB); and the
+registry now carries each built-in's input declarations, input validation
+with guidance, exact name resolution and the pane value formatter (about
+2.1 KiB). Keyword search is the separate `searchStudies()` export, so the
+widget does not ship it. The catalogue is declared in one pure expression and
+the time core's module state is annotated pure, so the "Single kernel"
+scenario still ships well under its 1 KiB budget. In the root widget artifact
+the same work adds about 6.2 KiB gzip (62.7 to 68.9 KiB, inside the existing
+72 KiB budget): 2.6 KiB is the time core, which other wave 1B packages also
+pull in, and about 3.5 KiB is the kernels and registry.
 
 ## Dense native charts
 

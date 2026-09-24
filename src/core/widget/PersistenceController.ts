@@ -95,7 +95,7 @@ export class PersistenceController implements WidgetController {
     const { context, data, shapes, studies, commands, lifecycle, controllers } = this.host;
     const unknownStudy = state.studies.find((study) => !studies.registry.resolve(study.name));
     if (unknownStudy) {
-      throw new Error(`[raze-charts] chart layout references unknown study: ${unknownStudy.name}`);
+      throw new Error(studies.registry.unknownStudyMessage(unknownStudy.name));
     }
 
     const loadId = ++this.loadId;

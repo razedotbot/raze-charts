@@ -32,17 +32,27 @@ class StudyRegistry
   list(): StudyDefinition[]
   register(def: StudyDefinition): void
   resolve(name: string): StudyDefinition | null
+  unknownStudyMessage(name: string): string
 interface StudySeries
   color?: string | undefined
   name?: string | undefined
   style?: StudySeriesStyle | undefined
   values: (null | number)[]
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
+type StudySource = 'close' | 'high' | 'hl2' | 'hlc3' | 'hlcc4' | 'low' | 'ohlc4' | 'open' | 'volume'
+type VwapAnchor = 'month' | 'quarter' | 'session' | 'week' | 'year'
+interface VwapOptions
+  anchor?: VwapAnchor | undefined
+  session?: string | undefined
+  source?: StudySource | undefined
+  timezone?: string | undefined
 function bollinger(closes: number[], length: number, multiplier?: number | undefined): { mid: (null | number)[]; upper: (null | number)[]; lower: (null | number)[]; }
 function closesFromBars(bars: Bar[]): number[]
 function ema(closes: number[], length: number): (null | number)[]
 function macd(closes: number[], fast?: number | undefined, slow?: number | undefined, signal?: number | undefined): { macd: (null | number)[]; signal: (null | number)[]; hist: (null | number)[]; }
 function rsi(closes: number[], length: number): (null | number)[]
+function searchStudies(defs: readonly StudyDefinition[], query: string): StudyDefinition[]
 function sma(closes: number[], length: number): (null | number)[]
+function sourceValues(bars: readonly Bar[], source?: StudySource | undefined): number[]
 function stdev(closes: number[], length: number): (null | number)[]
-function vwap(bars: Bar[]): (null | number)[]
+function vwap(bars: Bar[], options?: VwapOptions | undefined): (null | number)[]
