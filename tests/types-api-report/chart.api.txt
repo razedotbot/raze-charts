@@ -419,3 +419,12 @@ function scaleTime(opts?: undefined | { domain?: readonly [Date | number, Date |
 function svgFromCompiled(c: CompiledChart, options?: SvgRenderOptions | undefined): string
 function tooltipText(n: SceneNode): string
 function viewportFromPreset(preset: '1D' | '1M' | '1W' | '3M' | 'ALL' | 'YTD', extent: readonly [number, number], now?: number | undefined): ChartViewport
+# referenced, not exported
+type BuiltinBase = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { plugin?: undefined; pluginOptions?: undefined; }
+type BuiltinCartesian = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+type ErasedMarkPlugin = ChartMarkPlugin<unknown, unknown>
+interface NamedMarkOptions
+  name?: string | undefined
+type PolarOrHeatmapMark = HeatmapChartMark | PieChartMark | RadarChartMark
+type ScalesForMarks<TMarks extends readonly ChartMark[]> = number extends TMarks['length'] ? { x?: XScaleSpec | undefined; y?: BandScaleSpec | YScaleSpec | undefined; } : TMarks extends readonly [HeatmapChartMark] ? { x?: BandScaleSpec | undefined; y?: BandScaleSpec | undefined; } : TMarks extends readonly [PieChartMark] | readonly [RadarChartMark, ...RadarChartMark[]] ? never : { x?: XScaleSpec | undefined; y?: YScaleSpec | undefined; }
+type ValidMarkComposition<TMarks extends readonly ChartMark[]> = number extends TMarks['length'] ? TMarks : TMarks extends readonly [HeatmapChartMark] | readonly [PieChartMark] | readonly [RadarChartMark, ...RadarChartMark[]] ? TMarks : Extract<TMarks[number], PolarOrHeatmapMark> extends never ? TMarks : never

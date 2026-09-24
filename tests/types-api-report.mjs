@@ -6,8 +6,11 @@
 // alias), and the generated trees behind the ".", "./chart" and "./react"
 // exports. This test loads each of them with the TypeScript compiler, resolves
 // every exported name, and prints its kind, type parameters and resolved
-// member types into a line-oriented report. The report is compared with the
-// checked-in snapshot under tests/types-api-report/.
+// member types into a line-oriented report. Named package declarations that
+// the exports reference without exporting (a private base interface, a helper
+// type alias) are described too, under a trailing "# referenced, not exported"
+// section, because the exports print them by name only. The report is compared
+// with the checked-in snapshot under tests/types-api-report/.
 //
 // The report is intentionally insensitive to where a declaration lives (module
 // paths in `import("…")` qualifiers are dropped) and to member declaration
@@ -306,6 +309,73 @@ function typeOnlyExports(file, names) {
   return typeOnly;
 }
 
+// ── Declarations the exports depend on without exporting them ──────────────
+const REFERENCED_SECTION = "# referenced, not exported";
+const REFERENCED_KINDS = ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias | ts.SymbolFlags.Class
+  | ts.SymbolFlags.Enum | ts.SymbolFlags.Function | ts.SymbolFlags.Variable
+  | ts.SymbolFlags.ValueModule | ts.SymbolFlags.NamespaceModule;
+const MODULE_KINDS = ts.SymbolFlags.ValueModule | ts.SymbolFlags.NamespaceModule;
+
+/** A module- or namespace-level declaration: not a parameter, type parameter or member. */
+function isTopLevelDeclaration(declaration) {
+  const statement = ts.isVariableDeclaration(declaration) ? declaration.parent?.parent : declaration;
+  const parent = statement?.parent;
+  return Boolean(parent) && (ts.isSourceFile(parent) || ts.isModuleBlock(parent));
+}
+
+const isPublishedDeclaration = (symbol) => Boolean(symbol.declarations?.length)
+  && symbol.declarations.every((declaration) => isTopLevelDeclaration(declaration)
+    && resolve(declaration.getSourceFile().fileName).startsWith(distRoot));
+
+/** The exported symbols, including the members of exported namespaces. */
+function exportedClosure(symbols) {
+  const closure = new Set();
+  const add = (symbol) => {
+    if (closure.has(symbol)) return;
+    closure.add(symbol);
+    if (symbol.flags & MODULE_KINDS) for (const member of checker.getExportsOfModule(symbol)) add(resolveAlias(member));
+  };
+  symbols.forEach(add);
+  return closure;
+}
+
+/**
+ * Named package declarations that the exported declarations reference, directly
+ * or through each other, without exporting them. Their names appear in the
+ * report, but a change to their structure would not, so they are described too.
+ */
+function unexportedReferences(exportedSymbols) {
+  const exported = exportedClosure(exportedSymbols);
+  const found = new Set();
+  const queue = [...exported];
+  const consider = (target) => {
+    const symbol = target && resolveAlias(target);
+    if (!symbol || exported.has(symbol) || found.has(symbol)) return;
+    if (!(symbol.flags & REFERENCED_KINDS) || !isPublishedDeclaration(symbol)) return;
+    found.add(symbol);
+    queue.push(symbol);
+  };
+  const visit = (node) => {
+    const name = ts.isTypeReferenceNode(node) ? node.typeName
+      : ts.isExpressionWithTypeArguments(node) ? node.expression
+      : ts.isTypeQueryNode(node) ? node.exprName
+      : ts.isImportTypeNode(node) ? node.qualifier
+      : undefined;
+    if (name) consider(checker.getSymbolAtLocation(name));
+    ts.forEachChild(node, visit);
+  };
+  while (queue.length) {
+    const symbol = queue.shift();
+    if (symbol.flags & MODULE_KINDS) {
+      for (const member of checker.getExportsOfModule(symbol)) consider(member);
+    }
+    // A module re-exported as a namespace is declared by its whole source file;
+    // its members are visited individually instead.
+    for (const declaration of symbol.declarations ?? []) if (!ts.isSourceFile(declaration)) visit(declaration);
+  }
+  return [...found].sort((a, b) => compareText(a.name, b.name));
+}
+
 function reportFor(file) {
   const sourceFile = program.getSourceFile(resolve(root, file));
   const moduleSymbol = sourceFile && checker.getSymbolAtLocation(sourceFile);
@@ -317,6 +387,11 @@ function reportFor(file) {
   );
   const lines = [];
   for (const { name, symbol } of exports) lines.push(...describe(name, symbol, typeOnly.has(name)));
+  const referenced = unexportedReferences(exports.map(({ symbol }) => symbol));
+  if (referenced.length) {
+    lines.push(REFERENCED_SECTION);
+    for (const symbol of referenced) lines.push(...describe(symbol.name, symbol, false));
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -324,12 +399,15 @@ function reportFor(file) {
 /** Report lines keyed by their owning top-level declaration, so a diff says where a member changed. */
 function keyedLines(text) {
   let owner = "";
-  return text.split("\n").filter((line) => line && !line.startsWith("#")).map((line) => {
+  let section = "";
+  return text.split("\n").flatMap((line) => {
+    if (line === REFERENCED_SECTION) section = "    (referenced, not exported)";
+    if (!line || line.startsWith("#")) return [];
     if (!line.startsWith(" ")) {
-      owner = line;
-      return line;
+      owner = `${line}${section}`;
+      return [owner];
     }
-    return `${line}    ← in ${owner}`;
+    return [`${line}    ← in ${owner}`];
   });
 }
 

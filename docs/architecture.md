@@ -66,7 +66,8 @@ rules:
 documentation in the flattened file as in its module.
 
 `tests/types-api-report.mjs` resolves every export of the published
-declaration entry points and compares a normalized report with
+declaration entry points, plus every named package type those exports
+reference without exporting, and compares a normalized report with
 `tests/types-api-report/*.api.txt`. The report ignores which file declares a
 type, so moving a declaration between modules is free, while any change to a
 name, member, modifier or type fails with a diff. After an intentional public

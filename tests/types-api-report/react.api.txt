@@ -152,3 +152,365 @@ function point<T>(data: readonly T[], opts: PointMarkOptions<T>): PointChartMark
 function radar<T>(data: readonly T[], opts: RadarMarkOptions<T>): RadarChartMark
 function ruleX(values: readonly (Date | number | string)[], opts?: RuleXMarkOptions | undefined): RuleXChartMark
 function ruleY(values: readonly number[], opts?: RuleYMarkOptions | undefined): RuleYChartMark
+# referenced, not exported
+type Accessor<T> = ((row: T) => unknown) | (keyof T & string)
+type AnyScale = BandScale<number | string> | LinearScale
+type AreaChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'area'; stroke?: string | undefined; fill?: string | undefined; fillOpacity?: number | undefined; strokeWidth?: number | undefined; lastValue?: boolean | undefined; dashed?: boolean | undefined; curve?: ChartCurve | undefined; y0?: Accessor<never> | undefined; } & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+interface AreaMarkOptions<T> extends CartesianMarkOptions<T>
+  curve?: ChartCurve | undefined
+  dashed?: boolean | undefined
+  fill?: string | undefined
+  fillOpacity?: number | undefined
+  lastValue?: boolean | undefined
+  name?: string | undefined
+  stroke?: string | undefined
+  strokeWidth?: number | undefined
+  x: Accessor<T>
+  y: Accessor<T>
+  y0?: Accessor<T> | undefined
+interface AutoLinearScaleSpec
+  domain?: readonly [number, number] | undefined
+  nice?: boolean | undefined
+  padding?: undefined
+  tickFormat?: ((value: unknown) => string) | undefined
+  type?: undefined
+interface BandScale<T extends number | string = string>
+  bandwidth(): number
+  copy(): BandScale<T>
+  domain: T[]
+  readonly kind: 'band'
+  map(value: T): number
+  padding: number
+  range: [number, number]
+  start(value: T): number
+interface BandScaleSpec
+  domain?: readonly (number | string)[] | undefined
+  nice?: undefined
+  padding?: number | undefined
+  tickFormat?: ((value: unknown) => string) | undefined
+  type: 'band'
+type BarChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'bar'; fill?: string | undefined; stackId?: string | undefined; lastValue?: boolean | undefined; fade?: boolean | undefined; } & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+interface BarMarkOptions<T> extends CartesianMarkOptions<T>
+  fade?: boolean | undefined
+  fill?: string | undefined
+  lastValue?: boolean | undefined
+  name?: string | undefined
+  stackId?: string | undefined
+  x: Accessor<T>
+  y: Accessor<T>
+type BuiltinBase = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { plugin?: undefined; pluginOptions?: undefined; }
+type BuiltinCartesian = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+type BuiltinChartMark = AreaChartMark | BarChartMark | HeatmapChartMark | LineChartMark | PieChartMark | PointChartMark | RadarChartMark | RuleXChartMark | RuleYChartMark
+interface CartesianMarkOptions<T> extends NamedMarkOptions
+  name?: string | undefined
+  x: Accessor<T>
+  y: Accessor<T>
+type ChartCurve = 'linear' | 'monotone' | 'step'
+interface ChartDefinition
+  spec(input: { width: number; height: number; }): ChartSpec
+interface ChartDiagnostics
+  decimatedPoints: number
+  hoverSamples: number
+  renderedNodes: number
+  sourceRows: number
+  visibleRows: number
+type ChartMark = BuiltinChartMark | PluginChartMark
+interface ChartMarkBase
+  angleKey?: Accessor<never> | undefined
+  curve?: ChartCurve | undefined
+  dashed?: boolean | undefined
+  data: readonly unknown[]
+  fade?: boolean | undefined
+  fill?: string | undefined
+  fillOpacity?: number | undefined
+  innerRadius?: number | undefined
+  key?: Accessor<never> | undefined
+  labelKey?: Accessor<never> | undefined
+  lastValue?: boolean | undefined
+  name?: string | undefined
+  outerRadius?: number | undefined
+  r?: number | undefined
+  stackId?: string | undefined
+  stroke?: string | undefined
+  strokeWidth?: number | undefined
+  valueKey?: Accessor<never> | undefined
+  x?: Accessor<never> | undefined
+  y?: Accessor<never> | undefined
+  y0?: Accessor<never> | undefined
+interface ChartMarkPlugin<TDatum, TOptions = Record<string, never>>
+  compile(context: ChartMarkPluginContext<TDatum, TOptions>): ChartMarkPluginResult
+  readonly kind: string
+interface ChartMarkPluginBandScale
+  bandwidth(): number
+  copy(): ChartMarkPluginBandScale
+  readonly domain: readonly (number | string)[]
+  readonly kind: 'band'
+  map(value: number | string): number
+  readonly padding: number
+  readonly range: readonly [number, number]
+  start(value: number | string): number
+interface ChartMarkPluginContext<TDatum, TOptions>
+  color: string
+  data: readonly TDatum[]
+  height: number
+  mapX(value: unknown): number
+  mapY(value: unknown): number
+  name: string
+  options: TOptions
+  plot: Readonly<{ x: number; y: number; w: number; h: number; }>
+  theme: Readonly<DashboardTheme>
+  width: number
+  xScale: ChartMarkPluginScale
+  yScale: ChartMarkPluginScale
+interface ChartMarkPluginLinearScale
+  copy(): ChartMarkPluginLinearScale
+  readonly domain: readonly [number, number]
+  invert(px: number): number
+  readonly kind: 'linear'
+  map(value: number): number
+  readonly range: readonly [number, number]
+  ticks(count?: number | undefined): number[]
+interface ChartMarkPluginResult
+  lastValues?: LastValue[] | undefined
+  legend?: undefined | { name: string; color: string; detail?: string | undefined; }[]
+  nodes: SceneNode[]
+  samples?: HoverSample[] | undefined
+type ChartMarkPluginScale = ChartMarkPluginBandScale | ChartMarkPluginLinearScale
+interface ChartPerformanceOptions
+  decimation?: 'auto' | 'none' | undefined
+  maxRenderedPoints?: number | undefined
+interface ChartPointerEvent
+  datum?: unknown
+  node: SceneNode | null
+  sample: HoverSample | null
+  series?: string | undefined
+  x: unknown
+  y?: number | undefined
+interface ChartSpec
+  ariaDescription?: string | undefined
+  ariaLabel?: string | undefined
+  grid?: boolean | undefined
+  height?: number | undefined
+  hiddenSeries?: readonly string[] | undefined
+  legend?: boolean | undefined
+  margin?: Partial<Margin> | undefined
+  marks: readonly ChartMark[]
+  performance?: ChartPerformanceOptions | undefined
+  scales?: undefined | { x?: XScaleSpec | undefined; y?: BandScaleSpec | YScaleSpec | undefined; }
+  theme?: ChartThemeInput | undefined
+  tooltip?: boolean | undefined
+  viewport?: ChartViewport | undefined
+  width?: number | undefined
+type ChartThemeInput = 'dark' | 'light' | Partial<DashboardTheme>
+interface ChartViewport
+  x?: ChartViewportX | undefined
+  y?: readonly [number, number] | undefined
+type ChartViewportX = readonly (number | string)[] | readonly [Date | number, Date | number]
+interface CompiledChart
+  ariaDescription: string
+  ariaLabel: string
+  colorBar: null | { min: number; max: number; }
+  diagnostics: ChartDiagnostics
+  grid: boolean
+  heatmap: boolean
+  height: number
+  lastValues: LastValue[]
+  legend: { name: string; color: string; detail?: string | undefined; }[]
+  legendPlacement: 'hidden' | 'right' | 'top'
+  margin: Margin
+  nodes: SceneNode[]
+  plot: { x: number; y: number; w: number; h: number; }
+  polar: boolean
+  samples: HoverSample[]
+  theme: DashboardTheme
+  tooltip: boolean
+  viewport: ChartViewport | null
+  width: number
+  xScale: AnyScale
+  xTicks: { value: unknown; px: number; label: string; }[]
+  yScale: AnyScale
+  yTicks: { value: unknown; px: number; label: string; }[]
+type ComponentRole = 'area' | 'bar' | 'brush' | 'grid' | 'heatmap' | 'legend' | 'line' | 'pie' | 'radar' | 'reference-line' | 'scatter' | 'tooltip' | 'x-axis' | 'y-axis'
+interface DashboardTheme
+  accent: string
+  axis: string
+  background: string
+  chipBg: string
+  chipFg: string
+  crosshair: string
+  down: string
+  font: string
+  gold: string
+  grid: string
+  heatZero: string
+  lastChipFg: string
+  muted: string
+  sky: string
+  text: string
+type Descriptor<P> = ((props: P) => null) & { [COMPONENT_ROLE]: ComponentRole; }
+type ErasedMarkPlugin = ChartMarkPlugin<unknown, unknown>
+type HeatmapChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'heatmap'; valueKey: Accessor<never>; } & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+interface HeatmapMarkOptions<T> extends NamedMarkOptions
+  name?: string | undefined
+  valueKey: Accessor<T>
+  x: Accessor<T>
+  y: Accessor<T>
+type HeatmapYScaleSpec = BandScaleSpec
+interface HoverSample
+  color: string
+  kind: 'line' | 'point' | 'radar'
+  series: string
+  tip: string
+  x: number
+  y: number
+interface LastValue
+  color: string
+  dash?: boolean | undefined
+  label: string
+  y: number
+type LineChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'line'; stroke?: string | undefined; strokeWidth?: number | undefined; lastValue?: boolean | undefined; dashed?: boolean | undefined; curve?: ChartCurve | undefined; } & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+interface LineMarkOptions<T> extends CartesianMarkOptions<T>
+  curve?: ChartCurve | undefined
+  dashed?: boolean | undefined
+  lastValue?: boolean | undefined
+  name?: string | undefined
+  stroke?: string | undefined
+  strokeWidth?: number | undefined
+  x: Accessor<T>
+  y: Accessor<T>
+interface LinearScale
+  copy(): LinearScale
+  domain: [number, number]
+  invert(px: number): number
+  readonly kind: 'linear'
+  map(value: number): number
+  range: [number, number]
+  ticks(count?: number | undefined): number[]
+interface LinearScaleSpec
+  domain?: readonly [number, number] | undefined
+  nice?: boolean | undefined
+  padding?: undefined
+  tickFormat?: ((value: unknown) => string) | undefined
+  type: 'linear'
+interface LogScaleSpec
+  domain?: readonly [number, number] | undefined
+  nice?: undefined
+  padding?: undefined
+  tickFormat?: ((value: unknown) => string) | undefined
+  type: 'log'
+interface Margin
+  bottom: number
+  left: number
+  right: number
+  top: number
+interface MarkDomainContribution
+  includeZero?: boolean | undefined
+  x?: readonly unknown[] | undefined
+  y?: readonly number[] | undefined
+interface MountChartOptions
+  height?: number | undefined
+  hiddenSeries?: readonly string[] | undefined
+  idPrefix?: string | undefined
+  interaction?: MountInteraction | boolean | undefined
+  onSelect?: ((event: ChartPointerEvent) => void) | undefined
+  onTooltip?: ((event: ChartPointerEvent | null) => void) | undefined
+  onViewportChange?: ((viewport: ChartViewport) => void) | undefined
+  renderer?: 'canvas' | 'svg' | undefined
+  viewport?: ChartViewport | undefined
+  width?: number | undefined
+interface MountInteraction
+  brush?: boolean | undefined
+  navigator?: boolean | undefined
+  pan?: boolean | undefined
+  rangePresets?: boolean | undefined
+  zoom?: boolean | undefined
+interface NamedMarkOptions
+  name?: string | undefined
+type PieChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'pie'; valueKey: Accessor<never>; labelKey?: Accessor<never> | undefined; innerRadius?: number | undefined; outerRadius?: number | undefined; } & { plugin?: undefined; pluginOptions?: undefined; }
+interface PieMarkOptions<T> extends NamedMarkOptions
+  innerRadius?: number | undefined
+  labelKey?: Accessor<T> | undefined
+  name?: string | undefined
+  outerRadius?: number | undefined
+  valueKey: Accessor<T>
+type PluginChartMark = Pick<ChartMarkBase, 'data' | 'name'> & { kind: string; plugin: ErasedMarkPlugin; pluginOptions: unknown; stroke?: string | undefined; fill?: string | undefined; }
+type PointChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'point'; fill?: string | undefined; fillOpacity?: number | undefined; r?: number | undefined; } & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+interface PointMarkOptions<T> extends CartesianMarkOptions<T>
+  fill?: string | undefined
+  fillOpacity?: number | undefined
+  name?: string | undefined
+  r?: number | undefined
+  x: Accessor<T>
+  y: Accessor<T>
+type PolarOrHeatmapMark = HeatmapChartMark | PieChartMark | RadarChartMark
+type RadarChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'radar'; stroke?: string | undefined; fill?: string | undefined; fillOpacity?: number | undefined; strokeWidth?: number | undefined; } & { plugin?: undefined; pluginOptions?: undefined; } & { x: Accessor<never>; y: Accessor<never>; }
+interface RadarMarkOptions<T> extends CartesianMarkOptions<T>
+  fill?: string | undefined
+  fillOpacity?: number | undefined
+  name?: string | undefined
+  stroke?: string | undefined
+  strokeWidth?: number | undefined
+  x: Accessor<T>
+  y: Accessor<T>
+type RuleXChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'ruleX'; x: Accessor<never>; stroke?: string | undefined; strokeWidth?: number | undefined; } & { plugin?: undefined; pluginOptions?: undefined; }
+interface RuleXMarkOptions extends NamedMarkOptions
+  name?: string | undefined
+  stroke?: string | undefined
+  strokeWidth?: number | undefined
+type RuleYChartMark = Omit<ChartMarkBase, 'angleKey' | 'curve' | 'dashed' | 'fade' | 'fill' | 'fillOpacity' | 'innerRadius' | 'key' | 'labelKey' | 'lastValue' | 'outerRadius' | 'r' | 'stackId' | 'stroke' | 'strokeWidth' | 'valueKey' | 'x' | 'y' | 'y0'> & { kind: 'ruleY'; y: Accessor<never>; stroke?: string | undefined; strokeWidth?: number | undefined; } & { plugin?: undefined; pluginOptions?: undefined; }
+interface RuleYMarkOptions extends NamedMarkOptions
+  name?: string | undefined
+  stroke?: string | undefined
+  strokeWidth?: number | undefined
+type ScalesForMarks<TMarks extends readonly ChartMark[]> = number extends TMarks['length'] ? { x?: XScaleSpec | undefined; y?: BandScaleSpec | YScaleSpec | undefined; } : TMarks extends readonly [HeatmapChartMark] ? { x?: BandScaleSpec | undefined; y?: BandScaleSpec | undefined; } : TMarks extends readonly [PieChartMark] | readonly [RadarChartMark, ...RadarChartMark[]] ? never : { x?: XScaleSpec | undefined; y?: YScaleSpec | undefined; }
+type SceneNode = ({ type: 'arc'; x: number; y: number; r: number; innerR: number; startAngle: number; endAngle: number; } | { type: 'area' | 'line' | 'polygon'; points: ScenePoint[]; } | { type: 'circle'; x: number; y: number; r: number; } | { type: 'rect'; x: number; y: number; w: number; h: number; } | { type: 'rule'; x: number; y: number; x2: number; y2: number; } | { type: 'text'; x: number; y: number; label: string; }) & SceneNodeBase
+interface SceneNodeBase
+  anchor?: 'end' | 'middle' | 'start' | undefined
+  clip?: boolean | undefined
+  corner?: 'all' | 'bottom' | 'none' | 'top' | undefined
+  curve?: ChartCurve | undefined
+  dashed?: boolean | undefined
+  datum?: unknown
+  endAngle?: number | undefined
+  fill?: string | undefined
+  fillOpacity?: number | undefined
+  fontSize?: number | undefined
+  h?: number | undefined
+  highlight?: boolean | undefined
+  hit?: boolean | undefined
+  idx?: number | undefined
+  innerR?: number | undefined
+  label?: string | undefined
+  points?: ScenePoint[] | undefined
+  r?: number | undefined
+  role?: string | undefined
+  series?: string | undefined
+  startAngle?: number | undefined
+  stroke?: string | undefined
+  strokeWidth?: number | undefined
+  tip?: string | undefined
+  valueY?: number | undefined
+  w?: number | undefined
+  x?: number | undefined
+  x2?: number | undefined
+  y?: number | undefined
+  y2?: number | undefined
+interface ScenePoint
+  x: number
+  y: number
+interface TimeScaleSpec
+  domain?: readonly [Date | number, Date | number] | undefined
+  nice?: undefined
+  padding?: undefined
+  tickFormat?: ((value: unknown) => string) | undefined
+  type: 'time'
+type TypedChartSpec<TMarks extends readonly ChartMark[]> = Omit<ChartSpec, 'marks' | 'scales'> & { marks: ValidMarkComposition<TMarks>; scales?: ScalesForMarks<TMarks> | undefined; }
+type ValidMarkComposition<TMarks extends readonly ChartMark[]> = number extends TMarks['length'] ? TMarks : TMarks extends readonly [HeatmapChartMark] | readonly [PieChartMark] | readonly [RadarChartMark, ...RadarChartMark[]] ? TMarks : Extract<TMarks[number], PolarOrHeatmapMark> extends never ? TMarks : never
+interface ViewportGroup
+  add(handle: ViewportHandle): () => void
+  getViewport(): ChartViewport | null
+  setViewport(viewport: ChartViewport | null): void
+interface ViewportHandle
+  setViewport(viewport: ChartViewport | null): void
+type XScaleSpec = BandScaleSpec | LinearScaleSpec | LogScaleSpec | TimeScaleSpec
+type YScaleSpec = AutoLinearScaleSpec | LinearScaleSpec | LogScaleSpec
