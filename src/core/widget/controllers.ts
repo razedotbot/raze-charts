@@ -15,6 +15,7 @@ import { DrawingEventsController } from "./DrawingEventsController";
 import { EventHub } from "./EventHub";
 import { defineWidgetController, type WidgetControllerDefinition } from "./host";
 import { LayoutController } from "./LayoutController";
+import { LegendController } from "./LegendController";
 import { PersistenceController } from "./PersistenceController";
 
 export const WIDGET_CONTROLLERS: readonly WidgetControllerDefinition[] = [
@@ -27,4 +28,5 @@ export const WIDGET_CONTROLLERS: readonly WidgetControllerDefinition[] = [
   defineWidgetController("persistence", (host) => new PersistenceController(host)),
   defineWidgetController("contextMenu", (host) => new ContextMenuController(host)),
   defineWidgetController("drawingEvents", (host) => new DrawingEventsController(host)),
+  defineWidgetController("legend", (host) => new LegendController(host)),
 ];

@@ -111,6 +111,11 @@ and orientation. Controls use native buttons with accessible labels and state:
 - decorative icons are hidden from assistive technology;
 - separators are semantic;
 - loading uses `role="status"`, polite live updates, and busy state.
+- the legend is a named group ("Chart legend") after the canvas in tab order:
+  each study row is a list item whose values carry their plot names for screen
+  readers, its remove button is named after the row ("Remove EMA 9"), removal is
+  announced and Ctrl/Cmd+Z undoes it from the legend, focus moves to the next
+  row, the `+N` toggle exposes `aria-expanded`, and Escape returns to the chart.
 
 Popup triggers expose `aria-haspopup`, `aria-expanded`, and `aria-controls`.
 Menus are named and use menu item, radio item, or checkbox item semantics.

@@ -347,6 +347,9 @@ descriptors, a read-only compute context (symbol info, resolution, timezone,
 visible range) and incremental `init()`/`update()` steps that run once per live
 tick. Invalid inputs reject `createStudy()` with a `StudyInputError`. See
 [docs/indicators.md](docs/indicators.md).
+The legend, objects tree and Indicators menu label a study from its definition:
+`MOM 10` above, `EMA 9`, `BB 20 2`, `MACD 12 26 9` or `VWAP` for the built-ins.
+Set `shortTitle` or `formatLabel(inputs)` on the definition to change it.
 
 ### Price formatting
 

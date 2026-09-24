@@ -1,6 +1,7 @@
 import type { ChartContext } from "../core/context";
 import type { ShapeStore } from "../core/ShapeStore";
 import type { StudyStore } from "../studies/StudyStore";
+import { studyInstanceLabel } from "../studies/label";
 import { openPopup, popupRow, type PopupHandle } from "./popup";
 
 export class ObjectsTree {
@@ -103,10 +104,11 @@ export class ObjectsTree {
     }
     for (const study of studies) {
       const removeIndex = nextRowIndex();
-      panel.appendChild(popupRow(`Remove ${study.name} ${study.length}`, () => {
+      const label = `Remove ${studyInstanceLabel(study)}`;
+      panel.appendChild(popupRow(label, () => {
         this.studies.remove(study.id);
         this.render(panel, removeIndex);
-      }, { role: "menuitem", label: `Remove ${study.name}` }));
+      }, { role: "menuitem", label }));
     }
     if (focusIndex !== undefined) this.popup?.focusItem(focusIndex);
   }

@@ -33,6 +33,7 @@ import {
   toDisplay,
 } from "./plotScale";
 import { adjustPriceAxisWidth, computeTimeAxisTicks } from "./paint/axes";
+import { composeLegendSnapshot } from "./paint/legend";
 import type {
   Crosshair,
   DraftShape,
@@ -294,7 +295,8 @@ export class ChartRenderer implements GestureHost {
 
   takeScreenshot(): void {
     try {
-      this.snapshot().toBlob((blob) => {
+      // The DOM legend is not in the canvas bitmap; paint it into the export.
+      composeLegendSnapshot(this.snapshot(), this.financeView()).toBlob((blob) => {
         if (!blob) {
           console.warn("[raze-charts] takeScreenshot: the chart has no pixels to export yet (zero-size container?)");
           return;

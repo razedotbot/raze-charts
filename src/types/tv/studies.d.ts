@@ -36,7 +36,11 @@ export interface StudyInputBase<V> {
   /** Inputs sharing an `inline` key render on one dialog row. */
   readonly inline?: string;
   readonly tooltip?: string;
-  /** Include the value in the legend label (`MACD 12 26 close 9`). Defaults to true for numeric and source inputs. */
+  /**
+   * Include the value in the legend label (`MACD 12 26 hl2 9`). Defaults to
+   * true for int, float and price inputs, and for a source input only while it
+   * differs from its default (`EMA 9`, then `EMA 9 hl2`). See src/studies/label.ts.
+   */
   readonly inLabel?: boolean;
 }
 
@@ -266,7 +270,12 @@ export interface StudyDefinition {
   label?: string;
   /** Legend value formatter; defaults to price formatting (overlay) or 1 decimal (pane). */
   formatValue?: (value: number) => string;
-  /** Custom legend label from the effective inputs; the default is `shortTitle` plus the `inLabel` input values. */
+  /**
+   * Legend and objects-tree label for the effective inputs (defaults merged
+   * in). Without it the label is `shortTitle` plus the `inLabel` input values
+   * (a v2 or built-in schema), else every numeric `defaults` input, or
+   * `shortTitle` alone when `compute` ignores its inputs argument.
+   */
   formatLabel?: (inputs: StudyInputs) => string;
   /**
    * Values aligned 1:1 with `bars`; null = warm-up gap. Arrays stay one line;

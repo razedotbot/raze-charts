@@ -12,7 +12,10 @@ const PRICE_LINE_ALPHA = 0.85;
  * the line and pill are omitted there.
  */
 export function drawLastPrice(ctx: CanvasRenderingContext2D, v: FinanceView): void {
-  const bars = v.context.bars;
+  // Heikin-Ashi tags the plotted (HA) close like TradingView, unless
+  // `mainSeriesProperties.haStyle.showRealLastPrice` asks for the real one.
+  const showReal = v.context.options.overrides?.["mainSeriesProperties.haStyle.showRealLastPrice"] === true;
+  const bars = !showReal && v.seriesBars.length === v.context.bars.length ? v.seriesBars : v.context.bars;
   const last = bars[bars.length - 1];
   if (!last || !Number.isFinite(last.close)) return;
   if (v.logScale && !(last.close > 0)) return;
