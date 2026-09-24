@@ -245,6 +245,11 @@ test.describe("render loop", () => {
   test("a 2x1 layout stays synced after F", async ({ page }) => {
     await open(page, "layout=2x1&bars=1500");
     await page.waitForFunction(() => (window as unknown as HarnessWindow).__razeChart.chart(1).getVisibleRange().to > 0);
+    const booted = await page.evaluate(() => {
+      const w = (window as unknown as HarnessWindow).__razeChart;
+      return [w.chart(0).getVisibleRange(), w.chart(1).getVisibleRange()];
+    });
+    expect(booted[0], "the panes boot with equal ranges").toEqual(booted[1]);
     const top = page.locator(".raze-chart-layout-pane[data-pane-index='0'] canvas.raze-chart-canvas");
     const box = await top.boundingBox();
     if (!box) throw new Error("top pane not laid out");
@@ -265,6 +270,65 @@ test.describe("render loop", () => {
       return [w.chart(0).getVisibleRange(), w.chart(1).getVisibleRange()];
     });
     expect(ranges[0]).toEqual(ranges[1]);
+  });
+
+  test("a 2x1 layout boots in sync and keeps each pane's bar spacing through a live resize", async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 620 });
+    await open(page, "layout=2x1&bars=1500");
+    await page.waitForFunction(() => (window as unknown as HarnessWindow).__razeChart.chart(1).getVisibleRange().to > 0);
+    await settle(page);
+    // Each pane's own debug state (fractional index range, plot width) and API range.
+    const panes = () => page.evaluate(() => {
+      const w = window as unknown as HarnessWindow;
+      return [0, 1].map((index) => {
+        const canvas = document.querySelector(`.raze-chart-layout-pane[data-pane-index='${index}'] canvas.raze-chart-canvas`) as
+          (HTMLCanvasElement & { __razeChartState?: DebugState }) | null;
+        const state = canvas?.__razeChartState;
+        if (!state) throw new Error(`pane ${index} has not painted`);
+        const { from, to } = state.visibleRange;
+        return { range: { from, to }, spacing: state.plotW / (to - from), api: w.__razeChart.chart(index).getVisibleRange() };
+      });
+    });
+    const boot = await panes();
+    expect(boot[0].range, "both panes boot with the same range").toEqual(boot[1].range);
+    expect(boot[0].api).toEqual(boot[1].api);
+    const spacing = boot[0].spacing;
+    expect(Math.abs(spacing - 6), `boot spacing ${spacing.toFixed(3)} px`).toBeLessThanOrEqual(0.25);
+    for (const width of [800, 600, 1100]) {
+      await page.setViewportSize({ width, height: 620 });
+      await settle(page);
+      const after = await panes();
+      expect(after[0].range, `both panes share one range at ${width}px`).toEqual(after[1].range);
+      expect(after[0].api).toEqual(after[1].api);
+      for (const pane of after) {
+        // A relayed resize used to rescale the sibling twice (span x ratio²): 9.2 px at 800.
+        expect(Math.abs(pane.spacing - spacing), `bar spacing at ${width}px: ${pane.spacing.toFixed(3)} px`).toBeLessThan(0.01);
+      }
+    }
+    const back = (await panes())[0].range;
+    expect(back.to, "the right edge never moved").toBe(boot[0].range.to);
+    expect(back.from, "back at the boot width, the boot view returns").toBeCloseTo(boot[0].range.from, 6);
+
+    // One resize paints each pane's scene once: no relayed range makes the
+    // sibling paint a second time in the next frame.
+    await page.evaluate(() => {
+      const counts: number[] = [];
+      document.querySelectorAll<HTMLCanvasElement>(".raze-chart-layout-pane canvas.raze-chart-layer-main").forEach((canvas, index) => {
+        counts[index] = 0;
+        const ctx = canvas.getContext("2d")!;
+        const original = ctx.setTransform.bind(ctx) as (...args: unknown[]) => void;
+        (ctx as unknown as { setTransform: (...args: unknown[]) => void }).setTransform = (...args: unknown[]) => {
+          counts[index] = (counts[index] ?? 0) + 1;
+          original(...args);
+        };
+      });
+      (window as unknown as { __paneMainPaints?: number[] }).__paneMainPaints = counts;
+    });
+    await page.setViewportSize({ width: 900, height: 620 });
+    await settle(page);
+    await settle(page);
+    const paints = await page.evaluate(() => (window as unknown as { __paneMainPaints: number[] }).__paneMainPaints);
+    expect(paints, "main-layer paints per pane for one resize").toEqual([1, 1]);
   });
 
   test("an opaque pane uses an alpha:false scene layer; a transparent pane shows the page behind it", async ({ page }) => {

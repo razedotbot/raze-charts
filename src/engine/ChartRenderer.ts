@@ -20,6 +20,7 @@ import type { StudyStore } from "../studies/StudyStore";
 import {
   MAX_BAR_SPACING,
   PRICE_AXIS_W_DEFAULT,
+  PRICE_AXIS_W_MIN,
   TIME_AXIS_H,
   computePlotLayout,
   timeAxisTop,
@@ -121,10 +122,17 @@ export class ChartRenderer implements GestureHost {
   private readonly overlayShapeScreen: ShapeHit[] = [];
   /** Pointers currently pressed on the chart (drags edit drawings in place). */
   private readonly pressed = new Set<number>();
+  /**
+   * Price-axis width measured on a frame that painted bars; null before the
+   * first one. Whether an empty frame (placeholder labels) paints before the
+   * first data load is a race, so the default view must not read
+   * `priceAxisW` until bars painted (see defaultPlotWidth()).
+   */
+  private dataAxisW: number | null = null;
   /** The default view fell back to DEFAULT_VISIBLE_BARS because the plot had no width yet. */
   private defaultViewFallback = false;
   private readonly defaultVisibleBarsProvider = (): number => {
-    const count = defaultVisibleBarsFor(this.currentPlotWidth());
+    const count = defaultVisibleBarsFor(this.defaultPlotWidth());
     if (count === null) {
       this.defaultViewFallback = true;
       return DEFAULT_VISIBLE_BARS;
@@ -136,6 +144,21 @@ export class ChartRenderer implements GestureHost {
   };
   private readonly onPressEnd = (e: PointerEvent): void => {
     this.pressed.delete(e.pointerId);
+  };
+  /**
+   * A pointer event with no button down (a hover move, or the capture loss
+   * that follows a release) proves the pointer was released, even when the
+   * pointerup never reached the window listener (lost capture, another frame
+   * or a stopped event). A press stuck in the set would turn every later
+   * hover frame into a full scene repaint. A capture lost while a button is
+   * still down keeps the press: the gesture keeps dragging on canvas moves.
+   */
+  private readonly onPressIdle = (e: PointerEvent): void => {
+    if (e.buttons === 0) this.pressed.delete(e.pointerId);
+  };
+  /** A window blur mid-drag can swallow the release: forget every press. */
+  private readonly onPressBlur = (): void => {
+    this.pressed.clear();
   };
 
   constructor(
@@ -183,8 +206,11 @@ export class ChartRenderer implements GestureHost {
     this.context.dataChanged.subscribe(null, this.onData as never);
     // Capture phase: the press is known before the gesture handlers run.
     this.canvas.addEventListener("pointerdown", this.onPressStart, true);
+    this.canvas.addEventListener("pointermove", this.onPressIdle, true);
+    this.canvas.addEventListener("lostpointercapture", this.onPressIdle, true);
     window.addEventListener("pointerup", this.onPressEnd, true);
     window.addEventListener("pointercancel", this.onPressEnd, true);
+    window.addEventListener("blur", this.onPressBlur);
     this.gestures.attach();
   }
 
@@ -192,8 +218,11 @@ export class ChartRenderer implements GestureHost {
     this.context.dataChanged.unsubscribe(null, this.onData as never);
     this.gestures.destroy();
     this.canvas.removeEventListener("pointerdown", this.onPressStart, true);
+    this.canvas.removeEventListener("pointermove", this.onPressIdle, true);
+    this.canvas.removeEventListener("lostpointercapture", this.onPressIdle, true);
     window.removeEventListener("pointerup", this.onPressEnd, true);
     window.removeEventListener("pointercancel", this.onPressEnd, true);
+    window.removeEventListener("blur", this.onPressBlur);
     this.pressed.clear();
     this.engine.paintHook = null;
     this.engine.overlayPaintHook = null;
@@ -347,17 +376,35 @@ export class ChartRenderer implements GestureHost {
     return this.timePriceAt(x, y);
   }
 
-  /** Plot width for the next frame, from the engine size (0 while unknown). */
-  private currentPlotWidth(): number {
+  /** Plot width with a price axis `axisWidth` px wide, from the engine size (0 while unknown). */
+  private plotWidthFor(axisWidth: number): number {
     const width = this.engine.cssWidth;
-    return width > 0 ? Math.max(0, width - this.priceAxisW) : 0;
+    return width > 0 ? Math.max(0, width - axisWidth) : 0;
+  }
+
+  /** Plot width for the next frame (0 while unknown). */
+  private currentPlotWidth(): number {
+    return this.plotWidthFor(this.priceAxisW);
+  }
+
+  /**
+   * Plot width the default view is sized for: the axis width measured on bars,
+   * or PRICE_AXIS_W_MIN before any bar painted. That is what an empty frame
+   * measures (its placeholder labels never reach the minimum), so panes of a
+   * layout that boot together derive the same bar count whether or not one of
+   * them painted an empty frame first.
+   */
+  private defaultPlotWidth(): number {
+    return this.plotWidthFor(this.dataAxisW ?? PRICE_AXIS_W_MIN);
   }
 
   /**
    * Keep the bar spacing across width changes, anchored to the right edge,
    * as TradingView does: a wider pane shows more history instead of fatter
    * candles. A chart that booted with no width gets its default view once it
-   * is laid out.
+   * is laid out. Reason `resize` keeps the change local to this pane (no
+   * `viewportChanged`, so no layout relay): every pane of a layout rescales by
+   * its own width ratio, which keeps equal-width panes in sync.
    */
   private onEngineResize({ width, previousWidth }: EngineResize): void {
     const n = this.context.bars.length;
@@ -369,7 +416,7 @@ export class ChartRenderer implements GestureHost {
     if (previous <= 0) {
       const fallback = defaultViewRange(n, DEFAULT_VISIBLE_BARS);
       if (this.defaultViewFallback && range.from === fallback.from && range.to === fallback.to) {
-        const count = defaultVisibleBarsFor(next) ?? DEFAULT_VISIBLE_BARS;
+        const count = defaultVisibleBarsFor(this.defaultPlotWidth()) ?? DEFAULT_VISIBLE_BARS;
         this.context.setViewport(defaultViewRange(n, count), "resize");
       }
       this.defaultViewFallback = false;
@@ -469,6 +516,7 @@ export class ChartRenderer implements GestureHost {
       this.priceAxisW = desired;
       this.engine.markDirty();
     }
+    if (this.context.bars.length) this.dataAxisW = this.priceAxisW;
 
     paintFinanceLayer("main", ctx, v, priceTicks, timeTicks);
     this.mainKey = this.mainStateKey();
@@ -479,7 +527,10 @@ export class ChartRenderer implements GestureHost {
       for (let i = 0; i < all.length; i++) {
         if (all[i]!.close > 0) { nonzero++; if (firstReal < 0) firstReal = i; lastReal = i; }
       }
-      (window as unknown as { __razeChartState?: unknown }).__razeChartState = {
+      // The window holds the last painted pane; each canvas holds its own
+      // pane's state (multi-chart layouts).
+      (window as unknown as { __razeChartState?: unknown }).__razeChartState =
+      (this.canvas as unknown as { __razeChartState?: unknown }).__razeChartState = {
         bars: all.length, nonzero, firstReal, lastReal,
         visibleRange: { ...this.context.visibleRange },
         plotW: this.plotW,

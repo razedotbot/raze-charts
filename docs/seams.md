@@ -18,10 +18,11 @@ Rules for every seam:
   with a reason and request exactly one repaint. `setScaleMode` and
   `setChartType` fire exactly one event (`scaleChanged`, `chartTypeChanged`).
   `setViewport` fires its index-space `rangeChanged` once and, unless the
-  reason is `rebase` or `notify: false` is passed, the public time-space
-  `viewportChanged` once as well, so an effective call fires two events, one
-  on each delegate. An unchanged value fires nothing. W2-02 later puts a store
-  behind the setters and adds a lint that forbids direct writes.
+  reason is a local one (`rebase`, `resize`) or `notify: false` is passed,
+  the public time-space `viewportChanged` once as well, so an effective call
+  fires two events, one on each delegate. An unchanged value fires nothing.
+  W2-02 later puts a store behind the setters and adds a lint that forbids
+  direct writes.
 - **Nothing is silent.** Unknown reasons, modes, chart types, patch keys, id
   namespaces and inverted or non-finite ranges throw an error that lists the
   supported values.
@@ -38,16 +39,16 @@ when it is destroyed.
 
 | Seam | Type | Producer | Consumers | Fallback / status |
 | --- | --- | --- | --- | --- |
-| `setViewport(range, reason, { notify? })` | `boolean` (changed) | W1A-06, implemented | Writers: W1B-07 routes fit (`fit`), reset view (`reset`) and the resize spacing adjustment (`resize`). To route: W1B-10 (pan, zoom, pinch, keyboard, drag cancel), W1B-13 (presets, `load()`), W1B-18 (initial view, `rebase` after prepend, `realtime`, `setVisibleRange`, timeframe). Store: W2-02 | Implemented. Fires `rangeChanged` and (except `rebase`) `viewportChanged`, one each. Writers not yet routed still assign directly. |
+| `setViewport(range, reason, { notify? })` | `boolean` (changed) | W1A-06, implemented | Writers: W1B-07 routes fit (`fit`), reset view (`reset`) and the resize spacing adjustment (`resize`). To route: W1B-10 (pan, zoom, pinch, keyboard, drag cancel), W1B-13 (presets, `load()`), W1B-18 (initial view, `rebase` after prepend, `realtime`, `setVisibleRange`, timeframe). Store: W2-02 | Implemented. Fires `rangeChanged` and (except the local reasons `rebase` and `resize`, `LOCAL_VIEWPORT_REASONS`) `viewportChanged`, one each. Writers not yet routed still assign directly. |
 | `rangeChanged` | `Delegate<[ViewportChange]>` | `setViewport` | W1B-15 (visible-range studies), W1B-18 (pagination trigger), W2-02 | Fires once per effective change, with `previous` and `reason`. |
-| `viewportChanged` (existing) | Unix-second window | `setViewport` (except `rebase`) and the existing direct writers | Layout sync, `onVisibleRangeChanged` | `visibleUnixRange()` builds the payload with the same mapping as `DataManager.visibleUnixRange()`. |
+| `viewportChanged` (existing) | Unix-second window | `setViewport` (except `rebase` and `resize`) and the existing direct writers | Layout sync, `onVisibleRangeChanged` | `visibleUnixRange()` builds the payload with the same mapping as `DataManager.visibleUnixRange()`. A resize never reaches layout sync; a visible-range subscriber that must also hear resize-driven changes (W2-01) listens to `rangeChanged` with reason `resize`. |
 | `setScaleMode(patch, reason)` | `{ mode?, autoScale?, priceRange? }` | W1A-06, implemented | Writers: W1B-07 (fit and reset re-enable autoscale, reasons `fit` and `reset`). To route: W1B-10 (axis drag, axis double-click, cancel), W1B-13 (`load()`), W1B-19 (percent on the first compare), W1B-22 (ScaleBar) | `log` and `percent` are exclusive, a manual range turns autoscale off, and `autoScale: true` clears the range. An empty window (`min === max`) throws a `RangeError`: pass `max > min`, or `autoScale: true`. |
 | `scaleChanged` | `Delegate<[ScaleChange]>` | `setScaleMode` | W1B-22 (ScaleBar `aria-pressed`), W3-01 (price-scale API events) | ScaleBar keeps its click-driven sync until W1B-22. |
 | `scaleState()` / `readScaleState()` | `ScaleState` | W1A-06 | Any reader of the scale | Reproduces the painters' precedence: percent wins, and autoscale ignores a stale manual range. |
 | `setChartType(style, reason)` | `boolean` | W1A-06, implemented | Writers to route: W1B-13 (sidebar callback, `load()`) | Unknown styles throw with `CHART_STYLES`. |
 | `chartTypeChanged` | `Delegate<[ChartTypeChange]>` | `setChartType` | W1B-23 (sidebar picker state), W3-01 (chart-type API) | Not yet subscribed. |
 | `requestOverlayPaint()` | hook | *engine*: `ChartEngine.markOverlayDirty()`, which repaints only the overlay canvas (W1B-07) | W1B-10 (crosshair/hover moves), W1B-13 (countdown timer, synced-crosshair relay) | Without an engine it calls `requestPaint()`. The engine still repaints the main layer when main-layer state changed (see the engine seams). |
-| `defaultVisibleBars()` | hook returning bars | *renderer*: W1B-07 installs a width-aware provider, `DEFAULT_BAR_SPACING` (6 px) per bar for the current plot width | `DataManager.initVisibleRange` (boot; W1B-18 keeps it when routing through `setViewport`), `ChartRenderer.resetView()` | `DEFAULT_VISIBLE_BARS` (120) without a renderer or while the plot has no width. A chart that booted hidden gets the 6 px view on its first layout. |
+| `defaultVisibleBars()` | hook returning bars | *renderer*: W1B-07 installs a width-aware provider, `DEFAULT_BAR_SPACING` (6 px) per bar for the current plot width. The plot width uses the price-axis width measured on bars, or `PRICE_AXIS_W_MIN` before any bar painted (what an empty first frame measures for its placeholder labels), so the panes of a layout boot with the same count whether or not one of them painted an empty frame first | `DataManager.initVisibleRange` (boot; W1B-18 keeps it when routing through `setViewport`), `ChartRenderer.resetView()` | `DEFAULT_VISIBLE_BARS` (120) without a renderer or while the plot has no width. A chart that booted hidden gets the 6 px view on its first layout. |
 | `now()` / `setServerTimeOffset(ms)` | epoch ms | W1B-18 (offset from `getServerTime`) | W1B-09 (countdown), W1B-13 (timeframe presets, go-to-date), W1B-18 (initial history `to`) | Offset 0, so `now()` equals `Date.now()`. The clock can be injected for tests. |
 | `timezone` / `setTimezone(zone)` / `timezoneChanged` | `string \| null` (`exchange`, IANA, or null to follow the symbol) | Seeded from `options.timezone`. `chart.setTimezone()` (W1B-05) writes it | W1B-05 (ticks and crosshair through the W1A-05 core), W1B-09 (corner label) | `resolveTimezone(setting, symbolInfo)` reproduces today's axis-chrome rule. The field is read-only; assigning it throws. |
 | `overlayHost` | `HTMLElement \| null` | *engine*: a `div.raze-chart-overlay-host` stacked above the canvas | W1B-16 (DOM legend), W1B-10 (inline text editor, timescale-mark tooltip) | null until an engine mounts. It has `pointer-events: none` and clips its children, which opt in to pointer events. |
@@ -58,9 +59,13 @@ when it is destroyed.
 | `buildFeatureSet(options, { defaultsOn?, aliases? })` | `Set<string>` | W1A-06 | W1B-13 (`timeframes_toolbar` as the canonical name, with an alias) | Without a config the defaults are unchanged. W1B-13 can set the policy from the widget without editing `context.ts`. |
 
 Change reasons are frozen vocabularies: `VIEWPORT_CHANGE_REASONS`,
-`SCALE_CHANGE_REASONS` and `CHART_TYPE_CHANGE_REASONS`. The `rebase` reason
-re-anchors indices after bars are prepended while the visible time stays the
-same, so it skips the public `viewportChanged` unless `notify: true` is passed.
+`SCALE_CHANGE_REASONS` and `CHART_TYPE_CHANGE_REASONS`. Two viewport reasons
+are local to the pane (`LOCAL_VIEWPORT_REASONS`) and skip the public
+`viewportChanged` unless `notify: true` is passed: `rebase` re-anchors indices
+after bars are prepended while the visible time stays the same, and `resize`
+keeps a pane's bar spacing when its width changes. Every pane of a layout
+rescales by its own width ratio; relaying one pane's rescaled range to a
+sibling that rescales too would apply the ratio twice.
 
 ## View seams (`src/engine/paint/view.ts`)
 
@@ -108,12 +113,18 @@ overlay marks are listed in `FINANCE_LAYER_ORDER` (`src/engine/scene.ts`).
   a direct `visibleRange` write followed by an overlay request still repaints
   the scene. `ChartRenderer.requestPaint()` (the gesture host) asks for an
   overlay frame, or a full frame while a pointer is pressed because drags edit
-  drawings in place.
+  drawings in place. A press ends on `pointerup`, `pointercancel`, a window
+  `blur`, or any pointer event reporting no button down (a hover move, the
+  `lostpointercapture` after a release), so a release that never reached the
+  window cannot pin every later hover frame to a full repaint.
 - `onResize(size)`: called after the bitmaps are resized and before the
   synchronous repaint; the renderer keeps the bar spacing there (reason
-  `resize`, anchored to the right edge). A resize paints synchronously inside
-  the `ResizeObserver` callback, so no presented frame shows a cleared bitmap,
-  and one resize causes one paint.
+  `resize`, anchored to the right edge). The adjustment is local to the pane:
+  it fires `rangeChanged` but not `viewportChanged`, so layout sync does not
+  relay it, and equal-width panes stay in sync because each rescales by the
+  same ratio. A resize paints synchronously inside the `ResizeObserver`
+  callback, so no presented frame shows a cleared bitmap, and one resize
+  causes one paint in every pane.
 - `paintStats` counts frames and main, overlay and resize paints for
   benchmarks and tests. `composite()` stacks the two layer bitmaps exactly
   as displayed (pixel checks). Screenshots and exports use

@@ -139,7 +139,7 @@ export * from "./src/engine/seriesTransform";
 export * from "./src/engine/paint/axisTags";
 export { AXIS_TAG_PRIORITY } from "./src/engine/paint/view";
 export { WidgetRuntime } from "./src/core/widget/runtime";
-export { MIN_BAR_SPACING, MAX_BAR_SPACING } from "./src/engine/layout";
+export { MIN_BAR_SPACING, MAX_BAR_SPACING, PRICE_AXIS_W_DEFAULT, PRICE_AXIS_W_MIN } from "./src/engine/layout";
 export { formatCompact, formatPrice } from "./src/util/format";
 `;
 const bundled = await build({
@@ -164,8 +164,11 @@ const {
   DEFAULT_VISIBLE_BARS,
   FINANCE_LAYER_ORDER,
   FINANCE_PAINT_ORDER,
+  LOCAL_VIEWPORT_REASONS,
   MAX_BAR_SPACING,
   MIN_BAR_SPACING,
+  PRICE_AXIS_W_DEFAULT,
+  PRICE_AXIS_W_MIN,
   SCALE_CHANGE_REASONS,
   SeriesTransformCache,
   WidgetRuntime,
@@ -515,6 +518,131 @@ const spacingOf = (runtime) => runtime.renderer.plotW / (runtime.context.visible
   runtime.remove();
 }
 
+// ── Widget runtime: a press whose release never arrives ─────────────────────
+// Drags repaint the main layer while a pointer is pressed. A press stuck in
+// that set (lost capture, a blur mid-drag, a stopped pointerup) would make
+// every later hover frame a full scene repaint.
+{
+  const { runtime } = await mountRuntime({ bars: 600, width: 640 });
+  const { engine } = runtime;
+  const main = ctxOf(engine.mainCanvas);
+  engine.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0 });
+  const hoverPaints = (buttons = 0) => {
+    main.reset();
+    for (let i = 0; i < 10; i++) {
+      engine.canvas.dispatchEvent(pointer("pointermove", 120 + i * 9, 90 + i * 4, { buttons }));
+      flushFrames();
+    }
+    return main.calls("setTransform");
+  };
+  // A secondary-button press whose pointerup never arrives. The gestures
+  // ignore secondary buttons (no pan starts), so only the press tracking
+  // reacts, and moves reporting that button still down cannot prove a release.
+  // The mouse keeps one pointerId (1), like the moves below.
+  const press = () => {
+    const event = new window.MouseEvent("pointerdown", { clientX: 300, clientY: 150, button: 2, buttons: 2, bubbles: true, cancelable: true });
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "mouse" } });
+    engine.canvas.dispatchEvent(event);
+  };
+  const HELD = 2;
+
+  press();
+  assert(hoverPaints(HELD) >= 1, "while a button is down, moves repaint the main layer (drags edit drawings in place)");
+  engine.canvas.dispatchEvent(pointer("lostpointercapture", 300, 150, { buttons: HELD }));
+  assert(hoverPaints(HELD) >= 1, "a capture lost while the button is still down keeps the press: the drag goes on");
+  engine.canvas.dispatchEvent(pointer("lostpointercapture", 300, 150));
+  assert(hoverPaints(HELD) === 0, "lostpointercapture with no button down ends the press: 10 later moves cause 0 main paints");
+
+  press();
+  window.dispatchEvent(new window.Event("blur"));
+  assert(hoverPaints(HELD) === 0, "a window blur mid-drag forgets the press: 10 later moves cause 0 main paints");
+
+  press();
+  assert(hoverPaints(0) === 0, "a hover move with no button down proves the release: 10 hover moves cause 0 main paints");
+  runtime.remove();
+}
+
+// ── Context: resize and rebase changes stay local to the pane ───────────────
+{
+  const { runtime } = await mountRuntime({ bars: 600, width: 640 });
+  const { context } = runtime;
+  const viewport = listen(context.viewportChanged);
+  const ranges = listen(context.rangeChanged);
+  const { from, to } = context.visibleRange;
+  context.setViewport({ from: from - 3, to }, "resize");
+  assert(ranges.seen.length === 1 && viewport.seen.length === 0, "setViewport(reason resize) fires rangeChanged but not the public viewportChanged");
+  context.setViewport({ from: from - 4, to }, "resize", { notify: true });
+  assert(viewport.seen.length === 1, "notify:true still forces the public event for a resize");
+  assert([...LOCAL_VIEWPORT_REASONS].sort().join() === "rebase,resize", "LOCAL_VIEWPORT_REASONS lists exactly rebase and resize");
+  viewport.stop();
+  ranges.stop();
+  runtime.remove();
+}
+
+// ── Widget runtime: the default view does not depend on an empty first frame
+// Whether a pane paints an empty frame (placeholder price labels, which size
+// the axis to its minimum) before its first data load is a race. The default
+// bar count must not depend on it, or the panes of a layout boot a bar apart.
+{
+  const boot = async (emptyFrameFirst) => {
+    hostWidth = 1100;
+    hostHeight = 520;
+    const feed = makeFeed(2_000);
+    let releaseBars = () => {};
+    if (emptyFrameFirst) {
+      // Hold the bars so the pane really paints an empty frame first.
+      const barsHeld = new Promise((resolveHeld) => { releaseBars = resolveHeld; });
+      const serveBars = feed.getBars;
+      feed.getBars = (...args) => { void barsHeld.then(() => serveBars(...args)); };
+    }
+    const container = window.document.createElement("div");
+    window.document.body.appendChild(container);
+    const runtime = new WidgetRuntime({
+      symbol: "TEST",
+      interval: "1",
+      container,
+      datafeed: feed,
+      timezone: "Etc/UTC",
+      disabled_features: ["header_widget", "left_toolbar", "scale_bar", "countdown"],
+    }, () => { throw new Error("no child widgets in this test"); });
+    const ready = new Promise((resolveReady) => runtime.lifecycle.onChartReady(resolveReady));
+    const { context, engine, renderer } = runtime;
+    // The axis width the pane had when it chose its default view.
+    let axisAtBoot = null;
+    const provider = context.defaultVisibleBars;
+    context.defaultVisibleBars = () => {
+      axisAtBoot ??= renderer.priceAxisW;
+      return provider();
+    };
+    if (emptyFrameFirst) {
+      await new Promise((resolveTick) => setTimeout(resolveTick, 0));
+      context.requestPaint();
+      flushFrames();
+      assert(context.bars.length === 0 && renderer.priceAxisW === PRICE_AXIS_W_MIN, "an empty frame painted first and sized the axis to its minimum for the placeholder labels");
+      releaseBars();
+    }
+    await ready;
+    flushFrames();
+    context.defaultVisibleBars = provider;
+    const result = { range: { ...context.visibleRange }, n: context.bars.length, width: engine.cssWidth, axisAtBoot };
+    assert(context.defaultVisibleBars() === defaultVisibleBarsFor(engine.cssWidth - renderer.priceAxisW), "once bars painted, reset view uses the measured axis width");
+    runtime.remove();
+    return result;
+  };
+  const dataFirst = await boot(false);
+  const emptyFirst = await boot(true);
+  assert(
+    dataFirst.axisAtBoot === PRICE_AXIS_W_DEFAULT && emptyFirst.axisAtBoot === PRICE_AXIS_W_MIN,
+    "the two boots chose their view with different axis widths on hand (the race)",
+  );
+  assert(
+    dataFirst.range.from === emptyFirst.range.from && dataFirst.range.to === emptyFirst.range.to,
+    `both boot orders give the same default view (${JSON.stringify(dataFirst.range)} vs ${JSON.stringify(emptyFirst.range)})`,
+  );
+  const expected = defaultViewRange(dataFirst.n, defaultVisibleBarsFor(dataFirst.width - PRICE_AXIS_W_MIN));
+  assert(dataFirst.range.from === expected.from && dataFirst.range.to === expected.to, "the boot view is sized for the axis an empty frame measures (PRICE_AXIS_W_MIN)");
+}
+
 // ── Widget runtime: default spacing at boot, fit and reset ──────────────────
 for (const width of [390, 480, 1280]) {
   const { runtime } = await mountRuntime({ bars: 5_000, width, height: 420 });
@@ -568,6 +696,7 @@ for (const width of [390, 480, 1280]) {
   const beforeSpacing = spacingOf(runtime);
   const beforeTo = context.visibleRange.to;
   const resizeEvents = viewport.seen.length;
+  const resizeRanges = ranges.seen.length;
   const mainCtx = ctxOf(runtime.engine.mainCanvas);
   mainCtx.reset();
   hostWidth = 700;
@@ -576,7 +705,8 @@ for (const width of [390, 480, 1280]) {
   flushFrames();
   const afterSpacing = spacingOf(runtime);
   assert(Math.abs(afterSpacing - beforeSpacing) < 0.05 && context.visibleRange.to === beforeTo, `resize keeps ${beforeSpacing.toFixed(2)} px per bar anchored right (got ${afterSpacing.toFixed(2)})`);
-  assert(ranges.seen.at(-1)[0].reason === "resize" && viewport.seen.length === resizeEvents + 1, "the resize adjustment goes through setViewport (reason resize) once");
+  assert(ranges.seen.length === resizeRanges + 1 && ranges.seen.at(-1)[0].reason === "resize", "the resize adjustment goes through setViewport (reason resize) once");
+  assert(viewport.seen.length === resizeEvents, "the resize adjustment stays local: no viewportChanged, so layout sync never relays it to a pane that rescales itself");
   assert(mainCtx.calls("setTransform") === 1, "the resize frame is not painted a second time by the next animation frame");
   runtime.remove();
 }

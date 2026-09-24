@@ -69,9 +69,11 @@ export type ChartStyle = ChartStyleName;
 // ── Seam vocabularies ───────────────────────────────────────────────────────
 
 /**
- * Why the visible range changed. `rebase` re-anchors indices after bars were
- * prepended or replaced while the visible *time* window stays the same, so it
- * does not fire the public time-space `viewportChanged` by default.
+ * Why the visible range changed. Two reasons stay local to the pane and do not
+ * fire the public time-space `viewportChanged` by default (see
+ * LOCAL_VIEWPORT_REASONS): `rebase` re-anchors indices after bars were
+ * prepended or replaced while the visible *time* window stays the same, and
+ * `resize` keeps a pane's bar spacing when its width changes.
  */
 export const VIEWPORT_CHANGE_REASONS = Object.freeze([
   "initial",
@@ -92,6 +94,16 @@ export const VIEWPORT_CHANGE_REASONS = Object.freeze([
   "cancel",
 ] as const);
 export type ViewportChangeReason = (typeof VIEWPORT_CHANGE_REASONS)[number];
+
+/**
+ * Reasons whose range changes stay local to one pane: `setViewport` does not
+ * fire `viewportChanged` for them unless `notify: true` is passed, while
+ * `rangeChanged` still fires with the reason. A `resize` adjustment must not
+ * reach layout sync: every pane rescales by its own width ratio, and relaying
+ * one pane's rescaled range to a sibling that is about to rescale too would
+ * apply the ratio twice.
+ */
+export const LOCAL_VIEWPORT_REASONS: ReadonlySet<ViewportChangeReason> = new Set<ViewportChangeReason>(["rebase", "resize"]);
 
 /** Why price-scale state (mode, autoscale, manual range) changed. */
 export const SCALE_CHANGE_REASONS = Object.freeze([
@@ -177,7 +189,8 @@ export interface ChartTypeChange {
 export interface SetViewportOptions {
   /**
    * Fire the public time-space `viewportChanged` delegate (visible-range API
-   * events, layout sync). Defaults to true for every reason except `rebase`.
+   * events, layout sync). Defaults to true for every reason except the local
+   * ones, `rebase` and `resize` (LOCAL_VIEWPORT_REASONS).
    */
   notify?: boolean;
 }
@@ -466,7 +479,7 @@ export function createChartContext(init: ChartContextInit, options: CreateChartC
       previous: previous ? { from: previous.from, to: previous.to } : { ...next },
       reason,
     });
-    if (opts.notify ?? reason !== "rebase") {
+    if (opts.notify ?? !LOCAL_VIEWPORT_REASONS.has(reason)) {
       ctx.viewportChanged.fire(visibleUnixRange(ctx.bars, next));
     }
     ctx.requestPaint();
