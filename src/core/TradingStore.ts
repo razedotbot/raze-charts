@@ -65,7 +65,8 @@ let tradingCounter = 0;
 const nextId = (prefix: string): string => `${prefix}_${++tradingCounter}`;
 const quantityText = (value: string | number | undefined): string => value == null ? "" : String(value);
 const safely = (callback: (() => void) | undefined): void => {
-  try { callback?.(); } catch { /* consumer callbacks must not break chart state */ }
+  // Consumer callbacks must not break chart state, but their errors are reported.
+  try { callback?.(); } catch (error) { console.error("[raze-charts] trading line callback threw", error); }
 };
 
 const KIND_LABEL: Record<TradingLineKind, string> = {

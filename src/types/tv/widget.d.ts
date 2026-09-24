@@ -1,12 +1,13 @@
 // The widget: its interface, header buttons, and the runtime `widget`
 // constructor and `version` exports.
 
-import type { ResolutionString } from "./common";
+import type { EntityId, ResolutionString } from "./common";
 import type { IChartWidgetApi } from "./chart-api";
 import type { ContextMenuCallback } from "./context-menu";
 import type { ChartLayoutSnapshot } from "./layout";
 import type { ChartingLibraryWidgetOptions } from "./options";
 import type { DrawingEventType } from "./shapes";
+import type { TradingLineEvent, TradingLineSnapshot } from "./trading";
 
 // ── Header button ───────────────────────────────────────────────────────────
 export interface CreateButtonOptions {
@@ -14,6 +15,33 @@ export interface CreateButtonOptions {
   useTradingViewStyle?: boolean;
   title?: string;
 }
+
+// ── Widget events ───────────────────────────────────────────────────────────
+/** Payload of the `error` widget event. */
+export interface WidgetListenerError {
+  /** Stable error code: a listener registered by host code threw. */
+  readonly code: "listener_threw";
+  /** The event or subscription whose listener threw, e.g. `drawing_event` or `onIntervalChanged`. */
+  readonly event: string;
+  /** What the listener threw. */
+  readonly cause: unknown;
+}
+
+/** `trading_event` types: a line was created, or a TradingLineEvent occurred. */
+export type TradingEventType = "create" | TradingLineEvent["type"];
+
+/**
+ * Events `widget.subscribe` delivers. Any other name throws with this list.
+ * A listener that throws is logged as `[raze-charts] <event> listener threw`,
+ * reported through `error`, and never stops the other listeners.
+ */
+export interface WidgetEventMap {
+  drawing_event: (id: EntityId, type: DrawingEventType) => void;
+  trading_event: (line: TradingLineSnapshot, type: TradingEventType) => void;
+  error: (error: WidgetListenerError) => void;
+}
+
+export type WidgetEventName = keyof WidgetEventMap;
 
 // ── Widget ──────────────────────────────────────────────────────────────────
 export interface IChartingLibraryWidget {
@@ -23,8 +51,8 @@ export interface IChartingLibraryWidget {
   chart(index?: number): IChartWidgetApi;
   createButton(options?: CreateButtonOptions): HTMLElement;
   setCSSCustomProperty(customPropertyName: string, value: string): void;
-  subscribe(event: DrawingEventType | string, callback: (...args: never[]) => void): void;
-  unsubscribe(event: string, callback: (...args: never[]) => void): void;
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void;
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void;
   onContextMenu(callback: ContextMenuCallback): void;
   setSymbol(symbol: string, interval: ResolutionString, callback?: () => void): void;
   remove(): void;
@@ -41,8 +69,8 @@ export declare class widget implements IChartingLibraryWidget {
   chart(index?: number): IChartWidgetApi;
   createButton(options?: CreateButtonOptions): HTMLElement;
   setCSSCustomProperty(customPropertyName: string, value: string): void;
-  subscribe(event: DrawingEventType | string, callback: (...args: never[]) => void): void;
-  unsubscribe(event: string, callback: (...args: never[]) => void): void;
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void;
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void;
   onContextMenu(callback: ContextMenuCallback): void;
   setSymbol(symbol: string, interval: ResolutionString, callback?: () => void): void;
   remove(): void;

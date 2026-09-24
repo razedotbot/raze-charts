@@ -41,8 +41,9 @@ export function showContextMenu(
       closeContextMenu();
       try {
         item.click();
-      } catch {
-        /* a handler throwing must not wedge the menu */
+      } catch (error) {
+        // A handler throwing must not wedge the menu, but it is reported.
+        console.error("[raze-charts] context menu item click threw", error);
       }
     }, { role: "menuitem", label: item.text });
     row.setAttribute("aria-posinset", String(index + 1));

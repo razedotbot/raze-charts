@@ -79,7 +79,7 @@ try {
       resolveDir: root,
       loader: "ts",
       contents: `
-        export { studySpecFromArgs } from "./src/core/widget/StudyArgs";
+        export { parseCreateStudyArgs } from "./src/core/widget/StudyArgs";
         export { validateSnapshot } from "./src/core/widget/PersistenceController";
         export { EventHub } from "./src/core/widget/EventHub";
         export { CompareController } from "./src/core/widget/CompareController";
@@ -127,7 +127,7 @@ const {
   buildTheme,
   installApiModules,
   orderHandlers,
-  studySpecFromArgs,
+  parseCreateStudyArgs,
   validateSnapshot,
 } = internals;
 
@@ -139,14 +139,15 @@ assert(
 );
 
 // ── StudyArgs ───────────────────────────────────────────────────────────────
-const spec = studySpecFromArgs("EMA", 1, 0, { Length: 21, color: "#fff", source: "hl2", smooth: 2, flag: true });
+const studyEnv = (name) => ({ definition: { name, defaults: { length: 9 } }, warn: () => {} });
+const { spec } = parseCreateStudyArgs(studyEnv("EMA"), "EMA", 1, 0, { Length: 21, color: "#fff", source: "hl2", smooth: 2, flag: true });
 assert(
   spec.name === "EMA" && spec.length === 21 && spec.color === "#fff"
     && spec.forceOverlay === true && spec.lock === false
-    && sameList(Object.keys(spec.inputs), ["source", "smooth"]),
+    && sameList(Object.keys(spec.inputs), ["source", "smooth", "flag"]),
   "createStudy arguments map to a StudyStore spec (length alias, colour, primitive extra inputs)",
 );
-const bare = studySpecFromArgs("RSI");
+const { spec: bare } = parseCreateStudyArgs(studyEnv("RSI"), "RSI");
 assert(bare.length === 0 && bare.color === "" && Object.keys(bare.inputs).length === 0, "missing study inputs fall back to definition defaults");
 
 // ── PersistenceController snapshot validation ──────────────────────────────
@@ -540,6 +541,7 @@ const CHART_API_METHODS = [
   "setSymbol",
   "symbol",
   "executeActionById",
+  "getCheckableActionState",
   "createCompare",
 ];
 assert(

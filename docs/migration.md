@@ -45,7 +45,9 @@ exports are the stable resolver contract.
 | `getMarks` | Supported | Async callback results are accepted and scoped to the active request. |
 | `createShape`, `createMultipointShape` | Supported subset | Use only the drawing kinds in the capability matrix. |
 | `getShapeById`, `removeEntity`, `removeAllShapes` | Supported | Shape point editing and removal are implemented. |
-| `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. `forceOverlay` / `lock` are stored but not separately enforced. |
+| `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. `forceOverlay` / `lock` are stored but not separately enforced. Positional (`[30]`), `in_<n>` and boolean inputs are honoured; overrides support `plot.color`; options support `disableUndo` and `priceScale: "as-series"`. Everything else warns once. |
+| `subscribe` / `unsubscribe` | Supported subset | `drawing_event`, `trading_event` and `error`. Other event names throw instead of never firing. |
+| `executeActionById`, `getCheckableActionState` | Supported subset | See the `ChartActionId` union; unsupported ids such as `chartProperties` throw. |
 | `createButton` | Supported | Use it for small host actions; own complex UI outside the widget. |
 | `save()` / `load()` | Supported | Versioned JSON snapshot of symbol, interval, range, style, shapes, and studies with stable entity IDs. `disableSave` omits a live shape. The host owns storage. |
 | `createCompare(symbol)` | Supported | Overlay another symbol on the same pane; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair across panes. |

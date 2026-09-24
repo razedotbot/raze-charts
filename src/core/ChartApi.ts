@@ -5,7 +5,12 @@
 
 import type {
   BracketOrderOptions,
+  ChartActionId,
+  CheckableChartActionId,
   CreateShapeOptions,
+  CreateStudyInputs,
+  CreateStudyOptions,
+  CreateStudyOverrides,
   EntityId,
   IBracketOrderAdapter,
   IChartWidgetApi,
@@ -46,11 +51,14 @@ export interface ChartApiDeps {
     name: string,
     forceOverlay?: boolean,
     lock?: boolean,
-    inputs?: Record<string, unknown>,
+    inputs?: CreateStudyInputs,
+    overrides?: CreateStudyOverrides,
+    options?: CreateStudyOptions,
   ): Promise<EntityId>;
   setVisibleRange(range: { from: number; to: number }): Promise<void>;
   createCompare(symbol: string): Promise<EntityId>;
-  executeActionById(actionId: string): void;
+  executeActionById(actionId: ChartActionId): void;
+  getCheckableActionState(actionId: CheckableChartActionId): boolean;
 }
 
 // Declaration merging gives the class the methods installed below. The
@@ -68,7 +76,8 @@ export interface ChartApi {
   getVisibleRange(): { from: number; to: number };
   setVisibleRange(range: { from: number; to: number }): Promise<void>;
   createCompare(symbol: string): Promise<EntityId>;
-  executeActionById(actionId: string): void;
+  executeActionById(actionId: ChartActionId): void;
+  getCheckableActionState(actionId: CheckableChartActionId): boolean;
   createShape<TOverrides extends object>(
     point: ShapePoint,
     options: CreateShapeOptions<TOverrides>,
@@ -89,7 +98,9 @@ export interface ChartApi {
     name: string,
     forceOverlay?: boolean,
     lock?: boolean,
-    inputs?: Record<string, unknown>,
+    inputs?: CreateStudyInputs,
+    overrides?: CreateStudyOverrides,
+    options?: CreateStudyOptions,
   ): Promise<EntityId>;
   refreshMarks(): void;
   clearMarks(): void;

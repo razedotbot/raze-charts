@@ -45,6 +45,7 @@ interface BracketOrderSnapshot
   side: TradingSide
   stopLossPrice?: number | undefined
   takeProfitPrice?: number | undefined
+type ChartActionId = 'chartReset' | 'hideAllDrawingTools' | 'insertIndicator' | 'magnet' | 'objects_tree' | 'paneObjectTree' | 'paneRemoveAllStudiesDrawingTools' | 'redo' | 'stayInDrawingModeAction' | 'stay_in_drawing_mode' | 'symbolSearch' | 'timeScaleReset' | 'undo' | 'volume_pane'
 class ChartApi implements IChartWidgetApi
   new (context: ChartContext, deps: ChartApiDeps): ChartApi
   clearMarks(): void
@@ -54,8 +55,9 @@ class ChartApi implements IChartWidgetApi
   createOrderLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createPositionLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
-  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
-  executeActionById(actionId: string): void
+  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: CreateStudyInputs | undefined, overrides?: Readonly<Record<string, boolean | number | string>> | undefined, options?: CreateStudyOptions | undefined): Promise<EntityId>
+  executeActionById(actionId: ChartActionId): void
+  getCheckableActionState(actionId: CheckableChartActionId): boolean
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
@@ -76,9 +78,10 @@ interface ChartApiDeps
   createCompare(symbol: string): Promise<EntityId>
   createMultipointShape(points: ShapePoint[], options: CreateShapeOptions<Record<string, unknown>>): Promise<EntityId>
   createShape(point: ShapePoint, options: CreateShapeOptions<Record<string, unknown>>): Promise<EntityId>
-  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
+  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: CreateStudyInputs | undefined, overrides?: Readonly<Record<string, boolean | number | string>> | undefined, options?: CreateStudyOptions | undefined): Promise<EntityId>
   createTradingLine(options: TradingLineOptions, kind: 'order' | 'position'): ITradingLineAdapter
-  executeActionById(actionId: string): void
+  executeActionById(actionId: ChartActionId): void
+  getCheckableActionState(actionId: CheckableChartActionId): boolean
   getShapeById(id: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   refreshMarks(): void
@@ -299,6 +302,7 @@ interface ChartingLibraryWidgetOptions
   timezone?: string | undefined
   toolbar_bg?: string | undefined
   width?: number | undefined
+type CheckableChartActionId = 'hideAllDrawingTools' | 'magnet' | 'stayInDrawingModeAction' | 'stay_in_drawing_mode'
 interface Command
   redo(): void
   undo(): void
@@ -333,6 +337,15 @@ interface CreateShapeOptions<TOverrides extends object = Record<string, unknown>
   showInObjectsTree?: boolean | undefined
   text?: string | undefined
   zOrder?: 'bottom' | 'top' | undefined
+type CreateStudyInputValue = boolean | number | string
+type CreateStudyInputs = Readonly<Record<string, CreateStudyInputValue | undefined>> | readonly CreateStudyInputValue[]
+interface CreateStudyOptions
+  allowChangeCurrency?: boolean | undefined
+  allowChangeUnit?: boolean | undefined
+  checkLimit?: boolean | undefined
+  disableUndo?: boolean | undefined
+  priceScale?: string | undefined
+type CreateStudyOverrides = { readonly [x: string]: boolean | number | string; }
 interface Crosshair
   active: boolean
   x: number
@@ -383,10 +396,12 @@ interface DefineDataSourceOptions
   supportedResolutions?: ResolutionString[] | undefined
   symbolTypes?: DatafeedSymbolType[] | undefined
 class Delegate<TArgs extends unknown[] = unknown[]>
-  new <TArgs extends unknown[] = unknown[]>(): Delegate<TArgs>
+  new <TArgs extends unknown[] = unknown[]>(label?: string | undefined): Delegate<TArgs>
+  consumerView<TFunc extends (...args: never[]) => void = (...args: never[]) => void>(label?: string | undefined): ISubscription<TFunc>
   destroy(): void
   fire(...args: TArgs): void
   hasListeners(): boolean
+  reportErrorsTo(handler: ((error: unknown, label: string) => void) | null, label?: string | undefined): void
   subscribe(obj: null | object, fn: (...args: never[]) => void, once?: boolean | undefined): void
   unsubscribe(obj: null | object, fn: (...args: never[]) => void): void
   unsubscribeAll(obj: null | object): void
@@ -498,11 +513,14 @@ interface IBracketOrderAdapter
 interface IChartWidgetApi
   clearMarks(): void
   createBracketOrder(options: BracketOrderOptions): Promise<IBracketOrderAdapter>
+  createCompare(symbol: string): Promise<EntityId>
   createMultipointShape<TOverrides extends object>(points: ShapePoint[], options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createOrderLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createPositionLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
-  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
+  createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: CreateStudyInputs | undefined, overrides?: Readonly<Record<string, boolean | number | string>> | undefined, options?: CreateStudyOptions | undefined): Promise<EntityId>
+  executeActionById(actionId: ChartActionId): void
+  getCheckableActionState(actionId: CheckableChartActionId): boolean
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
@@ -529,8 +547,8 @@ interface IChartingLibraryWidget
   save(callback?: ((state: ChartLayoutSnapshot) => void) | undefined): ChartLayoutSnapshot
   setCSSCustomProperty(customPropertyName: string, value: string): void
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
-  subscribe(event: string, callback: (...args: never[]) => void): void
-  unsubscribe(event: string, callback: (...args: never[]) => void): void
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
 interface IDatafeedChartApi
   getBars(symbolInfo: LibrarySymbolInfo, resolution: ResolutionString, periodParams: PeriodParams, onResult: HistoryCallback, onError: DatafeedErrorCallback): void
   resolveSymbol(symbolName: string, onResolve: ResolveCallback, onError: DatafeedErrorCallback, extension?: unknown): void
@@ -1032,6 +1050,7 @@ class Toolbar
   readonly intervalSlot: HTMLDivElement
   readonly rangeSlot: HTMLDivElement
   readonly searchSlot: HTMLDivElement
+type TradingEventType = 'cancelled' | 'create' | 'modified' | 'moved' | 'moving' | 'removed'
 interface TradingHit
   hit: 'body' | 'cancel'
   line: StoredTradingLine
@@ -1111,8 +1130,17 @@ class Widget implements IChartingLibraryWidget
   save(callback?: ((state: ChartLayoutSnapshot) => void) | undefined): ChartLayoutSnapshot
   setCSSCustomProperty(name: string, value: string): void
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
-  subscribe(event: string, callback: (...args: never[]) => void): void
-  unsubscribe(event: string, callback: (...args: never[]) => void): void
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+interface WidgetEventMap
+  drawing_event: (id: EntityId, type: DrawingEventType) => void
+  error: (error: WidgetListenerError) => void
+  trading_event: (line: TradingLineSnapshot, type: TradingEventType) => void
+type WidgetEventName = keyof WidgetEventMap
+interface WidgetListenerError
+  readonly cause: unknown
+  readonly code: 'listener_threw'
+  readonly event: string
 function bollinger(closes: number[], length: number, multiplier?: number | undefined): { mid: (null | number)[]; upper: (null | number)[]; lower: (null | number)[]; }
 function buildTheme(opts: ChartingLibraryWidgetOptions): ThemeColors
 function closeContextMenu(): void
@@ -1159,8 +1187,8 @@ class widget implements IChartingLibraryWidget
   save(callback?: ((state: ChartLayoutSnapshot) => void) | undefined): ChartLayoutSnapshot
   setCSSCustomProperty(name: string, value: string): void
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
-  subscribe(event: string, callback: (...args: never[]) => void): void
-  unsubscribe(event: string, callback: (...args: never[]) => void): void
+  subscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
+  unsubscribe<E extends WidgetEventName>(event: E, callback: WidgetEventMap[E]): void
 function withAlpha(color: string, alpha: number): string
 # referenced, not exported
 const CHART_TYPE_CHANGE_REASONS: readonly ['initial', 'sidebar', 'header', 'api', 'load', 'override', 'context-menu']
