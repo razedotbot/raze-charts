@@ -4,14 +4,16 @@ import { dirname, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { bundleArtifacts } from "../scripts/entries.mjs";
+import { bundleCompatibilityTypes } from "../scripts/compat-types.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceProbe = resolve(root, "src/types/WatchContractProbe.ts");
 const emittedProbe = resolve(root, "dist/types/types/WatchContractProbe.d.ts");
-const compatibilitySource = resolve(root, "src/types/charting_library.d.ts");
 const compatibilityOutput = resolve(root, "dist/charting_library.d.ts");
 const publicReactTypes = resolve(root, "dist/types/react/index.d.ts");
-const compatibilityOriginal = readFileSync(compatibilitySource, "utf8");
+// The standalone drop-in file is flattened from src/types/charting_library.d.ts
+// and the src/types/tv/ modules it re-exports.
+const compatibilityOriginal = bundleCompatibilityTypes(root);
 let output = "";
 const child = spawn(process.execPath, ["build.mjs", "--watch"], {
   cwd: root,
@@ -56,7 +58,7 @@ try {
   assert.equal(
     readFileSync(compatibilityOutput, "utf8"),
     compatibilityOriginal,
-    "watch restores the compatibility declaration from its tracked source",
+    "watch restores the compatibility declaration from its tracked sources",
   );
 
   rmSync(sourceProbe, { force: true });

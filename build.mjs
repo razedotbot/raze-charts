@@ -6,7 +6,7 @@
 //   dist/charting_library.esm.js         — ESM bundle (bundler entry)
 //   dist/charting_library.cjs            — CJS bundle
 //   dist/charting_library.standalone.js  — IIFE that assigns window.TradingView
-//   dist/charting_library.d.ts           — hand-authored drop-in types (copied verbatim)
+//   dist/charting_library.d.ts           — hand-authored drop-in types (flattened, self-contained)
 //   dist/datafeed-api.d.ts               — alias of the above (TV layout parity)
 //   dist/<subpath>.esm.js / <subpath>.cjs — one pair per public subpath
 //   dist/types/**                        — tsc-generated declarations
@@ -15,8 +15,9 @@
 // subpath once, and this file derives one esbuild target per output format
 // from that table. Adding a subpath never requires editing this file.
 //
-// The drop-in `.d.ts` is authored by hand (src/types/charting_library.d.ts)
-// rather than generated, so it stays a small, stable, structurally-compatible
+// The drop-in `.d.ts` is authored by hand (src/types/charting_library.d.ts,
+// a barrel over the src/types/tv/ domain modules) rather than generated, so it
+// stays a small, stable, structurally-compatible
 // surface for consumers migrating off the TradingView library. The modular
 // named exports (engine, datafeed manager, studies, utils) are typed by the
 // generated declarations instead.
@@ -25,12 +26,14 @@ import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   watch as watchFs,
   writeFileSync,
 } from "node:fs";
@@ -39,6 +42,7 @@ import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PACKAGE_ENTRIES, entryArtifacts, entryById } from "./scripts/entries.mjs";
+import { bundleCompatibilityTypes } from "./scripts/compat-types.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const out = resolve(root, "dist");
@@ -158,21 +162,17 @@ function emitTypes() {
       cwd: root,
       stdio: "inherit",
     });
-    mkdirSync(resolve(stagedTypes, "types"), { recursive: true });
-    copyFileSync(
-      resolve(root, "src/types/charting_library.d.ts"),
-      resolve(stagedTypes, "types/charting_library.d.ts"),
-    );
+    // tsc does not emit hand-authored declarations: copy the barrel and the
+    // src/types/tv/ modules it re-exports next to the generated tree.
+    const compatibilityTypes = bundleCompatibilityTypes(root);
+    cpSync(resolve(root, "src/types"), resolve(stagedTypes, "types"), {
+      recursive: true,
+      filter: (source) => statSync(source).isDirectory() || source.endsWith(".d.ts"),
+    });
     rewriteDeclarationSpecifiers(stagedTypes);
     synchronizeDirectory(stagedTypes, typesOut);
-    copyFileSync(
-      resolve(root, "src/types/charting_library.d.ts"),
-      resolve(out, "charting_library.d.ts"),
-    );
-    copyFileSync(
-      resolve(root, "src/types/charting_library.d.ts"),
-      resolve(out, "datafeed-api.d.ts"),
-    );
+    writeFileSync(resolve(out, "charting_library.d.ts"), compatibilityTypes);
+    writeFileSync(resolve(out, "datafeed-api.d.ts"), compatibilityTypes);
   } finally {
     rmSync(stagedTypes, { recursive: true, force: true });
   }
@@ -228,9 +228,10 @@ if (watch) {
     typeTimer = setTimeout(() => {
       try {
         emitTypes();
-      } catch {
+      } catch (error) {
         // tsc already prints actionable diagnostics; keep watchers alive so
         // the next edit can repair both JavaScript and declaration artifacts.
+        if (error?.name === "CompatibilityTypesError") console.error(error.message);
       }
     }, 75);
   };

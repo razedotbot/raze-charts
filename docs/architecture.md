@@ -34,6 +34,53 @@ files are not public. The project is pre-1.0, so additions
 should still preserve documented behavior wherever practical and call out
 breaking changes explicitly.
 
+### TradingView-compatible declarations
+
+The TradingView-shaped types are hand-authored. `src/types/charting_library.d.ts`
+is a barrel that only re-exports one domain module per concern:
+
+| Module (`src/types/tv/`) | Declares |
+| --- | --- |
+| `common.d.ts` | Branded ids, theme and timezone names, `ISubscription` |
+| `datafeed.d.ts` | Bars, symbols, datafeed configuration and callbacks, marks |
+| `shapes.d.ts` | Shape points and `createShape` options, `ILineDataSourceApi` |
+| `trading.d.ts` | Order, position and bracket lines |
+| `chart-api.d.ts` | `IChartWidgetApi` |
+| `layout.d.ts` | `ChartLayoutSnapshot` for `save()` and `load()` |
+| `context-menu.d.ts` | `ContextMenuItem` and the `onContextMenu` callback |
+| `widget.d.ts` | `IChartingLibraryWidget`, the `widget` class, header button options, `version` |
+| `options.d.ts` | `ChartingLibraryWidgetOptions`, the `raze` chrome options, formatters |
+| `studies.d.ts` | `StudyDefinition` and Indicators panel presets |
+
+The package root re-exports the barrel, and `dist/types` ships the same module
+tree. `build.mjs` also flattens the modules into the self-contained
+`dist/charting_library.d.ts` (and its `dist/datafeed-api.d.ts` alias) that
+vendored drop-in installs copy next to a bundle. To keep that flattening exact,
+`scripts/compat-types.mjs` fails the build when a module breaks one of these
+rules:
+
+- every top-level declaration is a named `export`;
+- siblings are referenced only through `import type { A, B } from "./<module>"`,
+  without renames;
+- re-exports live only in the barrel, and every `tv/` module is re-exported;
+- a name is declared in one module only;
+- a `/** … */` comment sits directly above the declaration it documents.
+  TypeScript shows the last such comment before a declaration as its hover
+  documentation, even across blank lines and the imports that flattening
+  removes, so file headers and section notes are `//` comments.
+
+`tests/compat-types.mjs` checks that every declaration shows the same hover
+documentation in the flattened file as in its module.
+
+`tests/types-api-report.mjs` resolves every export of the published
+declaration entry points, plus every named package type those exports
+reference without exporting, and compares a normalized report with
+`tests/types-api-report/*.api.txt`. The report ignores which file declares a
+type, so moving a declaration between modules is free, while any change to a
+name, member, modifier or type fails with a diff. After an intentional public
+type change, review the diff and run
+`node tests/types-api-report.mjs --update`.
+
 ## Financial runtime
 
 The financial widget owns the host DOM and wires five responsibilities:
@@ -262,6 +309,7 @@ src/
   engine/      financial layout, interactions, renderer, Canvas paint layers
   studies/     built-in calculations, registry, active study state
                (index.ts is the /studies entrypoint)
+  types/       TradingView-compatible declarations: barrel over tv/ modules
   ui/          optional financial chrome and popup primitives
   util/        formatting, resolution, delegates, Heikin Ashi
 tests/         unit, lifecycle, package contract, and visual regressions
