@@ -425,6 +425,7 @@ interface FinanceView extends PlotScale
   hoverMark: Mark | null
   hoverShapeId: null | string
   hoverTimescaleMark: TimescaleMark | null
+  logFallback?: boolean | undefined
   logScale: boolean
   markScreen: MarkHit[]
   pctBase: number
@@ -732,6 +733,7 @@ interface PeriodParams
   from: number
   to: number
 interface PlotScale
+  logFallback?: boolean | undefined
   logScale: boolean
   pctBase: number
   percentScale: boolean
