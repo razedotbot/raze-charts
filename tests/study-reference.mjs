@@ -715,7 +715,10 @@ await test("rolling stdev is O(n): matches the naive definition and is window-le
   const bb20 = best(() => studies.bollinger(big, 20));
   const bb500 = best(() => studies.bollinger(big, 500));
   console.log(`  bollinger(100k): L=20 ${bb20.toFixed(2)} ms, L=200 ${bb200.toFixed(2)} ms, L=500 ${bb500.toFixed(2)} ms`);
-  assert.ok(bb200 < 5, `bollinger(100k, 200) takes ${bb200.toFixed(2)} ms (< 5 ms)`);
+  // The window-length ratio is the O(n) proof. The absolute bound is only a
+  // portable sanity cap: shared CI runners measured 5.4 ms where a desktop
+  // measures under 2 ms, and a naive O(n·L) pass at L = 200 is far slower.
+  assert.ok(bb200 < 25, `bollinger(100k, 200) takes ${bb200.toFixed(2)} ms (< 25 ms)`);
   assert.ok(bb500 < bb20 * 2 + 1, "cost does not grow with the window length");
 });
 

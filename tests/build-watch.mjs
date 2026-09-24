@@ -66,10 +66,17 @@ try {
   console.log("[raze-charts] build watch synchronizes type-only sources");
 } finally {
   rmSync(sourceProbe, { force: true });
-  if (child.exitCode == null) {
-    const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
-    child.kill();
-    await exited;
+  if (child.exitCode == null && child.signalCode == null) {
+    // Never wait unboundedly: on Linux kill() sends SIGTERM, which a stuck
+    // process could ignore. Escalate to SIGKILL, then report the failure.
+    const exited = new Promise((resolveExit) => child.once("exit", () => resolveExit(true)));
+    const within = (ms) => Promise.race([exited, new Promise((resolveLate) => setTimeout(() => resolveLate(false), ms))]);
+    child.kill("SIGTERM");
+    if (!(await within(10_000))) {
+      child.kill("SIGKILL");
+      await within(5_000);
+      throw new Error(`build.mjs --watch did not exit within 10 s of SIGTERM\n${output}`);
+    }
   }
   assert.ok(
     existsSync(publicReactTypes),

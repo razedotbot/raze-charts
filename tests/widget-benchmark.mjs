@@ -255,7 +255,18 @@ run("the runner documents its options and rejects unknown or inconsistent flags"
   assert.match(sizes.stderr, /invalid benchmark size "lots"/);
 });
 
-run("benchmarks run only under playwright.perf.config.ts, never in the default suites", () => {
+// The package supports Node 18, but the Playwright CLI refuses to start below
+// its own engines floor. Skip loudly there; the newer CI jobs cover this.
+const playwrightPackage = JSON.parse(
+  readFileSync(createRequire(import.meta.url).resolve("@playwright/test/package.json"), "utf8"),
+);
+const playwrightMinNode = Number(/(\d+)/.exec(playwrightPackage.engines?.node ?? "")?.[1] ?? 0);
+const nodeMajor = Number(process.versions.node.split(".")[0]);
+if (nodeMajor < playwrightMinNode) {
+  console.log(
+    `- skipped: benchmark suite separation (Playwright ${playwrightPackage.version} needs Node ${playwrightMinNode}+, this is ${process.version})`,
+  );
+} else run("benchmarks run only under playwright.perf.config.ts, never in the default suites", () => {
   const cli = createRequire(import.meta.url).resolve("@playwright/test/cli");
   const env = { ...process.env, RAZE_BENCH_SIZES: "" };
   const visual = runNode([cli, "test", "--list"], { env });

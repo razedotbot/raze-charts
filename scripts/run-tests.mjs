@@ -23,6 +23,21 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * Hard ceiling for one step. A hung test (for example a child process that
+ * ignores a signal on one platform) fails with a clear reason instead of
+ * silently consuming the whole CI job. Override with RAZE_TEST_TIMEOUT_MS.
+ */
+export function stepTimeoutMs(env = process.env) {
+  const raw = env.RAZE_TEST_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return 10 * 60_000;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`RAZE_TEST_TIMEOUT_MS must be a positive number of milliseconds, got "${raw}"`);
+  }
+  return value;
+}
+
 /** Files in the tests directory that are infrastructure, not tests. */
 export const NON_TEST_FILES = Object.freeze(["static-server.mjs"]);
 
@@ -229,16 +244,30 @@ function main(argv) {
     return 0;
   }
 
+  let timeout;
+  try {
+    timeout = stepTimeoutMs();
+  } catch (error) {
+    console.error(`[raze-charts] ${error.message}`);
+    return 2;
+  }
   const results = [];
   const started = performance.now();
   for (const step of steps) {
     console.log(`\n[raze-charts] ▶ ${step.label}`);
     const stepStarted = performance.now();
-    const result = spawnSync(step.command, step.args, { cwd: repositoryRoot, stdio: "inherit" });
+    const result = spawnSync(step.command, step.args, {
+      cwd: repositoryRoot,
+      stdio: "inherit",
+      timeout,
+      killSignal: "SIGKILL",
+    });
     const duration = performance.now() - stepStarted;
     const ok = result.status === 0;
     const reason = ok
       ? ""
+      : result.error?.code === "ETIMEDOUT"
+        ? `timed out after ${formatDuration(timeout)}; raise RAZE_TEST_TIMEOUT_MS only if the step is legitimately slow`
       : result.error
         ? result.error.message
         : result.signal

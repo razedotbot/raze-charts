@@ -27,8 +27,8 @@ function test(name, body) {
   console.log(`✓ ${name}`);
 }
 
-function runRunner(args) {
-  return spawnSync(process.execPath, [runner, ...args], { cwd: root, encoding: "utf8" });
+function runRunner(args, env = process.env) {
+  return spawnSync(process.execPath, [runner, ...args], { cwd: root, encoding: "utf8", env });
 }
 
 try {
@@ -157,6 +157,29 @@ try {
     assert.equal(lines[0], "typecheck (src)");
     assert.ok(lines.at(-1).endsWith("package-contract.mjs"));
     assert.doesNotMatch(result.stdout, /fixture pass/);
+  });
+
+  test("a hung test fails with a timeout instead of stalling the run", () => {
+    writeFileSync(join(fixture, "hang.mjs"), "setInterval(() => {}, 1000);\n");
+    try {
+      const started = Date.now();
+      const result = runRunner(
+        [`--tests-dir=${fixture}`, "--no-build", "hang", "alpha"],
+        { ...process.env, RAZE_TEST_TIMEOUT_MS: "1500" },
+      );
+      assert.notEqual(result.status, 0);
+      assert.match(result.stdout, /FAIL\s+\S*hang\.mjs.*timed out after 1\.5 s/);
+      assert.match(result.stdout, /pass\s+\S*alpha\.mjs/, "later tests still run after a timeout");
+      assert.ok(Date.now() - started < 30_000, "the runner did not wait for the hung test");
+    } finally {
+      rmSync(join(fixture, "hang.mjs"), { force: true });
+    }
+    const invalid = runRunner(
+      [`--tests-dir=${fixture}`, "--no-build", "alpha"],
+      { ...process.env, RAZE_TEST_TIMEOUT_MS: "soon" },
+    );
+    assert.equal(invalid.status, 2);
+    assert.match(invalid.stderr, /RAZE_TEST_TIMEOUT_MS must be a positive number/);
   });
 } finally {
   rmSync(sandbox, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

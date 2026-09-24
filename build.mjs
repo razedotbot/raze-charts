@@ -268,7 +268,23 @@ if (watch) {
     return handles;
   };
   const typeWatchers = watchTypeDirectories(resolve(root, "src"));
-  void typeWatchers;
+  // Stop promptly on Ctrl+C or a supervisor's SIGTERM: close the file
+  // watchers and esbuild contexts instead of leaving the process (and its
+  // esbuild service) running. A shutdown that stalls is forced after 3 s.
+  let stopping = false;
+  const stop = (signal) => {
+    if (stopping) return;
+    stopping = true;
+    setTimeout(() => {
+      console.error(`[raze-charts] watch did not stop cleanly after ${signal}; exiting`);
+      process.exit(1);
+    }, 3000);
+    clearTimeout(typeTimer);
+    for (const handle of typeWatchers) handle.close();
+    void Promise.allSettled(contexts.map((ctx) => ctx.dispose())).then(() => process.exit(0));
+  };
+  process.once("SIGINT", () => stop("SIGINT"));
+  process.once("SIGTERM", () => stop("SIGTERM"));
   console.log("[raze-charts] watching…");
 } else {
   await run();
