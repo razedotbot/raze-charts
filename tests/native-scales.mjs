@@ -124,6 +124,15 @@ assert.deepEqual(
   "fractional log ticks are exact decimals",
 );
 assert.deepEqual(scaleLog({ domain: [3, 7] }).ticks(5), [3, 4, 5, 6, 7], "a sub-decade domain falls back to linear ticks");
+// The value domain must not depend on the engine's Math.pow: Node 18 and 24
+// used to disagree in the last digit of the padded flat domain.
+assert.deepEqual(scaleLog({ domain: [3, 37] }).domain, [3, 37], "a log domain reports its endpoints exactly");
+assert.deepEqual(
+  scaleLog({ domain: [100, 100] }).domain,
+  [100 / Math.SQRT2, 100 * Math.SQRT2],
+  "a flat log domain pads by exactly √2 on each side",
+);
+assert.deepEqual(scaleLog({ domain: [3, 37] }).copy().domain, [3, 37], "copy() keeps the exact endpoints");
 {
   const wide = scaleLog({ domain: [1e-30, 1e30] }).ticks(6);
   assert.ok(wide.length >= 3 && wide.length <= 7, "very wide log domains label every n-th decade within budget");

@@ -290,15 +290,23 @@ export function scaleLog(opts?: {
   domain?: readonly [number, number];
   range?: readonly [number, number];
 }): LinearScale {
+  // The value-space endpoints are kept as given (or padded with exact IEEE
+  // multiply/divide) instead of being rebuilt with Math.pow(10, log10(x)):
+  // that round trip depends on the engine's libm, so the same chart would
+  // report different domains on different Node and browser versions.
+  let values: [number, number] = [1, 10];
   const toLogDomain = (domain: readonly [number, number]): [number, number] => {
     if (!domain.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0)) {
       throw new RangeError("scaleLog domain endpoints must be finite numbers greater than zero.");
     }
     const result: [number, number] = [Math.log10(domain[0]), Math.log10(domain[1])];
+    values = [domain[0], domain[1]];
     if (result[0] === result[1]) {
+      // A flat domain widens by a factor of √2 on each side.
       const halfDecade = Math.log10(Math.SQRT2);
       result[0] -= halfDecade;
       result[1] += halfDecade;
+      values = [domain[0] / Math.SQRT2, domain[1] * Math.SQRT2];
     }
     return result;
   };
@@ -306,7 +314,7 @@ export function scaleLog(opts?: {
     domain: toLogDomain(opts?.domain ?? [1, 10]),
     range: opts?.range,
   });
-  const valueDomain = (): [number, number] => [Math.pow(10, inner.domain[0]), Math.pow(10, inner.domain[1])];
+  const valueDomain = (): [number, number] => [values[0], values[1]];
   return {
     kind: "linear",
     get domain() { return valueDomain(); },

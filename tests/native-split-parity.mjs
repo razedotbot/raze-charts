@@ -797,9 +797,22 @@ if (update) {
     failures.push("tests/fixtures/native-split-parity.json is missing; run with --update on a trusted build");
   } else {
     const expected = JSON.parse(readFileSync(snapshotPath, "utf8"));
+    // Name the first differing paths so a failure on another runtime is
+    // diagnosable from the log alone.
+    const diffPaths = (a, b, path, out) => {
+      if (out.length >= 8) return;
+      if (a !== null && b !== null && typeof a === "object" && typeof b === "object" && Array.isArray(a) === Array.isArray(b)) {
+        for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) diffPaths(a[key], b[key], `${path}.${key}`, out);
+      } else if (JSON.stringify(a) !== JSON.stringify(b)) {
+        out.push(`    ${path}: expected ${JSON.stringify(a)}, actual ${JSON.stringify(b)}`);
+      }
+    };
     const compare = (label, a, b) => {
       for (const key of new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})])) {
-        if (JSON.stringify(a?.[key]) !== JSON.stringify(b?.[key])) failures.push(`${label} ${key} differs`);
+        if (JSON.stringify(a?.[key]) === JSON.stringify(b?.[key])) continue;
+        const paths = [];
+        diffPaths(a?.[key], b?.[key], key, paths);
+        failures.push(`${label} ${key} differs\n${paths.join("\n")}`);
       }
     };
     if (JSON.stringify(expected.exports) !== JSON.stringify(current.exports)) {
