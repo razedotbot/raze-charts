@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const port = Number(process.env.PORT || 8799);
+// The browser benchmark opts in to cross-origin isolation, which lifts
+// Chromium's 100 µs performance.now() coarsening to 5 µs.
+const isolationHeaders = process.env.CROSS_ORIGIN_ISOLATED === "1"
+  ? { "cross-origin-opener-policy": "same-origin", "cross-origin-embedder-policy": "require-corp" }
+  : {};
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -29,7 +34,10 @@ const server = createServer(async (req, res) => {
   }
   try {
     const body = await readFile(file);
-    res.writeHead(200, { "content-type": TYPES[extname(file)] || "application/octet-stream" });
+    res.writeHead(200, {
+      "content-type": TYPES[extname(file)] || "application/octet-stream",
+      ...isolationHeaders,
+    });
     res.end(body);
   } catch {
     res.writeHead(404).end("not found");

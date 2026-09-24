@@ -1,0 +1,375 @@
+{
+  "version": 1,
+  "suite": "financial-widget-browser",
+  "description": "Financial widget in headless Chromium: load, repaint, crosshair, pan, wheel, six-study repaint, live ticks and retained heap.",
+  "environment": {
+    "viewport": "1100x620 CSS px at DPR 1 (the visual-golden surface)",
+    "data": "Deterministic 1-minute OHLCV random walk; the whole series is served on the first request",
+    "chrome": "Default widget chrome, dark theme, countdown and popup hints disabled",
+    "timing": "Main-thread milliseconds: synchronous input handler plus every requestAnimationFrame callback it causes, plus a forced 1x1 canvas readback so rasterisation is included; load is wall time from construction to the first painted data frame",
+    "heap": "Runtime.getHeapUsage usedSize after two forced GCs, minus the page before the series was generated"
+  },
+  "budgetPolicy": {
+    "time": "max(10 ms, 6x reference median)",
+    "heap": "max(16 MB, 2x reference median)"
+  },
+  "reference": {
+    "browser": "chromium 153.0.8010.12",
+    "platform": "win32 10.0.26200 x64",
+    "cpu": "AMD Ryzen 9 5900X 12-Core Processor",
+    "node": "v24.21.0",
+    "rasterIncluded": true,
+    "captured": "2026-09-24",
+    "note": "Maintainer workstation reference; compare trends, not machines. --check enforces the portable budget only."
+  },
+  "scenarios": {
+    "load": {
+      "unit": "ms",
+      "description": "Construct the widget, load the series and paint the first data frame",
+      "sizes": {
+        "1000": {
+          "baseline": 35.3,
+          "p95": 43.28,
+          "budget": 300
+        },
+        "10000": {
+          "baseline": 36.85,
+          "p95": 39.77,
+          "budget": 300
+        },
+        "100000": {
+          "baseline": 36.33,
+          "p95": 67.95,
+          "budget": 300
+        },
+        "500000": {
+          "baseline": 119.73,
+          "p95": 120.91,
+          "budget": 800
+        }
+      }
+    },
+    "frame-default": {
+      "unit": "ms",
+      "description": "Repaint after a one-bar viewport change at the default 120-bar zoom",
+      "sizes": {
+        "1000": {
+          "baseline": 1.98,
+          "p95": 2.8,
+          "budget": 15,
+          "target": 2
+        },
+        "10000": {
+          "baseline": 2.05,
+          "p95": 2.8,
+          "budget": 15,
+          "target": 2
+        },
+        "100000": {
+          "baseline": 2.09,
+          "p95": 2.6,
+          "budget": 15,
+          "target": 2
+        },
+        "500000": {
+          "baseline": 1.88,
+          "p95": 2.42,
+          "budget": 15,
+          "target": 2
+        }
+      }
+    },
+    "frame-zoomed-out": {
+      "unit": "ms",
+      "description": "Repaint after a one-bar viewport change at 1.5 px per bar",
+      "sizes": {
+        "1000": {
+          "baseline": 2.72,
+          "p95": 4.24,
+          "budget": 20
+        },
+        "10000": {
+          "baseline": 3.04,
+          "p95": 3.56,
+          "budget": 20
+        },
+        "100000": {
+          "baseline": 3.09,
+          "p95": 4.27,
+          "budget": 20
+        },
+        "500000": {
+          "baseline": 3.16,
+          "p95": 4.45,
+          "budget": 20
+        }
+      }
+    },
+    "frame-all": {
+      "unit": "ms",
+      "description": "Repaint after a one-bar viewport change with the whole history visible",
+      "sizes": {
+        "1000": {
+          "baseline": 4.89,
+          "p95": 6.22,
+          "budget": 30
+        },
+        "10000": {
+          "baseline": 29.5,
+          "p95": 31,
+          "budget": 180
+        },
+        "100000": {
+          "baseline": 237.69,
+          "p95": 291.67,
+          "budget": 1500
+        },
+        "500000": {
+          "baseline": 1386.82,
+          "p95": 1390.85,
+          "budget": 8500
+        }
+      }
+    },
+    "crosshair-move": {
+      "unit": "ms",
+      "description": "Mouse move sweeping the crosshair across the default view",
+      "sizes": {
+        "1000": {
+          "baseline": 3.15,
+          "p95": 4.08,
+          "budget": 20
+        },
+        "10000": {
+          "baseline": 3.11,
+          "p95": 3.83,
+          "budget": 20
+        },
+        "100000": {
+          "baseline": 2.66,
+          "p95": 3.07,
+          "budget": 20
+        },
+        "500000": {
+          "baseline": 2.71,
+          "p95": 3.35,
+          "budget": 20
+        }
+      }
+    },
+    "crosshair-move-all": {
+      "unit": "ms",
+      "description": "Mouse move sweeping the crosshair with the whole history visible",
+      "sizes": {
+        "1000": {
+          "baseline": 5.32,
+          "p95": 6.15,
+          "budget": 40
+        },
+        "10000": {
+          "baseline": 28.39,
+          "p95": 31.13,
+          "budget": 180
+        },
+        "100000": {
+          "baseline": 247.18,
+          "p95": 276.01,
+          "budget": 1500
+        },
+        "500000": {
+          "baseline": 1358.89,
+          "p95": 1382.11,
+          "budget": 8500
+        }
+      }
+    },
+    "pan": {
+      "unit": "ms",
+      "description": "Pointer drag step while panning the default view",
+      "sizes": {
+        "1000": {
+          "baseline": 3.02,
+          "p95": 3.7,
+          "budget": 20
+        },
+        "10000": {
+          "baseline": 3.18,
+          "p95": 3.88,
+          "budget": 20
+        },
+        "100000": {
+          "baseline": 2.72,
+          "p95": 3.36,
+          "budget": 20
+        },
+        "500000": {
+          "baseline": 2.61,
+          "p95": 3.46,
+          "budget": 20
+        }
+      }
+    },
+    "wheel-zoom": {
+      "unit": "ms",
+      "description": "Alternating wheel zoom out/in at the default view",
+      "sizes": {
+        "1000": {
+          "baseline": 2.73,
+          "p95": 3.51,
+          "budget": 20
+        },
+        "10000": {
+          "baseline": 2.93,
+          "p95": 3.74,
+          "budget": 20
+        },
+        "100000": {
+          "baseline": 2.34,
+          "p95": 2.78,
+          "budget": 20
+        },
+        "500000": {
+          "baseline": 2.5,
+          "p95": 2.91,
+          "budget": 20
+        }
+      }
+    },
+    "frame-studies": {
+      "unit": "ms",
+      "description": "Default-view repaint with six studies (EMA, SMA, RSI, VWAP, BB, MACD)",
+      "sizes": {
+        "1000": {
+          "baseline": 4.54,
+          "p95": 5.48,
+          "budget": 30
+        },
+        "10000": {
+          "baseline": 4.64,
+          "p95": 5.03,
+          "budget": 30
+        },
+        "100000": {
+          "baseline": 4,
+          "p95": 4.81,
+          "budget": 30
+        },
+        "500000": {
+          "baseline": 3.93,
+          "p95": 4.66,
+          "budget": 30
+        }
+      }
+    },
+    "tick-replace": {
+      "unit": "ms",
+      "description": "Live tick replacing the forming bar with six studies",
+      "sizes": {
+        "1000": {
+          "baseline": 4.55,
+          "p95": 5.31,
+          "budget": 30,
+          "target": 2
+        },
+        "10000": {
+          "baseline": 6.56,
+          "p95": 8.43,
+          "budget": 40,
+          "target": 2
+        },
+        "100000": {
+          "baseline": 23.99,
+          "p95": 46.79,
+          "budget": 150,
+          "target": 2
+        },
+        "500000": {
+          "baseline": 167.49,
+          "p95": 329.23,
+          "budget": 1100,
+          "target": 2
+        }
+      }
+    },
+    "tick-append": {
+      "unit": "ms",
+      "description": "Live tick appending a new bar with six studies",
+      "sizes": {
+        "1000": {
+          "baseline": 4.31,
+          "p95": 5.04,
+          "budget": 30
+        },
+        "10000": {
+          "baseline": 6.2,
+          "p95": 7,
+          "budget": 40
+        },
+        "100000": {
+          "baseline": 23.36,
+          "p95": 38.7,
+          "budget": 150
+        },
+        "500000": {
+          "baseline": 179.72,
+          "p95": 368.84,
+          "budget": 1100
+        }
+      }
+    },
+    "heap": {
+      "unit": "MB",
+      "description": "Retained heap for the series and a mounted widget, after GC",
+      "sizes": {
+        "1000": {
+          "baseline": 0.4,
+          "p95": 0.4,
+          "budget": 16
+        },
+        "10000": {
+          "baseline": 1.36,
+          "p95": 1.36,
+          "budget": 16
+        },
+        "100000": {
+          "baseline": 10.64,
+          "p95": 10.64,
+          "budget": 30,
+          "target": 15
+        },
+        "500000": {
+          "baseline": 51.83,
+          "p95": 51.83,
+          "budget": 110,
+          "target": 75
+        }
+      }
+    },
+    "heap-studies": {
+      "unit": "MB",
+      "description": "Retained heap after adding the six studies, after GC",
+      "sizes": {
+        "1000": {
+          "baseline": 1.04,
+          "p95": 1.04,
+          "budget": 16
+        },
+        "10000": {
+          "baseline": 4.21,
+          "p95": 4.21,
+          "budget": 16
+        },
+        "100000": {
+          "baseline": 35.45,
+          "p95": 35.45,
+          "budget": 80
+        },
+        "500000": {
+          "baseline": 174.3,
+          "p95": 174.3,
+          "budget": 400
+        }
+      }
+    }
+  }
+}
