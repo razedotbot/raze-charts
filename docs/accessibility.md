@@ -24,6 +24,23 @@ provided. Mounted Canvas output uses the same image semantics and a visually
 hidden bounded summary derived from the description, series names, and values.
 This keeps renderer choice from dropping the chart's high-level meaning.
 
+Default series palettes are tuned for colour-vision deficiencies: every pair of
+slots stays distinguishable under simulated protanopia, deuteranopia and
+tritanopia. Gains/losses, heatmaps and the scatter ramp use the theme's
+`accent` and `down` tokens, green and red by default. Pass
+`theme: COLORBLIND_CHART_THEME` (or `COLORBLIND_LIGHT_CHART_THEME`) to switch
+those encodings to blue and orange, or spread a preset to adjust single
+tokens:
+
+```ts
+import { COLORBLIND_LIGHT_CHART_THEME, defineChart, heatmap } from "@razedotbot/charts/chart";
+
+const definition = defineChart({
+  marks: [heatmap(returns, { x: "month", y: "asset", valueKey: "change" })],
+  theme: { ...COLORBLIND_LIGHT_CHART_THEME, font: "Inter, sans-serif" },
+});
+```
+
 Pointer tooltips are not a screen-reader data browser. When exact values or
 point-by-point comparison are necessary, render an adjacent HTML table or
 textual summary from the same source data. Keep that representation available

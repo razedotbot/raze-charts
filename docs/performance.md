@@ -67,8 +67,8 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
 | | Scenario: Widget only | `import { widget }` | 63 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 44 KiB |
-| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 44.5 KiB |
+| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 33.5 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 23 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
 | | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 37 KiB |
@@ -94,6 +94,13 @@ The native artifact allowance grew from 42 to 44 KiB when the compiler and
 renderers were split into `src/chart/compile/*` and `src/chart/render/*`: the
 unminified artifact keeps every function and property name, so the module
 boundaries added about 2.2 KiB with byte-identical output.
+
+The native artifact allowance grew from 44 to 44.5 KiB, and the "Line-only
+mount" scenario from 33 to 33.5 KiB, for the bounded tick generator:
+exact-decimal steps chosen against the tick budget, decade-aware log ticks
+with a sub-decade linear fallback, and nice-domain iteration add about
+0.8 KiB to `src/chart/scales.ts`, which every Cartesian chart imports.
+Together with the colour-blind theme presets the artifact grows about 1.2 KiB.
 
 The root artifact budget was raised from 55 KiB to the 72 KiB hard cap set by
 architecture decision AD-01, and the "Widget only" scenario from 49 KiB to

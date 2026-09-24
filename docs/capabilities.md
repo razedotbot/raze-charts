@@ -88,6 +88,10 @@ registry created there is standalone; pass definitions to a widget through
 | Automatic dense line/area decimation | **Yes** | Pixel-aware extrema envelope; defaults to two rendered points per plot pixel. Input scanning remains O(n). |
 | Decimation diagnostics and opt-out | **Yes** | `CompiledChart.diagnostics`; tune `maxRenderedPoints` or set `decimation: "none"`. |
 | Retained scene diffing | **No** | `update()` preserves the mount, then recompiles and repaints the scene. |
+| Tick density and nice steps | **Yes** | `ticks(n)` returns between `ceil(n / 2)` and `n + 1` ticks on 1, 2 or 5 x 10^k steps (2.5 only when those miss the budget by two or more), as exact decimals. A non-finite `n` throws a `RangeError`. |
+| Log scale ticks | **Yes** | Powers of ten, with 2x and 5x subdivisions when the budget allows and every n-th decade on very wide domains. A domain narrower than a decade that holds too few of those values falls back to linear ticks (3-7 gives 3, 4, 5, 6, 7). |
+| Flat-series domains | **Yes** | An all-equal series v gets `v ± max(abs(v) × 1%, 1)`, capped so a non-zero value never crosses zero, and plots in the vertical middle. Bars and areas keep their zero baseline. |
+| Colour-vision-safe palettes | **Yes** | Every default series-palette pair is at least ΔE76 15 apart under normal vision and simulated protan, deutan and tritan vision, has 4.5:1 contrast with its plot, and avoids the text colour. `COLORBLIND_CHART_THEME` / `COLORBLIND_LIGHT_CHART_THEME` encode up/down, heatmaps and the scatter ramp as blue/orange instead of green/red. Heatmap colours derive from the theme's `accent`, `down` and `heatZero` tokens. |
 
 ## React adapter
 

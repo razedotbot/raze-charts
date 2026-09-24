@@ -47,6 +47,8 @@ interface BarMarkOptions<T> extends CartesianMarkOptions<T>
   y: Accessor<T>
 type BuiltinChartMark = AreaChartMark | BarChartMark | HeatmapChartMark | LineChartMark | PieChartMark | PointChartMark | RadarChartMark | RuleXChartMark | RuleYChartMark
 const CHART_PALETTE: readonly string[]
+const COLORBLIND_CHART_THEME: Readonly<DashboardTheme>
+const COLORBLIND_LIGHT_CHART_THEME: Readonly<DashboardTheme>
 interface CartesianMarkOptions<T> extends NamedMarkOptions
   name?: string | undefined
   x: Accessor<T>
