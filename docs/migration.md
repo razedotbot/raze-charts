@@ -100,6 +100,28 @@ This separation makes it obvious which configuration can travel with an
 existing widget integration and which configuration intentionally couples to
 Raze.
 
+### Content Security Policy
+
+TradingView's library renders inside an iframe. Raze renders in your page,
+so your page's CSP applies to it. The widget's chrome styles use
+constructable stylesheets and CSSOM, so `style-src 'self'` works without
+`'unsafe-inline'`. Where constructable stylesheets are unavailable, provide a
+nonce through `<meta property="csp-nonce" nonce="…">` or
+`ensureBaseStyles(target, { nonce })`. With Trusted Types enforced, allow the
+`raze-charts` policy (`trusted-types raze-charts`). The
+[capability matrix](./capabilities.md#ui-kit-csp-and-localization) lists the
+remaining gaps.
+
+### Custom sidebar icons: `SidebarCustomItem.icon` type
+
+`SidebarCustomItem.icon` (in `raze.sidebar`) accepts an `Element` as well as
+a markup string, so its type widened from `string` to `string | Element`. An
+Element is cloned into the 32×32 button and needs no HTML sink, which is the
+option for pages that enforce Trusted Types. Code that only builds sidebar
+items compiles unchanged. Code that reads `item.icon` back as a string, for
+example to inspect or serialise a sidebar configuration, now needs a check
+such as `typeof item.icon === "string"` before using it as one.
+
 ## Recharts-shaped JSX
 
 The React entrypoint is a focused translation layer over the native chart

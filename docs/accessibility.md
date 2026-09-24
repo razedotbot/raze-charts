@@ -82,11 +82,28 @@ and orientation. Controls use native buttons with accessible labels and state:
 Popup triggers expose `aria-haspopup`, `aria-expanded`, and `aria-controls`.
 Menus are named and use menu item, radio item, or checkbox item semantics.
 Opening moves focus into the popup. Arrow Up/Down and Home/End navigate,
-Escape closes and returns focus, and focus-out/outside click dismisses. An
-indicator menu rerender preserves focus on the corresponding row.
+Escape closes and returns focus, and an outside press or focus moving out of
+the menu dismisses it. Pressing a row moves focus to it without closing the
+menu, so its action runs. An indicator menu rerender preserves focus on the
+corresponding row. These rules also hold when the chart is mounted inside an
+(open) shadow root.
 
-Animation on the loading state respects `prefers-reduced-motion`. Built-in
-focus styles remain visible in forced-color mode.
+On phones (coarse primary pointer) and viewports narrower than 520px, menus
+open as bottom sheets with 48px rows. A named drag handle ("Close"), a
+backdrop tap, a swipe down or Escape closes a sheet and returns focus to the
+button that opened it. Tab and Shift+Tab stay inside an open sheet, the sheet
+is announced as a modal dialog (`aria-modal`) named after its menu, and the
+page behind it does not scroll. If a resize or rotation means the menu should
+switch between sheet and flyout, it closes and focus returns to its button.
+
+Animation on the loading state and on sheets respects
+`prefers-reduced-motion`. Built-in focus styles remain visible in
+forced-color mode.
+
+New settings surfaces are built on the internal [UI kit](./ui-kit.md). Its
+modal dialogs trap Tab and Shift+Tab, cancel on Escape and restore focus to
+their opener. Its tab lists, radio groups, spin buttons and colour palette
+follow the ARIA keyboard patterns.
 
 ## Integration responsibilities
 

@@ -359,6 +359,10 @@ built-in mark kind. Plugin-specific top-level options belong in the typed
   afterthought.
 - Mounts expose explicit cleanup and tests exercise teardown during async work.
 - Performance claims have a reproducible scenario, baseline, and budget.
+- Chrome UI is built from the [UI kit](./ui-kit.md): kit overlays and
+  controls, `t(key, default)` strings, `--raze-*` tokens in a scoped
+  stylesheet, and text-only rendering of untrusted strings (enforced by
+  `node scripts/check-dom-sinks.mjs`).
 
 ## Repository map
 

@@ -30,8 +30,12 @@ export type SidebarActionId = "indicators" | "fit" | "screenshot" | "fullscreen"
 export interface SidebarCustomItem {
   id: string;
   title: string;
-  /** Inline SVG (or any HTML) rendered inside the 32×32 button. */
-  icon: string;
+  /**
+   * Rendered inside the 32×32 button: inline SVG (or any HTML) markup, or an
+   * Element (cloned for the button). Markup is host-authored HTML, so never
+   * build it from user input; with Trusted Types enforced, prefer an Element.
+   */
+  icon: string | Element;
   onClick: () => void;
 }
 export type SidebarItem = SidebarToolId | SidebarActionId | "separator" | SidebarCustomItem;
