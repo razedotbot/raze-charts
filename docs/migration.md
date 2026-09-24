@@ -128,6 +128,26 @@ This separation makes it obvious which configuration can travel with an
 existing widget integration and which configuration intentionally couples to
 Raze.
 
+The range bar uses TradingView's featureset name, `timeframes_toolbar`. The
+earlier `time_frames_toolbar` spelling still works as a deprecated alias and
+logs a warning when `debug: true`.
+
+### Widget size, timeframe and layouts
+
+- `width`, `height`, `autosize` and `fullscreen` are honoured. `autosize: true`
+  (and the default without dimensions) fills the container; `width`/`height`
+  without `autosize: true` size the chart in pixels; `fullscreen: true` fills
+  the browser viewport. Integrations that passed `width`/`height` into a sized
+  container and relied on them being ignored should drop them or pass
+  `autosize: true`.
+- `timeframe` accepts TradingView's `{ from, to }` and `TimeFrameValue`
+  objects. The earlier Raze `{ type: "time-range", value: "from,to" }` shape still
+  works and is typed as deprecated.
+- In `raze.layout` grids, an interval change on any pane now applies to every
+  pane, like TradingView's default interval sync. Pass
+  `raze.layout_sync: { interval: false }` to keep the previous per-pane
+  intervals.
+
 ### Content Security Policy
 
 TradingView's library renders inside an iframe. Raze renders in your page,

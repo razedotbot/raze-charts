@@ -475,9 +475,12 @@ export class DataManager {
         try {
           await this.openOn(window, generation);
         } catch (error) {
-          // A listener's window is optional: the interval itself switched.
-          if (!chosen) throw error;
-          if (this.isCurrent(generation)) this.reportError("apply onIntervalChanged timeframe", error);
+          // The bars are committed: a window that cannot be applied (a failed
+          // history page) keeps the default view instead of failing the load.
+          // A listener's window is optional too: the interval itself switched.
+          if (this.isCurrent(generation)) {
+            this.reportError(chosen ? "apply onIntervalChanged timeframe" : "configured timeframe", error);
+          }
         }
         if (!this.isCurrent(generation)) return false;
       }
@@ -1194,7 +1197,7 @@ export class DataManager {
     }
     if ((tf.type === "period-back" || tf.type === "time-range") && typeof tf.value === "string") {
       return resolveTimeframe(
-        { type: tf.type, value: tf.value },
+        tf.type === "period-back" ? { type: "period-back", value: tf.value } : { type: "time-range", value: tf.value },
         Math.floor(this.context.now() / 1000),
       );
     }

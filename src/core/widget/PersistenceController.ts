@@ -2,6 +2,7 @@
 // style and scale flags, drawings, study specs, compare symbols).
 
 import type { Bar, ChartLayoutSnapshot, EntityId, ResolutionString } from "../../types/charting_library";
+import { CHART_STYLES } from "../context";
 import type { WidgetController, WidgetHost } from "./host";
 
 declare module "./host" {
@@ -22,6 +23,8 @@ export function validateSnapshot(state: ChartLayoutSnapshot): void {
       || !Number.isFinite(state.visibleRange.from)
       || !Number.isFinite(state.visibleRange.to)
       || state.visibleRange.from > state.visibleRange.to
+      || (state.logScale !== undefined && typeof state.logScale !== "boolean")
+      || (state.percentScale !== undefined && typeof state.percentScale !== "boolean")
       || state.drawings.some((drawing) => !drawing
         || typeof drawing.id !== "string"
         || !Array.isArray(drawing.points)
@@ -34,6 +37,11 @@ export function validateSnapshot(state: ChartLayoutSnapshot): void {
         || !Number.isFinite(study.length))
       || state.compare?.some((symbol) => typeof symbol !== "string")) {
     throw new TypeError("[raze-charts] invalid chart layout snapshot");
+  }
+  if (!CHART_STYLES.includes(state.chartStyle)) {
+    throw new TypeError(
+      `[raze-charts] chart layout snapshot has unknown chartStyle "${String(state.chartStyle)}". Supported chart types: ${CHART_STYLES.join(", ")}`,
+    );
   }
   const drawingIds = state.drawings.map((drawing) => drawing.id);
   const studyIds = state.studies.flatMap((study) => study.id ? [study.id] : []);
@@ -124,9 +132,12 @@ export class PersistenceController implements WidgetController {
     const chrome = controllers.chrome;
     const resumeHistory = commands.suspend();
     try {
-      context.chartStyle = state.chartStyle;
-      context.logScale = state.logScale;
-      context.percentScale = state.percentScale;
+      context.setChartType(state.chartStyle, "load");
+      // Percent wins over log, matching the painters and readScaleState().
+      context.setScaleMode(
+        { mode: state.percentScale ? "percent" : state.logScale ? "log" : "normal" },
+        "load",
+      );
       if (state.volumeMode) context.volumeMode = state.volumeMode;
       if (typeof state.magnet === "boolean") context.magnet = state.magnet;
       chrome.leftSidebar?.setChartStyle(state.chartStyle);
