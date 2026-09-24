@@ -214,7 +214,7 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
   errors.length = 0;
   bracket.setStopLossPrice(97);
   assert(
-    bracketCalls === 1 && errors.some((entry) => /\[raze-charts\] trading line callback threw/.test(errorText(entry)) && /broker amend failed/.test(errorText(entry))),
+    bracketCalls === 1 && errors.some((entry) => /\[raze-charts\] trading line (?:[\w ]+ )?callback threw/.test(errorText(entry)) && /broker amend failed/.test(errorText(entry))),
     "a throwing trading callback is logged instead of disappearing",
   );
 
@@ -317,15 +317,27 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
   assert(studyById(instance, ema)?.length === 30, 'createStudy("EMA", false, false, [30]) creates EMA(30)');
   const legacy = await chart.createStudy("Moving Average Exponential", false, false, { in_0: 25 });
   assert(studyById(instance, legacy)?.length === 25, "TradingView in_<n> input ids map onto declared input positions");
-  const tooMany = await rejects(chart.createStudy("EMA", false, false, [30, 2]), /too many positional inputs \(2\); EMA inputs: length/);
-  assert(tooMany instanceof TypeError, "extra positional inputs reject with a TypeError naming the declared inputs");
+  // Built-ins declare their inputs in TradingView's in_N order (EMA: length, source, offset).
+  const positional = await chart.createStudy("EMA", false, false, [30, "hl2", 2]);
   assert(
-    (await rejects(chart.createStudy("VWAP", false, false, [5]), /too many positional inputs \(1\); VWAP inputs: none/)) instanceof TypeError,
-    "positional inputs for a study without declared inputs reject",
+    studyById(instance, positional)?.length === 30 && studyById(instance, positional)?.inputs.source === "hl2"
+      && studyById(instance, positional)?.inputs.offset === 2,
+    "positional inputs map onto a built-in's declared inputs in order",
+  );
+  const tooMany = await rejects(
+    chart.createStudy("EMA", false, false, [30, "close", 0, 2]),
+    /received 4 positional inputs but the study declares 3 \(length, source, offset\)/,
   );
   assert(
-    (await rejects(chart.createStudy("EMA", false, false, { length: "30" }), /"length" must be a finite number/)) instanceof TypeError,
-    "a non-numeric length rejects instead of silently using the default",
+    tooMany instanceof TypeError && tooMany.name === "StudyInputError" && tooMany.code === "unknown-input",
+    "extra positional inputs reject with a StudyInputError (a TypeError) naming the declared inputs",
+  );
+  const noInputs = await rejects(chart.createStudy("Flagged", false, false, [1, true, "x"]), /declares 2 \(length, smooth\)/);
+  assert(noInputs?.code === "unknown-input", "a v1 study's positional inputs are bounded by its declared defaults");
+  const badLength = await rejects(chart.createStudy("EMA", false, false, { length: "long" }), /input "length": must be a finite number/);
+  assert(
+    badLength instanceof TypeError && badLength.code === "invalid-value",
+    "a non-numeric length rejects instead of silently using the default (a numeric string such as \"30\" is a length)",
   );
   assert(
     (await rejects(chart.createStudy("EMA", false, false, { source: { field: "close" } }), /must be a finite number, string or boolean/)) instanceof TypeError,
@@ -340,7 +352,7 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
   await chart.createStudy("EMA", false, false, { lenght: 50 });
   assert(
     studyById(instance, typo)?.length === 9
-      && warnings.filter((text) => /createStudy\("EMA"\): input "lenght" has no effect; EMA inputs: length/.test(text)).length === 1,
+      && warnings.filter((text) => /EMA input "lenght" is not supported and is ignored\. Supported inputs: length \(in_0\), source \(in_1\), offset \(in_2\)/.test(text)).length === 1,
     "a typo'd input on a built-in warns once with the declared inputs instead of being ignored silently",
   );
   assert(
@@ -349,7 +361,7 @@ const studyById = (instance, id) => instance.save().studies.find((study) => stud
   );
   const same = await chart.createStudy("EMA", false, false, { in_0: 30, length: 30 });
   assert(studyById(instance, same)?.length === 30, "in_<n> and its named id with the same value are accepted");
-  const unknown = await rejects(chart.createStudy("Ichimoku Cloud"), /unknown study: Ichimoku Cloud; available studies: EMA, SMA, RSI/);
+  const unknown = await rejects(chart.createStudy("Ichimoku Cloud"), /unknown study: Ichimoku Cloud\. Available studies: EMA, SMA, RSI/);
   assert(unknown instanceof Error, "an unknown study rejects and lists the available studies");
 
   seenFlags.length = 0;

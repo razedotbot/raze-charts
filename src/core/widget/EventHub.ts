@@ -18,7 +18,14 @@ type Listener = (...args: never[]) => void;
  * Every widget event that fires. A name outside this list throws, so a typo
  * or a TradingView event Raze Charts does not emit is never a silent no-op.
  */
-export const WIDGET_EVENTS: readonly WidgetEventName[] = Object.freeze(["drawing_event", "trading_event", "error"]);
+export const WIDGET_EVENTS: readonly WidgetEventName[] = Object.freeze([
+  "drawing_event",
+  "trading_event",
+  "error",
+  // Emitted by the DrawingEventsController.
+  "drawing_selection_changed",
+  "drawing_tool_changed",
+]);
 
 export class EventHub implements WidgetController {
   private readonly subscriptions = new Map<string, Set<Listener>>();

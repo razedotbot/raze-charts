@@ -2,14 +2,17 @@
 // overrides, options)` arguments and the `studies_overrides` constructor
 // option into a StudyStore spec.
 //
-// Nothing is dropped silently. createStudy arguments of the wrong shape throw
-// a TypeError, and keys that have no effect warn once through `env.warn`.
+// Nothing is dropped silently. Input values of the wrong type throw a
+// StudyInputError (a TypeError; the store validates the rest against the
+// definition's schema), other arguments of the wrong shape throw a TypeError,
+// and keys that have no effect warn once through `env.warn`.
 // `studies_overrides` entries are defaults for every new study, so a bad one
 // only warns and is skipped: a styling default must never stop a chart from
 // mounting or make later createStudy calls fail.
 
 import type { StudyDefinition, StudyPlotStyleOverride } from "../../types/charting_library";
-import { BUILTIN_STUDIES } from "../../studies/registry";
+import { describeInputValue, StudyInputError } from "../../studies/inputs";
+import { builtinInputSchema } from "../../studies/registry";
 import type { StudySpec } from "../../studies/StudyStore";
 
 type InputValue = number | string | boolean;
@@ -26,7 +29,7 @@ export interface StudyArgsEnv {
 
 export interface ParsedStudyArgs {
   readonly spec: StudySpec;
-  /** `options.disableUndo`: keep the creation out of undo history. */
+  /** `options.disableUndo`: keep the creation out of undo history (also set on `spec`). */
   readonly disableUndo: boolean;
   /**
    * Plot reference of each `spec.plotStyles` entry and the override that set
@@ -42,11 +45,14 @@ const isInputValue = (value: unknown): value is InputValue =>
   typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-const schemaOf = (definition: StudyDefinition): unknown => (definition as { inputs?: unknown }).inputs;
+/** A v2 definition's input schema, else a built-in's declared inputs (TradingView `in_N` order). */
+const schemaOf = (definition: StudyDefinition): unknown =>
+  (definition as { inputs?: unknown }).inputs ?? builtinInputSchema(definition);
 
 /**
- * Input ids in declaration order: a v2 schema's ids, else `length` (when the
- * definition has a default length) followed by its other non-colour defaults.
+ * Input ids in declaration order: a v2 or built-in schema's ids, else `length`
+ * (when the definition has a default length) followed by its other non-colour
+ * defaults.
  */
 export function declaredInputs(definition: StudyDefinition): string[] {
   const schema = schemaOf(definition);
@@ -141,30 +147,45 @@ export function parseCreateStudyArgs(
   };
 
   // Positional arrays and TradingView's `in_<n>` ids map onto declared ids.
+  // Other keys are forwarded as given: the store validates them against a v2
+  // schema (unknown ids reject) and built-ins warn about keys they ignore.
   const given = new Map<string, unknown>();
+  /** The caller's key for each id, for error messages. */
+  const sources = new Map<string, string>();
   if (Array.isArray(inputs)) {
-    if (inputs.length > declared.length) fail(`too many positional inputs (${inputs.length})`, true);
-    inputs.forEach((value, index) => given.set(canonical(declared[index]!), value));
+    if (inputs.length > declared.length) {
+      throw new StudyInputError(
+        "unknown-input",
+        definition.name,
+        null,
+        `received ${inputs.length} positional inputs but the study declares ${declared.length}`
+          + (declared.length ? ` (${declared.join(", ")})` : ""),
+      );
+    }
+    inputs.forEach((value, index) => {
+      const id = canonical(declared[index]!);
+      given.set(id, value);
+      sources.set(id, declared[index]!);
+    });
   } else if (isRecord(inputs)) {
-    // Built-ins and v2 schemas declare every input they read, so an unknown
-    // key (a typo such as `lenght`) cannot do anything.
-    const closed = BUILTIN_STUDIES.includes(definition) || isRecord(schemaOf(definition));
-    const sources = new Map<string, string>();
     for (const [key, value] of Object.entries(inputs)) {
-      const position = /^in_(\d+)$/.exec(key);
-      const id = canonical(position ? declared[+position[1]!] ?? fail(`no input at ${key}`, true) : key);
+      const position = declared.includes(key) ? null : /^in_(\d+)$/.exec(key);
+      const mapped = position ? declared[+position[1]!] : key;
+      if (mapped === undefined) {
+        throw new StudyInputError(
+          "unknown-input",
+          definition.name,
+          key,
+          `no input at this position; declared inputs: ${declared.join(", ") || "none"}`,
+        );
+      }
+      const id = canonical(mapped);
       const previous = sources.get(id);
       if (previous !== undefined && given.get(id) !== value) {
         fail(`"${previous}" and "${key}" both set input "${id}" to different values`);
       }
       given.set(id, value);
       sources.set(id, key);
-      if (closed && id !== "color" && !declared.includes(id)) {
-        warn(
-          `${definition.name}:input:${key}`,
-          `${call}: input "${key}" has no effect; ${definition.name} inputs: ${declared.join(", ") || "none"}`,
-        );
-      }
     }
   } else if (inputs != null) {
     fail("inputs must be an object or a positional array");
@@ -204,15 +225,19 @@ export function parseCreateStudyArgs(
   let length = 0;
   let inputColor = "";
   const extra: Record<string, InputValue> = {};
+  const invalid = (id: string, value: unknown, expected: string): never => {
+    throw new StudyInputError("invalid-value", definition.name, sources.get(id) ?? id, `must be ${expected}, got ${describeInputValue(value)}`);
+  };
   for (const [id, value] of given) {
     if (value === undefined) continue;
     if (id === "length") {
-      length = typeof value === "number" && Number.isFinite(value) ? value : fail(`"length" must be a finite number`);
+      // A numeric string ("21") is a length; anything else rejects instead of using the default.
+      const number = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+      length = typeof number === "number" && Number.isFinite(number) ? number : invalid(id, value, "a finite number");
     } else if (id === "color") {
-      if (typeof value !== "string") fail(`"color" must be a CSS colour string`);
-      else inputColor = value;
-    } else {
-      extra[id] = isInputValue(value) ? value : fail(`input "${id}" must be a finite number, string or boolean`, true);
+      inputColor = typeof value === "string" ? value : invalid(id, value, "a CSS colour string");
+    } else if (value !== null) {
+      extra[id] = isInputValue(value) ? value : invalid(id, value, "a finite number, string or boolean");
     }
   }
   // The call's inputs.color beats a studies_overrides primary colour.
@@ -253,9 +278,9 @@ export function parseCreateStudyArgs(
       color: styles.get("0")?.color ?? inputColor,
       lock: !!lock,
       forceOverlay: overlay,
-      // Booleans are forwarded as-is; the v1 input map type predates them.
-      inputs: extra as Record<string, number | string>,
+      inputs: extra,
       ...(styled.length ? { plotStyles } : {}),
+      ...(disableUndo ? { disableUndo } : {}),
     },
     disableUndo,
     plotKeys: new Map(styled.map(([ref]) => [ref, plotKeys.get(ref)!])),

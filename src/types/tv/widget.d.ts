@@ -42,6 +42,10 @@ export interface WidgetEventMap {
   drawing_event: (id: EntityId, type: DrawingEventType) => void;
   trading_event: (line: TradingLineSnapshot, type: TradingEventType) => void;
   error: (error: WidgetListenerError) => void;
+  /** The selected drawings changed (from the pointer, keyboard, objects tree, store or API): their ids, `[]` when none. */
+  drawing_selection_changed: (ids: string[]) => void;
+  /** The active drawing tool changed: its id (`"cursor"` when drawing ends). */
+  drawing_tool_changed: (tool: string) => void;
 }
 
 export type WidgetEventName = keyof WidgetEventMap;
