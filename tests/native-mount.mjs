@@ -3,10 +3,11 @@
 // stacking, stage-based overlay coordinates, legend toggles on both renderers,
 // clamped zoom and bounded pan, category chips, structured pointer payloads,
 // edge-anchored tick labels, tooltips that survive repaints, themed range
-// presets, rAF-coalesced wheel and resize, the cached navigator scene, and the
-// mount lifecycle (every listener, observer, and frame released on destroy
-// and on a failed update). The internal window maths (src/chart/viewport.ts)
-// is bundled from source with esbuild for direct unit tests.
+// presets, rAF-coalesced wheel and resize, the cached navigator scene (also
+// under a controlled host that echoes every viewport back), and the mount
+// lifecycle (every listener, observer, and frame released on destroy and on a
+// failed update). The internal window maths (src/chart/viewport.ts) and the
+// legend toggle helper are bundled from source with esbuild for unit tests.
 
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -19,13 +20,16 @@ import { JSDOM } from "jsdom";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const chart = await import(pathToFileURL(resolve(root, "dist/chart.esm.js")).href);
 const {
-  bar, compileChart, defineChart, line, mountChart, paintChartCanvas, pie, radar, svgFromCompiled,
+  bar, compileChart, defineChart, heatmap, line, mountChart, paintChartCanvas, pie, radar, svgFromCompiled,
 } = chart;
 
 async function importInternals() {
   const bundled = await build({
     stdin: {
-      contents: 'export { clampXWindow, panXWindow, zoomXWindow } from "./src/chart/viewport";',
+      contents: [
+        'export { clampXWindow, panXWindow, zoomXWindow } from "./src/chart/viewport";',
+        'export { toggledHiddenSeries } from "./src/chart/render/legend";',
+      ].join("\n"),
       resolveDir: root,
       loader: "ts",
       sourcefile: "native-mount-internals.ts",
@@ -45,7 +49,7 @@ async function importInternals() {
     rmSync(scratch, { recursive: true, force: true });
   }
 }
-const { clampXWindow, panXWindow, zoomXWindow } = await importInternals();
+const { clampXWindow, panXWindow, toggledHiddenSeries, zoomXWindow } = await importInternals();
 
 let failures = 0;
 async function check(name, run) {
@@ -350,6 +354,37 @@ await check("legend entries are keyboard-reachable toggle buttons with pressed s
   fixture.cleanup();
 });
 
+await check("showing a legend row removes every key that hides it", () => {
+  const scene = compileChart(pairDefinition, { width: 480, height: 280 });
+  const same = (actual, expected, message) => assert.deepEqual([...actual].sort(), [...expected].sort(), message);
+  // Scene v1: entries are keyed by series name.
+  same(toggledHiddenSeries(scene, new Set(), "Beta"), ["Beta"], "a click hides a visible series");
+  same(toggledHiddenSeries(scene, new Set(["Beta"]), "Beta"), [], "a second click shows it again");
+  // Scene v2 (AD-08): rows are keyed by id and hidden rows stay listed.
+  const rows = [
+    { id: "mark-0", name: "Alpha", color: "#e5484d", hidden: true, markIndex: 0, symbol: "line" },
+    { id: "mark-1", name: "Beta", color: "#3e63dd", hidden: false, markIndex: 1, symbol: "line" },
+  ];
+  const v2 = { ...scene, legendLayout: { placement: "top", rows, size: 22, overflow: 0 } };
+  same(toggledHiddenSeries(v2, new Set(["Alpha"]), "mark-0"), [], "a series hidden by name comes back from its id-keyed row");
+  same(toggledHiddenSeries(v2, new Set(["Alpha", "mark-0"]), "mark-0"), [], "every key that hides the row is removed");
+  same(toggledHiddenSeries(v2, new Set(["Alpha"]), "mark-1"), ["Alpha", "mark-1"], "hiding another row keeps the first hidden");
+  same(toggledHiddenSeries(null, new Set(["x"]), "x"), [], "without a scene the key itself toggles");
+});
+
+await check("a mount shows every series again once its hidden set is emptied", () => {
+  const fixture = mountFixture(pairDefinition, { width: 480, height: 280, hiddenSeries: ["Alpha"] });
+  const shown = () => new Set(fixture.handle.getScene().samples.map((sample) => sample.series));
+  assert(!shown().has("Alpha"), "options.hiddenSeries hides Alpha");
+  // Stand-in for a legend that lists the hidden row (scene v2): its toggle carries the key.
+  const toggle = document.createElement("button");
+  toggle.setAttribute("data-series", "Alpha");
+  fixture.el.legend.appendChild(toggle);
+  toggle.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert(shown().has("Alpha"), "toggling Alpha back on shows it; options.hiddenSeries does not re-hide it");
+  fixture.cleanup();
+});
+
 await check("radar series toggle from the legend", () => {
   const axes = ["Speed", "Power", "Range", "Cost", "Style"];
   const definition = defineChart({
@@ -470,24 +505,39 @@ await check("horizontal wheel pans when panning is on and is left to the page ot
 await check("on thinned band axes the X chip names the hovered bar's category", () => {
   const days = Array.from({ length: 24 }, (_, i) => ({ day: `D${String(i + 1).padStart(2, "0")}`, volume: 20 + ((i * 7) % 23) }));
   const events = [];
+  const selects = [];
   const fixture = mountFixture(defineChart({ marks: [bar(days, { x: "day", y: "volume", name: "Volume" })], legend: false }), {
     width: 480,
     height: 280,
     onTooltip: (event) => events.push(event),
+    onSelect: (event) => selects.push(event),
   });
   const scene = fixture.handle.getScene();
   assert(scene.xTicks.length < days.length, "the band axis is thinned");
   const bars = scene.nodes.filter((node) => node.role === "bar");
   assert.equal(bars.length, 24, "every bar is hoverable");
   for (const node of bars) {
-    fixture.fire("pointermove", { clientX: node.x + node.w / 2, clientY: node.y + node.h / 2 });
+    const clientX = node.x + node.w / 2;
+    const clientY = node.y + node.h / 2;
+    fixture.fire("pointermove", { clientX, clientY });
     assert.equal(fixture.el.chipX.textContent, node.datum.day, `chip names ${node.datum.day}`);
     assert(fixture.el.tip.textContent.includes(node.datum.day), "the tooltip names the same category");
     assert.equal(fixture.el.chipY.textContent, String(node.datum.volume), "the value chip shows the datum value");
     const event = events.at(-1);
+    const index = days.indexOf(node.datum);
     assert.equal(event.x, node.datum.day, "onTooltip.x is the category");
     assert.equal(event.y, node.datum.volume, "onTooltip.y is the datum value");
     assert.equal(event.datum, node.datum, "onTooltip.datum is the row");
+    assert.equal(event.index, index, `bar payloads carry the row index (${node.datum.day})`);
+    assert.equal(event.markIndex, 0, "bar payloads carry the mark index");
+    assert.equal(event.seriesId, "mark-0", "bar payloads carry the series id, like line samples");
+    fixture.fire("pointerdown", { clientX, clientY });
+    fixture.fire("pointerup", { clientX, clientY });
+    assert.deepEqual(
+      [selects.at(-1).x, selects.at(-1).index, selects.at(-1).seriesId],
+      [node.datum.day, index, "mark-0"],
+      "onSelect on a bar carries the same identity",
+    );
   }
   fixture.cleanup();
 });
@@ -534,6 +584,41 @@ await check("pointer payloads are data-space: x type follows the scale, samples 
   assert.equal(linearEvent.x, row.t);
   assert.equal(linearEvent.y, row.v);
   linear.cleanup();
+
+  // Heatmap cells and pie slices answer without a sample and carry the same identity.
+  const cells = [
+    { x: "5m", y: "SOL", value: 2.4 },
+    { x: "1h", y: "SOL", value: -1.1 },
+    { x: "5m", y: "ETH", value: 0.6 },
+    { x: "1h", y: "ETH", value: 3.2 },
+  ];
+  const slices = [{ label: "Equity", v: 5 }, { label: "Bonds", v: 3 }, { label: "Cash", v: 2 }];
+  const cases = [
+    { role: "heat", rows: cells, definition: defineChart({ marks: [heatmap(cells, { x: "x", y: "y", valueKey: "value" })] }) },
+    { role: "slice", rows: slices, definition: defineChart({ marks: [pie(slices, { valueKey: "v", labelKey: "label", name: "Mix" })] }) },
+  ];
+  for (const { role, rows, definition } of cases) {
+    const events = [];
+    const fixture = mountFixture(definition, { width: 480, height: 280, onTooltip: (event) => events.push(event) });
+    const nodes = fixture.handle.getScene().nodes.filter((node) => node.role === role);
+    assert.equal(nodes.length, rows.length, `every ${role} row is a node`);
+    for (const node of nodes) {
+      const centre = role === "heat"
+        ? { x: node.x + node.w / 2, y: node.y + node.h / 2 }
+        : (() => {
+          const angle = (node.startAngle + node.endAngle) / 2;
+          const radius = (node.r + node.innerR) / 2;
+          return { x: node.x + Math.cos(angle) * radius, y: node.y + Math.sin(angle) * radius };
+        })();
+      fixture.fire("pointermove", { clientX: centre.x, clientY: centre.y });
+      const event = events.at(-1);
+      assert(event?.node === node, `the pointer reaches the ${role} node`);
+      assert.equal(event.index, rows.indexOf(node.datum), `${role} payloads carry the row index`);
+      assert.equal(event.seriesId, "mark-0", `${role} payloads carry the series id`);
+      assert.equal(event.markIndex, 0, `${role} payloads carry the mark index`);
+    }
+    fixture.cleanup();
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -702,6 +787,69 @@ await check("with the navigator on, the full-data scene compiles once per defini
   fixture.cleanup();
 });
 
+await check("a controlled host echoing the viewport never recompiles the full data", () => {
+  const rows = Array.from({ length: 20_000 }, (_, i) => ({ x: i, y: Math.sin(i / 40) }));
+  for (const navigator of [false, true]) {
+    // "sync" echoes inside onViewportChange; "next frame" echoes later, as the
+    // React adapter does from its effect.
+    for (const timing of ["sync", "next frame"]) {
+      const label = `${timing} echo, navigator ${navigator ? "on" : "off"}`;
+      const sizes = [];
+      const definition = defineChart((size) => {
+        sizes.push(`${size.width}x${size.height}`);
+        return { marks: [line(rows, { x: "x", y: "y", name: "Echo" })], legend: false };
+      });
+      let fixture = null;
+      let echoes = 0;
+      const echo = (viewport) => {
+        echoes++;
+        fixture.handle.update(definition, { viewport });
+      };
+      fixture = mountFixture(definition, {
+        width: 480,
+        height: 280,
+        viewport: { x: [5_000, 15_000] },
+        interaction: { navigator },
+        onViewportChange: (viewport) => {
+          if (timing === "sync") echo(viewport);
+          else requestAnimationFrame(() => echo(viewport));
+        },
+      });
+      const scene = fixture.handle.getScene();
+      const windowSize = `${scene.width}x${scene.height}`;
+      const clientX = scene.plot.x + scene.plot.w / 2;
+      const perFrame = timing === "sync" ? 1 : 2;
+      for (let frame = 0; frame < 5; frame++) {
+        const before = sizes.length;
+        const span = fixture.handle.getViewport().x.map(Number);
+        for (let i = 0; i < 10; i++) fixture.fire("wheel", { clientX, clientY: 140, deltaY: -40 });
+        flushFrames();
+        if (timing !== "sync") flushFrames();
+        const compiled = sizes.slice(before);
+        assert(compiled.every((size) => size === windowSize), `${label}: frame ${frame} compiles only the ${windowSize} window (${compiled.join(", ")})`);
+        assert.equal(compiled.length, perFrame, `${label}: frame ${frame} compiles ${perFrame === 1 ? "once" : "once, plus once for the echo"}`);
+        const next = fixture.handle.getViewport().x.map(Number);
+        assert(next[1] - next[0] < span[1] - span[0], `${label}: frame ${frame} zooms in`);
+      }
+      assert.equal(echoes, 5, `${label}: the host echoed every change`);
+
+      if (timing !== "sync") {
+        // Wheel input that lands before the echo survives it.
+        const before = fixture.handle.getViewport().x.map(Number);
+        for (let i = 0; i < 10; i++) fixture.fire("wheel", { clientX, clientY: 140, deltaY: -40 });
+        flushFrames();
+        for (let i = 0; i < 10; i++) fixture.fire("wheel", { clientX, clientY: 140, deltaY: -40 });
+        flushFrames();
+        flushFrames();
+        const after = fixture.handle.getViewport().x.map(Number);
+        const expected = (before[1] - before[0]) * 1.12 ** (-0.4 * 20);
+        assert(Math.abs(after[1] - after[0] - expected) / expected < 1e-9, `${label}: an echo keeps the wheel zoom that arrived before it`);
+      }
+      fixture.cleanup();
+    }
+  }
+});
+
 await check("ResizeObserver bursts repaint once per frame", () => {
   let width = 500;
   const fixture = mountFixture(revenueDefinition, { renderer: "canvas" });
@@ -850,7 +998,11 @@ await check("update() with the same definition sees mutated rows: extent, bounds
 
   before = specCalls;
   fixture.handle.update(definition, { viewport: { x: [60, 80] } });
-  assert.equal(specCalls - before, 1, "a viewport-only update (a controlled echo) reuses the full-data scene");
+  assert.equal(specCalls - before, 1, "an update that moves the viewport reuses the full-data scene");
+  before = specCalls;
+  fixture.handle.update(definition, { viewport: fixture.handle.getViewport() });
+  fixture.handle.update(definition, { viewport: { x: [60, 80] } });
+  assert.equal(specCalls - before, 2, "an update that echoes the live viewport (a controlled host) reuses it too");
 
   for (let i = 100; i < 150; i++) rows.push({ x: i, y: i % 7 });
   before = specCalls;
@@ -1003,6 +1155,21 @@ await check("a failed update leaves listeners, frames, DOM, and scene untouched"
   fixture.handle.update(revenueDefinition, { width: 500 });
   assert.equal(fixture.handle.getScene().width, 500, "the mount keeps working");
   fixture.cleanup();
+});
+
+await check("a host may destroy the mount from onViewportChange", () => {
+  let fixture = null;
+  fixture = mountFixture(hundredDefinition, {
+    width: 480,
+    height: 280,
+    onViewportChange: () => fixture.handle.destroy(),
+  });
+  fixture.fire("wheel", { clientX: 240, clientY: 140, deltaY: -100 });
+  assert.doesNotThrow(() => flushFrames(), "the wheel frame does not repaint a destroyed mount");
+  assert.equal(fixture.handle.getScene(), null, "the mount is destroyed");
+  assert.equal(fixture.host.childElementCount, 0, "its DOM is gone");
+  assert.equal(frames.size, 0, "no frame is left behind");
+  fixture.host.remove();
 });
 
 await check("a failed first paint releases everything it acquired", () => {

@@ -209,6 +209,12 @@ export interface SceneNodeBase {
   xValue?: unknown;
   /** Data-space y of the datum (the segment value for stacked bars). Set on bars. */
   yValue?: number;
+  /** Stable series id (the mark's `id`, otherwise `mark-<index>`). Set on bars, heatmap cells, and pie slices. */
+  seriesId?: string;
+  /** Index of the producing mark in `ChartSpec.marks`. Set on bars, heatmap cells, and pie slices. */
+  markIndex?: number;
+  /** Row index of `datum` within its mark's `data`. Set on bars, heatmap cells, and pie slices. */
+  index?: number;
 }
 
 /** Renderer-neutral geometry with required fields encoded by primitive kind. */

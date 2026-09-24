@@ -16,6 +16,7 @@ import { paintChartCanvas } from "./canvas";
 import { createRangeChrome, linearExtent } from "./chrome";
 import { stageFrame, type StageFrame } from "./frame";
 import { attachGestures, type GestureController } from "./gestures";
+import { toggledHiddenSeries } from "./legend";
 import {
   applyOverlayTheme,
   createHoverController,
@@ -124,6 +125,8 @@ export function mountChart(
   /** Data spacing for the zoom defaults, per full-data content and axis transform. */
   let stepCache: { key: ContentKey | null; transform: AxisTransform; step: number | null } | null = null;
   let resizeRaf = 0;
+  /** Scenes committed by render(); emitViewport uses it to spot a host that already repainted. */
+  let commits = 0;
   /** Stage size the live scene was compiled for (before explicit width/height). */
   let compiledStage = { width: Number.NaN, height: Number.NaN };
   let gestures: GestureController | null = null;
@@ -159,13 +162,17 @@ export function mountChart(
 
   const emitViewport = (next: ChartViewport): void => {
     state.viewport = next;
+    const before = commits;
     state.options.onViewportChange?.(next);
-    paint();
+    // A controlled host that echoed the window synchronously through update()
+    // (or moved it again with setViewport()) has already painted the latest
+    // state; painting again would compile the same window twice. A host may
+    // also destroy the mount from the callback.
+    if (commits === before && !state.destroyed) paint();
   };
 
   const toggleSeries = (key: string): void => {
-    if (state.hidden.has(key)) state.hidden.delete(key);
-    else state.hidden.add(key);
+    state.hidden = toggledHiddenSeries(state.scene, state.hidden, key);
     paint();
   };
 
@@ -207,7 +214,9 @@ export function mountChart(
     if (state.options.height == null) h = Math.max(1, stage.clientHeight || h);
     const stageSize = { width: w, height: h };
     const current = state.definition;
-    const hidden = state.hidden.size ? Array.from(state.hidden) : state.options.hiddenSeries;
+    // state.hidden starts from options.hiddenSeries and follows update() and
+    // legend clicks, so an emptied set means every series is shown again.
+    const hidden = state.hidden.size ? Array.from(state.hidden) : undefined;
     const viewport = state.viewport ?? state.options.viewport;
     const overlayed = Boolean(viewport) || Boolean(hidden?.length);
     const captured = compileCapturing(current, stageSize, (spec) => (overlayed ? {
@@ -274,6 +283,7 @@ export function mountChart(
     state.lastInputWidth = wrapSize.width;
     state.lastInputHeight = wrapSize.height;
     compiledStage = stageSize;
+    commits++;
     // Presets read the zoom limits, which need the committed scene.
     chrome.syncPresets(compiled.theme);
     syncLegendToggles(rt);
@@ -341,16 +351,20 @@ export function mountChart(
         state.options = { ...state.options, ...nextOptions };
         if (Object.prototype.hasOwnProperty.call(nextOptions, "viewport")) {
           const requested = nextOptions.viewport ?? null;
-          // An echo of the live window (controlled mode) keeps a pending wheel zoom.
-          navigation = !sameViewport(requested, state.viewport);
-          if (navigation) gestures?.cancelWheel();
+          navigation = true;
+          // A window that moves replaces a pending wheel zoom; an echo of the
+          // live window (a controlled host) keeps it.
+          if (!sameViewport(requested, state.viewport)) gestures?.cancelWheel();
           state.viewport = requested;
         }
         if (nextOptions.hiddenSeries) state.hidden = new Set(nextOptions.hiddenSeries);
       }
       // Rows may have been mutated in place, so the full-data extent and the
-      // navigator are recomputed. Moving the viewport is navigation (such as a
-      // controlled zoom echo), where the row fingerprint still catches appends.
+      // navigator are recomputed. A call that passes a viewport is navigation:
+      // a controlled host moving the window, or echoing the one
+      // onViewportChange reported (the React adapter does this on every
+      // change). It keeps the full-data scene, and the row fingerprint still
+      // catches added or removed rows. A new definition misses the cache anyway.
       if (!navigation) revision++;
       try {
         render();

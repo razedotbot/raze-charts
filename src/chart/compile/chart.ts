@@ -35,7 +35,7 @@ import { isBuiltinKind, isBuiltinMark, isPluginMark, type CartesianChartMark, ty
 import { compilePluginMark, resolvePluginDomains } from "./plugin";
 import { compilePie, compileRadar, createRadarState } from "./polar";
 import { isRecord, isRuntimeArray } from "./shared";
-import type { ChartDefinition, CompiledChart, HoverSample } from "./types";
+import type { ChartDefinition, CompiledChart, HoverSample, SceneNode } from "./types";
 import { validateChartSpec } from "./validate";
 
 export function compileChart(definition: ChartDefinition, size: { width: number; height: number }): CompiledChart {
@@ -117,6 +117,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       continue;
     }
     const firstSample = ctx.samples.length;
+    const firstNode = ctx.nodes.length;
     pushSeriesLegend(ctx, m, name, color);
     if (m.kind === "line" || m.kind === "area") compileLineArea(ctx, m, name, color);
     else if (m.kind === "point") compilePoint(ctx, m, name);
@@ -127,7 +128,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
     else if (m.kind === "pie") compilePie(ctx, m, name);
     else if (m.kind === "radar") compileRadar(ctx, m, name, color, radarState);
     const source = visibleMarks[k] ?? m;
-    stampSampleIdentity(ctx.samples, firstSample, source, sourceIndex.get(source) ?? k);
+    stampMarkIdentity(ctx.samples, firstSample, ctx.nodes, firstNode, source, sourceIndex.get(source) ?? k);
   }
 
   const { nodes, samples } = ctx;
@@ -161,34 +162,45 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
 }
 
 /**
- * Give a mark's hover samples their series identity and source row index.
- * Samples are emitted in row order and the viewport window keeps row order,
- * so one forward identity walk over the source rows resolves every index.
+ * Give a mark's hover samples, and the nodes that answer pointer events
+ * without a sample (bars, heatmap cells, pie slices), their series identity
+ * and source row index, so onTooltip/onSelect payloads agree across marks.
+ */
+function stampMarkIdentity(
+  samples: HoverSample[], fromSample: number, nodes: SceneNode[], fromNode: number, source: ChartMark, markIndex: number,
+): void {
+  const explicitId = (source as { id?: unknown }).id;
+  const seriesId = typeof explicitId === "string" && explicitId ? explicitId : `mark-${markIndex}`;
+  stampRows(samples, fromSample, source.data, seriesId, markIndex, () => true);
+  stampRows(nodes, fromNode, source.data, seriesId, markIndex, (node) => node.role === "bar" || node.role === "heat" || node.role === "slice");
+}
+
+/**
+ * Items are emitted in row order and the viewport window keeps row order, so
+ * one forward identity walk over the source rows resolves every index.
  *
  * TODO(W2-13, perf-native-viewport-index): the walk starts at row 0, so a
  * narrow window at the end of a large mark costs O(rows before the window).
  * That is below the O(n) windowing today; once windowing binary-searches,
  * have windowChartSpec report each window's source offset and start there.
  */
-function stampSampleIdentity(samples: HoverSample[], from: number, source: ChartMark, markIndex: number): void {
-  if (from >= samples.length) return;
-  const explicitId = (source as { id?: unknown }).id;
-  const seriesId = typeof explicitId === "string" && explicitId ? explicitId : `mark-${markIndex}`;
-  const rows = source.data;
+function stampRows<T extends { datum?: unknown; seriesId?: string; markIndex?: number; index?: number }>(
+  items: T[], from: number, rows: readonly unknown[], seriesId: string, markIndex: number, include: (item: T) => boolean,
+): void {
   let cursor = 0;
-  let resolvable = true;
-  for (let i = from; i < samples.length; i++) {
-    const sample = samples[i]!;
-    sample.seriesId = seriesId;
-    sample.markIndex = markIndex;
-    if (!resolvable || !("datum" in sample)) continue;
+  for (let i = from; i < items.length; i++) {
+    const item = items[i]!;
+    if (!include(item)) continue;
+    item.seriesId = seriesId;
+    item.markIndex = markIndex;
+    if (cursor < 0 || !("datum" in item)) continue;
     let at = cursor;
-    while (at < rows.length && rows[at] !== sample.datum) at++;
+    while (at < rows.length && rows[at] !== item.datum) at++;
     if (at === rows.length) {
-      resolvable = false;
+      cursor = -1;
       continue;
     }
-    sample.index = at;
+    item.index = at;
     cursor = at;
   }
 }

@@ -354,12 +354,15 @@ interface SceneNodeBase
   highlight?: boolean | undefined
   hit?: boolean | undefined
   idx?: number | undefined
+  index?: number | undefined
   innerR?: number | undefined
   label?: string | undefined
+  markIndex?: number | undefined
   points?: ScenePoint[] | undefined
   r?: number | undefined
   role?: string | undefined
   series?: string | undefined
+  seriesId?: string | undefined
   startAngle?: number | undefined
   stroke?: string | undefined
   strokeWidth?: number | undefined

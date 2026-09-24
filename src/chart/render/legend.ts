@@ -158,6 +158,27 @@ export function layoutLegend(c: CompiledChart): LegendLayout {
   return { entries, more, toggleable };
 }
 
+/**
+ * The hidden-series set after a click on legend entry `key`. Hiding adds the
+ * key. Showing a hidden entry removes every key that hides it, its row id and
+ * its name, so a series hidden by name (options.hiddenSeries) comes back when
+ * its v2 row, keyed by id, is clicked.
+ *
+ * TODO(integration W1B-02): delegate to compile/legend `toggleHiddenSeries`,
+ * which also knows the marks a row groups and a pie slice's keys.
+ */
+export function toggledHiddenSeries(c: CompiledChart | null, hidden: ReadonlySet<string>, key: string): Set<string> {
+  const next = new Set(hidden);
+  const entry = c ? layoutLegend(c).entries.find((candidate) => candidate.key === key) : undefined;
+  if (entry?.hidden || next.has(key)) {
+    next.delete(key);
+    if (entry) next.delete(entry.name);
+  } else {
+    next.add(key);
+  }
+  return next;
+}
+
 /** Legend entry under a scene-space point, if it toggles. */
 export function legendEntryAt(c: CompiledChart, x: number, y: number): LegendEntryLayout | null {
   const layout = layoutLegend(c);

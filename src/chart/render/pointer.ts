@@ -153,8 +153,11 @@ export function pointerEventFor(target: PointerTarget): ChartPointerEvent {
     node: accentNode,
     sample,
   };
-  if (sample?.seriesId !== undefined) event.seriesId = sample.seriesId;
-  if (sample?.index !== undefined) event.index = sample.index;
-  if (sample?.markIndex !== undefined) event.markIndex = sample.markIndex;
+  // Samples (lines, points, radar) and row nodes (bars, heatmap cells, pie
+  // slices) carry the same identity fields.
+  const source = sample ?? accentNode;
+  if (source?.seriesId !== undefined) event.seriesId = source.seriesId;
+  if (source?.index !== undefined) event.index = source.index;
+  if (source?.markIndex !== undefined) event.markIndex = source.markIndex;
   return event;
 }

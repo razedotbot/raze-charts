@@ -22,11 +22,16 @@ export interface ChartPointerEvent {
   y?: number;
   /** Series name of the hovered sample or mark. */
   series?: string;
-  /** Stable series id (the mark's `id`, otherwise `mark-<index>`). */
+  /**
+   * Stable series id (the mark's `id`, otherwise `mark-<index>`). `seriesId`,
+   * `index`, and `markIndex` are set for built-in marks, whether the target
+   * is a hover sample (line, area, point, radar) or a row node (bar, heatmap
+   * cell, pie slice); custom-mark plugins leave them unset.
+   */
   seriesId?: string;
   /** Source row of the hovered sample or mark. */
   datum?: unknown;
-  /** Row index of `datum` within its mark's `data`. */
+  /** Row index of `datum` within its mark's `data` (before viewport windowing). */
   index?: number;
   /** Index of the producing mark in `ChartSpec.marks`. */
   markIndex?: number;
@@ -86,14 +91,17 @@ export interface MountChartOptions {
 
 export interface MountHandle {
   /**
-   * Update in place. The mounted host and interaction state are preserved.
-   * Every call counts as a content change, because the rows a definition
-   * reads may have been mutated in place, so the full-data extent and the
-   * navigator are recomputed. A call that moves the viewport is navigation
-   * and keeps them unless rows were added or removed. A tooltip under a
-   * stationary pointer is refreshed afterwards, and `onTooltip` runs only
-   * when its target or values changed. An error thrown there propagates
-   * after the update has been applied.
+   * Update in place. The mounted host and interaction state are preserved,
+   * and the visible scene is recompiled. A call without `viewport` also
+   * recomputes the full-data extent and the navigator, because the rows a
+   * definition reads may have been mutated in place. A call that passes
+   * `viewport` (moving the window, or echoing the one `onViewportChange`
+   * reported, as controlled hosts do) is navigation: it keeps them unless
+   * the definition changed or rows were added or removed. An echo made
+   * synchronously inside `onViewportChange` is that change's only repaint.
+   * A tooltip under a stationary pointer is refreshed afterwards, and
+   * `onTooltip` runs only when its target or values changed. An error
+   * thrown there propagates after the update has been applied.
    */
   update(definition: ChartDefinition, options?: MountChartOptions): void;
   /** Latest renderer-neutral scene, useful for diagnostics and deterministic tests. */
@@ -159,7 +167,7 @@ export interface MountRuntime {
   windowLimits(): AxisWindowLimits | null;
   /** Recompile and repaint; throws after destroy(). */
   paint(): void;
-  /** Commit a viewport, notify onViewportChange, and repaint. */
+  /** Commit a viewport, notify onViewportChange, and repaint unless the callback already did. */
   emitViewport(next: ChartViewport): void;
   /** Show or hide a series by legend key and repaint. */
   toggleSeries(key: string): void;

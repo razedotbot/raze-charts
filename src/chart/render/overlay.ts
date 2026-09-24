@@ -17,53 +17,23 @@ import type { ChartPointerEvent, MountDom, MountRuntime } from "./types";
 /** Height of a crosshair axis chip (15px line box + 1px padding). */
 const AXIS_CHIP_HEIGHT = 17;
 
+/** Shared by every overlay element: hidden until hover, never a pointer target. */
+const OVERLAY = "position:absolute;display:none;pointer-events:none;";
+
 function tipStyle(theme: DashboardTheme): string {
-  return [
-    "position:absolute",
-    "display:none",
-    "pointer-events:none",
-    "z-index:5",
-    `background:${theme.chipBg}`,
-    `color:${readableTextColor(theme.chipBg, theme)}`,
-    `font:10px/1.5 ${theme.font}`,
-    "font-variant-numeric:tabular-nums",
-    "padding:7px 10px 7px 11px",
-    "border-radius:3px",
-    "white-space:pre",
-    `box-shadow:0 0 0 1px ${theme.axis}`,
-    "letter-spacing:0.02em",
-  ].join(";");
+  return `${OVERLAY}z-index:5;background:${theme.chipBg};color:${readableTextColor(theme.chipBg, theme)};`
+    + `font:10px/1.5 ${theme.font};font-variant-numeric:tabular-nums;padding:7px 10px 7px 11px;border-radius:3px;`
+    + `white-space:pre;box-shadow:0 0 0 1px ${theme.axis};letter-spacing:0.02em`;
 }
 
 function hairStyle(theme: DashboardTheme, vertical: boolean): string {
-  return [
-    "position:absolute",
-    "display:none",
-    "pointer-events:none",
-    "z-index:3",
-    vertical ? "width:0" : "height:0",
-    vertical
-      ? `border-left:1px dashed ${theme.crosshair}`
-      : `border-top:1px dashed ${theme.crosshair}`,
-  ].join(";");
+  return `${OVERLAY}z-index:3;${vertical ? "width:0;border-left" : "height:0;border-top"}:1px dashed ${theme.crosshair}`;
 }
 
 function axisChipStyle(theme: DashboardTheme): string {
-  return [
-    "position:absolute",
-    "display:none",
-    "pointer-events:none",
-    "z-index:4",
-    `background:${theme.chipBg}`,
-    `color:${readableTextColor(theme.chipBg, theme)}`,
-    `font:10px ${theme.font}`,
-    "font-variant-numeric:tabular-nums",
-    "padding:1px 6px",
-    "border-radius:2.5px",
-    "line-height:15px",
-    "white-space:nowrap",
-    `box-shadow:0 0 0 6px ${theme.background}`,
-  ].join(";");
+  return `${OVERLAY}z-index:4;background:${theme.chipBg};color:${readableTextColor(theme.chipBg, theme)};`
+    + `font:10px ${theme.font};font-variant-numeric:tabular-nums;padding:1px 6px;border-radius:2.5px;`
+    + `line-height:15px;white-space:nowrap;box-shadow:0 0 0 6px ${theme.background}`;
 }
 
 /** Build the mount's DOM and attach it to `el`. */
@@ -82,18 +52,8 @@ export function createMountDom(el: HTMLElement): MountDom {
   const cell = document.createElement("div");
   const a11y = document.createElement("div");
   a11y.className = "raze-chart-sr-summary";
-  a11y.style.cssText = [
-    "position:absolute",
-    "width:1px",
-    "height:1px",
-    "padding:0",
-    "margin:-1px",
-    "overflow:hidden",
-    "clip:rect(0,0,0,0)",
-    "white-space:nowrap",
-    "border:0",
-    "user-select:none",
-  ].join(";");
+  a11y.style.cssText = "position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;"
+    + "clip:rect(0,0,0,0);white-space:nowrap;border:0;user-select:none";
   const legend = document.createElement("div");
   legend.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;z-index:6;";
   legend.hidden = true;
@@ -120,38 +80,17 @@ export function applyOverlayTheme(rt: MountRuntime, theme: DashboardTheme): void
   chipY.style.cssText = axisChipStyle(theme);
   chipX.style.cssText = axisChipStyle(theme);
   tip.style.cssText = tipStyle(theme);
-  dot.style.cssText = [
-    "position:absolute",
-    "display:none",
-    "pointer-events:none",
-    "z-index:4",
-    "width:8px",
-    "height:8px",
-    "margin:-4px 0 0 -4px",
-    "border-radius:50%",
-    `box-shadow:0 0 0 1.5px ${theme.background}`,
-  ].join(";");
-  cell.style.cssText = [
-    "position:absolute",
-    "display:none",
-    "pointer-events:none",
-    "z-index:3",
-    "box-sizing:border-box",
-    `box-shadow:inset 0 0 0 1.5px ${theme.text}, 0 0 0 1px ${theme.background}`,
-  ].join(";");
+  dot.style.cssText = `${OVERLAY}z-index:4;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;`
+    + `box-shadow:0 0 0 1.5px ${theme.background}`;
+  cell.style.cssText = `${OVERLAY}z-index:3;box-sizing:border-box;`
+    + `box-shadow:inset 0 0 0 1.5px ${theme.text}, 0 0 0 1px ${theme.background}`;
   brushRect.style.background = chartColorWithOpacity(theme.accent, 0.12);
   brushRect.style.border = `1px solid ${chartColorWithOpacity(theme.accent, 0.7)}`;
   wrap.style.touchAction = rt.state.options.interaction === false ? "" : "none";
 }
 
 export function hideOverlay(dom: MountDom): void {
-  dom.hairV.style.display = "none";
-  dom.hairH.style.display = "none";
-  dom.chipY.style.display = "none";
-  dom.chipX.style.display = "none";
-  dom.tip.style.display = "none";
-  dom.dot.style.display = "none";
-  dom.cell.style.display = "none";
+  for (const el of [dom.hairV, dom.hairH, dom.chipY, dom.chipX, dom.tip, dom.dot, dom.cell]) el.style.display = "none";
   dom.stage.querySelectorAll("[data-role='slice']").forEach((el) => {
     (el as SVGElement).style.opacity = "1";
   });
@@ -270,10 +209,7 @@ export function createHoverController(rt: MountRuntime): HoverController {
     if (!compiled.polar) {
       updateCrosshair(dom, compiled, resolved, frame);
     } else {
-      hairV.style.display = "none";
-      hairH.style.display = "none";
-      chipY.style.display = "none";
-      chipX.style.display = "none";
+      for (const el of [hairV, hairH, chipY, chipX]) el.style.display = "none";
     }
 
     if (hit?.role === "heat" && hit.w && hit.h) {
@@ -391,21 +327,9 @@ export function syncLegendToggles(rt: MountRuntime): void {
       button.type = "button";
       button.dataset.series = entry.key;
     }
-    button.style.cssText = [
-      "position:absolute",
-      `left:${cssX(frame, entry.box.x)}px`,
-      `top:${cssY(frame, entry.box.y)}px`,
-      `width:${entry.box.w * frame.scale}px`,
-      `height:${entry.box.h * frame.scale}px`,
-      "margin:0",
-      "padding:0",
-      "border:0",
-      "border-radius:3px",
-      "background:transparent",
-      "cursor:pointer",
-      "touch-action:manipulation",
-      `outline-color:${accent}`,
-    ].join(";");
+    button.style.cssText = `position:absolute;left:${cssX(frame, entry.box.x)}px;top:${cssY(frame, entry.box.y)}px;`
+      + `width:${entry.box.w * frame.scale}px;height:${entry.box.h * frame.scale}px;margin:0;padding:0;border:0;`
+      + `border-radius:3px;background:transparent;cursor:pointer;touch-action:manipulation;outline-color:${accent}`;
     button.setAttribute("aria-label", entry.name);
     button.setAttribute("aria-pressed", String(!entry.hidden));
     return button;
