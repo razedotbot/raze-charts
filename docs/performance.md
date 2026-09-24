@@ -213,3 +213,127 @@ incremental today.
 - Keep one reproducible before/after command in a performance pull request.
 - Treat a changed budget as an API decision that requires explanation, not as
   the default response to a regression.
+
+## Financial widget browser benchmark
+
+The compiler benchmark above runs in Node and cannot see canvas paint,
+rasterisation, browser `Intl` cost, DOM chrome or garbage collection. The
+widget benchmark drives the real financial widget in headless Chromium through
+Playwright and reports median and p95 for 11 timed scenarios plus retained
+heap, each at 1k, 10k, 100k and 500k bars.
+
+Build once, install Chromium once, then run the suite (about 90 seconds):
+
+```bash
+node build.mjs
+npx playwright install chromium
+node scripts/benchmark-widget.mjs
+```
+
+| Option | Effect |
+| --- | --- |
+| `--check` | Exit non-zero when a median exceeds its portable budget, or when a measured scenario has no budget. |
+| `--check --strict` | Enforce the aspirational `target` values (where defined) instead of the budgets. |
+| `--json` | Machine-readable results on stdout; Playwright progress goes to stderr. |
+| `--record` | Write measured medians into the baseline. Existing budgets and targets are kept. |
+| `--sizes=1k,100k` | Measure a subset of data sizes. |
+| `--no-raster` | Skip the per-frame canvas readback, so only script time is measured. |
+
+`PW_PORT` selects the static server port (default 8798). The suite uses its
+own [playwright.perf.config.ts](../playwright.perf.config.ts), so the visual
+and accessibility suites (`npx playwright test`) never run it.
+
+### Method
+
+- The page is [examples/benchmark.html](../examples/benchmark.html). It uses a
+  1100x620 CSS px viewport at DPR 1, the same surface as the visual goldens.
+  Widget chrome is on by default; the countdown and hint popups are disabled.
+- The data is a deterministic 1-minute OHLCV random walk. The whole series is
+  served on the first request, so no pagination runs while measuring.
+- Timed values are main-thread milliseconds. Each one covers the synchronous
+  input handler, every `requestAnimationFrame` callback the input causes, and
+  a forced 1x1 canvas readback after each frame, which pulls rasterisation
+  into the measurement. Inputs are real DOM `PointerEvent`/`WheelEvent`
+  dispatches to the element under the pointer, public
+  `setVisibleRange` calls, and live `subscribeBars` ticks.
+- `load` is wall time from `new widget()` to the end of the first painted data
+  frame. It includes the datafeed's asynchronous hand-offs and the first load
+  in each page, which runs with a cold JIT.
+- `heap` is `Runtime.getHeapUsage` after two forced garbage collections, minus
+  the heap before the series was generated. It covers the bar objects, the
+  widget's copies and caches. `heap-studies` adds EMA, SMA, RSI, VWAP,
+  Bollinger Bands and MACD.
+- The page is cross-origin isolated, which gives it 5 µs timers.
+  Each scenario runs three warm-up steps, then samples until 40 samples or a
+  1.5 s time budget (2.5 s at 500k) is reached, and never takes fewer than 5.
+
+| Scenario | Operation |
+| --- | --- |
+| `load` | Construct the widget, load the series, paint the first data frame |
+| `frame-default` | Repaint after a one-bar viewport change at the default 120-bar zoom |
+| `frame-zoomed-out` | Same at 1.5 px per bar (about the widest gesture zoom) |
+| `frame-all` | Same with the whole history visible (the ALL range) |
+| `crosshair-move` | Mouse move sweeping the crosshair across the default view |
+| `crosshair-move-all` | Mouse move sweeping the crosshair with the whole history visible |
+| `pan` | One pointer-drag step while panning the default view |
+| `wheel-zoom` | Alternating wheel zoom out and in at the default view |
+| `frame-studies` | Default-view repaint with the six studies |
+| `tick-replace` | Live tick replacing the forming bar, six studies |
+| `tick-append` | Live tick appending a new bar, six studies |
+| `heap`, `heap-studies` | Retained heap without and with the six studies |
+
+### Reference results
+
+These medians come from Chromium 153 (headless) on Windows x64 with an AMD
+Ryzen 9 5900X, captured 2026-09-24 with rasterisation included. Other
+workloads were running at the same time, and repeated runs varied by about
+30%. Compare trends, not machines. The source of truth is
+[widget-baseline.json](../benchmarks/widget-baseline.json).
+
+| Scenario | 1k | 10k | 100k | 500k | Budget (1k / 10k / 100k / 500k) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `load` | 35.30 ms | 36.85 ms | 36.33 ms | 120 ms | 300 / 300 / 300 / 800 ms |
+| `frame-default` | 1.98 ms | 2.05 ms | 2.09 ms | 1.88 ms | 15 / 15 / 15 / 15 ms |
+| `frame-zoomed-out` | 2.72 ms | 3.04 ms | 3.09 ms | 3.16 ms | 20 / 20 / 20 / 20 ms |
+| `frame-all` | 4.89 ms | 29.50 ms | 238 ms | 1387 ms | 30 / 180 / 1500 / 8500 ms |
+| `crosshair-move` | 3.15 ms | 3.11 ms | 2.66 ms | 2.71 ms | 20 / 20 / 20 / 20 ms |
+| `crosshair-move-all` | 5.32 ms | 28.39 ms | 247 ms | 1359 ms | 40 / 180 / 1500 / 8500 ms |
+| `pan` | 3.02 ms | 3.18 ms | 2.72 ms | 2.61 ms | 20 / 20 / 20 / 20 ms |
+| `wheel-zoom` | 2.73 ms | 2.93 ms | 2.34 ms | 2.50 ms | 20 / 20 / 20 / 20 ms |
+| `frame-studies` | 4.54 ms | 4.64 ms | 4.00 ms | 3.93 ms | 30 / 30 / 30 / 30 ms |
+| `tick-replace` | 4.55 ms | 6.56 ms | 23.99 ms | 167 ms | 30 / 40 / 150 / 1100 ms |
+| `tick-append` | 4.31 ms | 6.20 ms | 23.36 ms | 180 ms | 30 / 40 / 150 / 1100 ms |
+| `heap` | 0.4 MB | 1.4 MB | 10.6 MB | 51.8 MB | 16 / 16 / 30 / 110 MB |
+| `heap-studies` | 1.0 MB | 4.2 MB | 35.5 MB | 174.3 MB | 16 / 16 / 80 / 400 MB |
+
+Portable budgets are the larger of 10 ms and 6x the reference median, or of
+16 MB and 2x the reference for heap. They are rounded up to coarse steps. They
+catch algorithmic regressions on slow shared runners and are not a frame-rate
+promise. The baseline also carries aspirational `target` values that
+`--check --strict` enforces: a default-zoom frame of at most 2 ms, a
+replace-last tick with six studies of at most 2 ms, and at most 15 MB of heap
+per 100k bars. These targets show where the widget has to go next; the
+default check does not enforce them.
+
+What the numbers show today:
+
+- Work at a fixed zoom does not depend on history length. Default, zoomed-out,
+  crosshair, pan and wheel frames cost 2-3 ms from 1k to 500k bars.
+- Paint cost grows linearly with the number of visible bars. With the whole
+  history in view, every repaint walks all bars: 238 ms at 100k and about
+  1.4 s at 500k. Every crosshair move does the same, because the crosshair
+  still repaints the entire scene.
+- A live tick with six studies is O(n). The incremental paths cover only EMA,
+  SMA and RSI, and VWAP, Bollinger Bands and MACD recompute the full series.
+  That costs 24 ms at 100k and about 170 ms at 500k, against the 2 ms target.
+- Retained heap is about 10.6 MB per 100k bars without studies, inside the
+  15 MB target. The six studies raise it to about 35 MB per 100k bars.
+
+Boundaries: the benchmark covers headless Chromium only. GPU compositing, other
+browsers, high-DPR displays and a side-by-side comparison with other charting
+libraries are out of scope. A comparison against lightweight-charts would need
+a third-party dependency, which this repository does not take; publish it
+from a separate harness that uses the same page geometry and scenarios. When a
+change moves these numbers on purpose, run `--record`. Put the before and
+after tables in the pull request. Edit a budget only as an explained API
+decision.

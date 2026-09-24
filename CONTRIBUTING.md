@@ -134,6 +134,7 @@ add a subpath:
 | Playwright goldens | Product-level financial and native-dashboard appearance and interaction states |
 | Bundle budget | Gzip size of each published ESM entrypoint and of tree-shaken, minified consumer scenarios, one budget file per entry |
 | Compiler benchmark | Repeatable 1k through 1M native scene compilation and regression budget |
+| Widget browser benchmark | `node scripts/benchmark-widget.mjs --check`: Chromium frame, crosshair, pan, wheel, live-tick and heap budgets at 1k through 500k bars ([details](./docs/performance.md#financial-widget-browser-benchmark)) |
 
 ## Architecture and style
 

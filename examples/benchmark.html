@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts - widget browser benchmark</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #181615; }
+    #wrap { position: absolute; inset: 0; overflow: hidden; }
+  </style>
+  <!--
+    Frame instrumentation must be installed before the library evaluates, so it
+    lives in a classic script (classic scripts run before deferred modules).
+    Every requestAnimationFrame callback the page schedules is timed; the
+    harness waits on the untouched native rAF so its own bookkeeping is never
+    counted as chart work.
+  -->
+  <script>
+    (() => {
+      const nativeRaf = window.requestAnimationFrame.bind(window);
+      const nativeCancel = window.cancelAnimationFrame.bind(window);
+      const pending = new Set();
+      const probe = {
+        nativeRaf,
+        pending,
+        /** Accumulated JS milliseconds spent inside instrumented rAF callbacks. */
+        work: 0,
+        /** Number of instrumented rAF callbacks that ran. */
+        frames: 0,
+        /** performance.now() when the latest instrumented callback finished. */
+        lastFrameEnd: 0,
+        /** When true, each instrumented frame is followed by a canvas readback. */
+        rasterFlush: false,
+        /** Milliseconds spent in forced canvas readbacks (rasterisation). */
+        raster: 0,
+        reset() {
+          this.work = 0;
+          this.frames = 0;
+          this.raster = 0;
+        },
+      };
+
+      function flushCanvases() {
+        // A 1x1 readback forces Chromium to rasterise every recorded 2D draw
+        // call synchronously, so raster cost lands inside the measured frame
+        // instead of an unmeasured compositor step.
+        for (const canvas of document.querySelectorAll(".raze-chart-root canvas")) {
+          if (!canvas.width || !canvas.height) continue;
+          const ctx = canvas.getContext("2d");
+          ctx?.getImageData(0, 0, 1, 1);
+        }
+      }
+
+      window.requestAnimationFrame = (callback) => {
+        const id = nativeRaf((timestamp) => {
+          pending.delete(id);
+          const start = performance.now();
+          try {
+            callback(timestamp);
+          } finally {
+            const end = performance.now();
+            probe.work += end - start;
+            probe.frames += 1;
+            if (probe.rasterFlush) {
+              flushCanvases();
+              probe.raster += performance.now() - end;
+            }
+            probe.lastFrameEnd = performance.now();
+          }
+        });
+        pending.add(id);
+        return id;
+      };
+      window.cancelAnimationFrame = (id) => {
+        pending.delete(id);
+        nativeCancel(id);
+      };
+      window.__razeFrameProbe = probe;
+    })();
+  </script>
+</head>
+<body>
+  <div id="wrap"></div>
+  <script type="module">
+    import { widget } from "../dist/charting_library.esm.js";
+
+    const probe = window.__razeFrameProbe;
+    const wrap = document.getElementById("wrap");
+    const RESOLUTION_SEC = 60;
+    // Frozen epoch keeps generated timestamps and axis labels deterministic.
+    const LAST_BAR_SEC = Date.UTC(2024, 0, 15, 12, 0, 0) / 1000;
+    const INITIAL_VISIBLE_BARS = 120;
+    const RIGHT_PAD_BARS = 7;
+    const STUDIES = ["EMA", "SMA", "RSI", "VWAP", "Bollinger Bands", "MACD"];
+
+    const state = {
+      bars: [],
+      /** Bars the mounted chart holds (grows with appended live ticks). */
+      count: 0,
+      firstSec: 0,
+      widget: null,
+      chart: null,
+      onTick: null,
+      lastBar: null,
+      pointerDown: false,
+      step: 0,
+    };
+
+    function nextFrame() {
+      return new Promise((resolve) => probe.nativeRaf(() => resolve()));
+    }
+
+    /** Waits until no instrumented animation frame is pending (bounded). */
+    async function settle(maxFrames = 30) {
+      let guard = 0;
+      do {
+        await nextFrame();
+      } while (probe.pending.size > 0 && ++guard < maxFrames);
+      if (probe.pending.size > 0) {
+        throw new Error(`[benchmark] chart kept requesting frames for ${maxFrames} frames`);
+      }
+    }
+
+    /** Deterministic random-walk OHLCV series with a regular 60-second step. */
+    function generateBars(count) {
+      const bars = new Array(count);
+      let seed = 1234567;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+      let price = 6400;
+      const firstSec = LAST_BAR_SEC - (count - 1) * RESOLUTION_SEC;
+      for (let i = 0; i < count; i += 1) {
+        const open = price;
+        // Mean-reverting drift keeps 500k bars inside a plausible price band.
+        const drift = (rnd() - 0.5) * price * 0.004 + (6400 - price) * 0.001;
+        const close = Math.max(1, price + drift);
+        const high = Math.max(open, close) * (1 + rnd() * 0.002);
+        const low = Math.min(open, close) * (1 - rnd() * 0.002);
+        bars[i] = {
+          time: (firstSec + i * RESOLUTION_SEC) * 1000,
+          open,
+          high,
+          low,
+          close,
+          volume: Math.floor(rnd() * 100000),
+        };
+        price = close;
+      }
+      return bars;
+    }
+
+    function makeDatafeed(bars) {
+      const symbolInfo = {
+        name: "BENCH", ticker: "BENCH", description: "Benchmark series",
+        type: "crypto", session: "24x7", timezone: "Etc/UTC",
+        exchange: "Bench", listed_exchange: "Bench", format: "price",
+        minmov: 1, pricescale: 100, has_intraday: true,
+        intraday_multipliers: ["1"], supported_resolutions: ["1"],
+        volume_precision: 0, data_status: "streaming",
+      };
+      let served = false;
+      return {
+        onReady(cb) { setTimeout(() => cb({ supported_resolutions: ["1"] }), 0); },
+        searchSymbols(_q, _e, _t, cb) { cb([]); },
+        resolveSymbol(_symbol, onResolve) { setTimeout(() => onResolve(symbolInfo), 0); },
+        getBars(_info, _resolution, _period, onResult) {
+          // The first request receives the entire series; `noData` marks the
+          // start of history so no pagination runs during measurements.
+          const payload = served ? [] : bars;
+          served = true;
+          setTimeout(() => onResult(payload, { noData: true }), 0);
+        },
+        subscribeBars(_info, _resolution, onTick) { state.onTick = onTick; },
+        unsubscribeBars() { state.onTick = null; },
+      };
+    }
+
+    function chartCanvas() {
+      const canvas = wrap.querySelector("canvas.raze-chart-canvas") ?? wrap.querySelector("canvas");
+      if (!canvas) throw new Error("[benchmark] the widget has not mounted its canvas");
+      return canvas;
+    }
+
+    function timeOf(index) {
+      return state.firstSec + index * RESOLUTION_SEC;
+    }
+
+    function viewRange(name) {
+      const n = state.count;
+      if (name === "default") {
+        return { from: n - INITIAL_VISIBLE_BARS, to: n - 1 + RIGHT_PAD_BARS };
+      }
+      if (name === "zoomed-out") {
+        // 1.5 CSS px per bar across the canvas, i.e. about as far out as zoom
+        // gestures go (the widget's minimum bar spacing is 1.5 px).
+        const span = Math.min(n - 1, Math.floor(chartCanvas().clientWidth / 1.5));
+        return { from: n - 1 - span, to: n - 1 + RIGHT_PAD_BARS };
+      }
+      if (name === "all") return { from: 0, to: n - 1 };
+      throw new Error(`[benchmark] unknown view "${name}"`);
+    }
+
+    async function applyRange(range, shift = 0) {
+      await state.chart.setVisibleRange({
+        from: timeOf(range.from + shift),
+        to: timeOf(range.to + shift),
+      });
+    }
+
+    function plotPoint(fx, fy) {
+      const rect = chartCanvas().getBoundingClientRect();
+      return { x: rect.left + rect.width * fx, y: rect.top + rect.height * fy };
+    }
+
+    function dispatchPointer(type, point, extra = {}) {
+      // Dispatch at whatever element real input would hit, so the benchmark
+      // follows the chart if listeners move to a layered overlay canvas.
+      const target = document.elementFromPoint(point.x, point.y) ?? wrap;
+      target.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clientX: point.x,
+        clientY: point.y,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+        button: type === "pointermove" ? -1 : 0,
+        buttons: type === "pointerup" ? 0 : state.pointerDown ? 1 : 0,
+        ...extra,
+      }));
+    }
+
+    function dispatchWheel(point, deltaY) {
+      const target = document.elementFromPoint(point.x, point.y) ?? wrap;
+      target.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clientX: point.x,
+        clientY: point.y,
+        deltaY,
+        deltaMode: 0,
+      }));
+    }
+
+    function pushTick(append) {
+      if (!state.onTick) throw new Error("[benchmark] the chart has no live subscription");
+      const last = state.lastBar;
+      const step = state.step;
+      const delta = (step % 2 === 0 ? 1 : -1) * last.close * 0.0005;
+      const close = Math.max(1, last.close + delta);
+      const bar = append
+        ? { time: last.time + RESOLUTION_SEC * 1000, open: last.close, high: last.close, low: last.close, close: last.close, volume: 0 }
+        : {
+          time: last.time,
+          open: last.open,
+          high: Math.max(last.high, close),
+          low: Math.min(last.low, close),
+          close,
+          volume: last.volume + 10,
+        };
+      state.lastBar = bar;
+      if (append) state.count += 1;
+      state.onTick({ ...bar });
+    }
+
+    /**
+     * Scenario steps. Each performs one user-visible operation; the sampler
+     * measures its synchronous handler plus every animation frame it causes.
+     */
+    const scenarios = {
+      frame: {
+        async prepare(opts) { await applyRange(viewRange(opts.view)); },
+        run(opts) { return applyRange(viewRange(opts.view), state.step % 2); },
+        async teardown() { await applyRange(viewRange("default")); },
+      },
+      "crosshair-move": {
+        async prepare(opts) {
+          await applyRange(viewRange(opts.view));
+          dispatchPointer("pointermove", plotPoint(0.3, 0.35));
+        },
+        run() {
+          // Sweep across the plot so every sample hovers a different bar.
+          const phase = (state.step % 40) / 40;
+          dispatchPointer("pointermove", plotPoint(0.1 + phase * 0.7, 0.25 + phase * 0.3));
+        },
+        async teardown() {
+          dispatchPointer("pointerleave", plotPoint(0.3, 0.35), { bubbles: false });
+          await applyRange(viewRange("default"));
+        },
+      },
+      pan: {
+        async prepare(opts) {
+          await applyRange(viewRange(opts.view));
+          state.pointerDown = true;
+          dispatchPointer("pointerdown", plotPoint(0.45, 0.4));
+        },
+        run() {
+          // Drag back and forth by up to 120 px around the press point.
+          const offset = ((state.step % 12) - 6) * 20;
+          const origin = plotPoint(0.45, 0.4);
+          dispatchPointer("pointermove", { x: origin.x + offset, y: origin.y });
+        },
+        async teardown() {
+          state.pointerDown = false;
+          dispatchPointer("pointerup", plotPoint(0.45, 0.4));
+          dispatchPointer("pointerleave", plotPoint(0.45, 0.4), { bubbles: false });
+          await applyRange(viewRange("default"));
+        },
+      },
+      "wheel-zoom": {
+        async prepare(opts) { await applyRange(viewRange(opts.view)); },
+        run() { dispatchWheel(plotPoint(0.5, 0.4), state.step % 2 === 0 ? 100 : -100); },
+        async teardown() { await applyRange(viewRange("default")); },
+      },
+      "tick-replace": {
+        async prepare(opts) { await applyRange(viewRange(opts.view)); },
+        run() { pushTick(false); },
+        async teardown() { await applyRange(viewRange("default")); },
+      },
+      "tick-append": {
+        async prepare(opts) { await applyRange(viewRange(opts.view)); },
+        run() { pushTick(true); },
+        async teardown() { await applyRange(viewRange("default")); },
+      },
+    };
+
+    async function sampleOnce(run) {
+      await settle();
+      probe.reset();
+      const start = performance.now();
+      await run();
+      const handler = performance.now() - start;
+      await settle();
+      return {
+        ms: handler + probe.work + probe.raster,
+        scriptMs: handler + probe.work,
+        rasterMs: probe.raster,
+        frames: probe.frames,
+      };
+    }
+
+    const bench = {
+      version: 1,
+      studies: STUDIES,
+
+      environment() {
+        return {
+          crossOriginIsolated: window.crossOriginIsolated === true,
+          devicePixelRatio: window.devicePixelRatio,
+          userAgent: navigator.userAgent,
+        };
+      },
+
+      /** Generates the deterministic series for one data size. */
+      setup(size) {
+        if (!Number.isInteger(size) || size < 200) {
+          throw new Error(`[benchmark] size must be an integer >= 200, got ${size}`);
+        }
+        state.bars = generateBars(size);
+        state.firstSec = state.bars[0].time / 1000;
+        state.lastBar = { ...state.bars[state.bars.length - 1] };
+        return { bars: size };
+      },
+
+      setRasterFlush(enabled) {
+        probe.rasterFlush = Boolean(enabled);
+      },
+
+      /**
+       * Mounts a widget over the generated series and resolves once its first
+       * data frame has painted. Returns construction-to-painted milliseconds.
+       */
+      async load() {
+        if (state.widget) await bench.unload();
+        const bars = state.bars.slice();
+        state.count = bars.length;
+        state.lastBar = { ...bars[bars.length - 1] };
+        await settle();
+        probe.reset();
+        const start = performance.now();
+        const w = new widget({
+          symbol: "BENCH",
+          datafeed: makeDatafeed(bars),
+          interval: "1",
+          container: wrap,
+          library_path: "/",
+          locale: "en",
+          theme: "dark",
+          autosize: true,
+          timezone: "Etc/UTC",
+          custom_font_family: "Arial, Helvetica, sans-serif",
+          // Timers and hint popups would add frames unrelated to the scenario.
+          disabled_features: ["popup_hints", "countdown"],
+        });
+        state.widget = w;
+        await new Promise((resolve) => w.onChartReady(resolve));
+        state.chart = w.activeChart();
+        await settle();
+        if (probe.frames === 0 || state.chart.getVisibleRange().to <= 0) {
+          throw new Error("[benchmark] the chart finished loading without painting its data");
+        }
+        // Wall time: includes the datafeed's asynchronous hand-offs and DOM
+        // construction, i.e. what a user waits for before the first candles.
+        return { ms: probe.lastFrameEnd - start, rasterMs: probe.raster, frames: probe.frames };
+      },
+
+      async unload() {
+        state.widget?.remove();
+        state.widget = null;
+        state.chart = null;
+        state.onTick = null;
+        await settle();
+      },
+
+      /** Adds the six reference studies used by the study scenarios. */
+      async addStudies() {
+        for (const name of STUDIES) await state.chart.createStudy(name, false, false);
+        await settle();
+      },
+
+      /**
+       * Runs one scenario: warm-up steps, then samples until either
+       * `maxSamples` or the time budget is reached (never fewer than
+       * `minSamples`).
+       */
+      async measure(name, opts = {}) {
+        const scenario = scenarios[name];
+        if (!scenario) {
+          throw new Error(`[benchmark] unknown scenario "${name}"; expected one of ${Object.keys(scenarios).join(", ")}`);
+        }
+        if (!state.chart) throw new Error("[benchmark] load() the chart before measuring");
+        const options = {
+          view: "default",
+          warmup: 3,
+          minSamples: 5,
+          maxSamples: 40,
+          timeBudgetMs: 1500,
+          ...opts,
+        };
+        await scenario.prepare(options);
+        await settle();
+        const samples = [];
+        try {
+          state.step = 0;
+          for (let i = 0; i < options.warmup; i += 1) {
+            state.step += 1;
+            await sampleOnce(() => scenario.run(options));
+          }
+          const started = performance.now();
+          while (
+            samples.length < options.minSamples
+            || (samples.length < options.maxSamples && performance.now() - started < options.timeBudgetMs)
+          ) {
+            state.step += 1;
+            samples.push(await sampleOnce(() => scenario.run(options)));
+          }
+        } finally {
+          await scenario.teardown(options);
+          await settle();
+        }
+        return samples;
+      },
+    };
+
+    window.__razeBench = bench;
+    window.__razeBenchReady = true;
+  </script>
+</body>
+</html>
