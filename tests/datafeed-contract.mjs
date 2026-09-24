@@ -590,9 +590,12 @@ async function loadFixture(bars, options = {}) {
   await manager.resolveAndLoad();
   const span = context.visibleRange.to - context.visibleRange.from;
   assert(context.visibleRange.from === 450 && span === 52, "the opening view uses the width-aware defaultVisibleBars()");
-  context.setViewport({ from: 0, to: 60 }, "api");
-  await manager.maybeLoadMoreHistory();
-  assert(calls.getBars.length === 2 && context.visibleRange.from === 100, "pagination re-anchors the window by the prepended count");
+  context.setViewport({ from: 440, to: 500 }, "pan");
+  assert(calls.getBars.length === 1, "a pan away from the left edge does not page history");
+  context.setViewport({ from: 0, to: 60 }, "pan");
+  assert(calls.getBars.length === 2, "a pan near the left edge pages history through rangeChanged");
+  await settle();
+  assert(context.visibleRange.from === 100, "pagination re-anchors the window by the prepended count");
   calls.ticks.at(-1)(bar(BASE + MIN));
   context.setViewport({ from: 550, to: 610 }, "api");
   calls.ticks.at(-1)(bar(BASE + 2 * MIN));

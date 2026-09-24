@@ -34,6 +34,7 @@ import {
   DEFAULT_VISIBLE_BARS,
   type ChartContext,
   type IndexRange,
+  type ViewportChange,
   type ViewportChangeReason,
 } from "../core/context";
 import { resolveTimeframe } from "../core/timeframe";
@@ -58,6 +59,14 @@ export const HISTORY_BACKOFF_MAX_MS = 60_000;
 export const SERVER_TIME_TIMEOUT_MS = 1_000;
 /** getServerTime is repeated at this interval while supports_time is on. */
 export const SERVER_TIME_RESYNC_MS = 5 * 60_000;
+
+/**
+ * Viewport changes that can bring the left edge into view. Loads, rebases,
+ * realtime shifts and timeframe reveals page history themselves.
+ */
+const PAGINATION_REASONS: ReadonlySet<ViewportChangeReason> = new Set<ViewportChangeReason>([
+  "pan", "zoom", "pinch", "keyboard", "fit", "reset", "preset", "api", "sync", "resize",
+]);
 
 interface DataTarget {
   symbol: string;
@@ -128,11 +137,17 @@ export class DataManager {
   private serverTimeInFlight: Promise<void> | null = null;
   private serverTimeTimer: ReturnType<typeof setInterval> | null = null;
 
+  /** True while this manager applies a revealed range (no extra page request). */
+  private revealing = false;
   /** Warning keys already reported by this manager (one message per class). */
   private readonly warned = new Set<string>();
 
   constructor(private readonly context: ChartContext) {
     this.context.resolution = normalizeResolution(this.context.resolution) as ResolutionString;
+    // Any user or API move toward the left edge may need older history.
+    this.context.rangeChanged.subscribe(this, ((change: ViewportChange) => {
+      if (!this.revealing && PAGINATION_REASONS.has(change.reason)) void this.maybeLoadMoreHistory();
+    }) as never);
     this.desiredTarget = {
       symbol: this.context.symbol,
       resolution: this.context.resolution,
@@ -1170,7 +1185,13 @@ export class DataManager {
 
   private applyRange(range: IndexRange, reason: ViewportChangeReason): void {
     this.context.setScaleMode({ autoScale: true }, reason === "timeframe" || reason === "preset" ? "preset" : "api");
-    this.context.setViewport(range, reason);
+    // revealTimeRange() already paged as far as the window needs.
+    this.revealing = true;
+    try {
+      this.context.setViewport(range, reason);
+    } finally {
+      this.revealing = false;
+    }
   }
 
   private showAllBars(reason: ViewportChangeReason): void {
@@ -1295,6 +1316,7 @@ export class DataManager {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.context.rangeChanged.unsubscribeAll(this);
     this.generation += 1;
     this.historyRequestId += 1;
     this.activeHistoryRequestId = null;
