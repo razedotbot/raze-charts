@@ -449,6 +449,7 @@ await test("createStudy name resolution is exact: unsupported TradingView names 
     "Volume Weighted Average Price": "VWAP",
     "Bollinger Bands": "Bollinger Bands",
     "BB": "Bollinger Bands",
+    "Bollinger": "Bollinger Bands",
     "Moving Average Convergence Divergence": "MACD",
     "MACD@tv-basicstudies": "MACD",
     "  rsi  ": "RSI",
