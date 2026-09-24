@@ -229,6 +229,9 @@ range the main series just added, and gives it its own live subscription and
 reset callback. Every compare request belongs to a cancellable group, so a
 newer reload, `removeEntity()` or `remove()` drops pending callbacks, and a
 compare never keeps bars of another resolution on the axis while it reloads.
+A failed reload leaves the compare on the failed target (empty, or with its
+still-valid bars live after a symbol-only change), so the next move of the
+main series, back to the previous target included, or a reset refetches it.
 
 For new code, `defineDataSource` describes a Promise-first data source and
 `createDatafeed` adapts it to the callback contract consumed by the widget.

@@ -437,6 +437,120 @@ function makeHost(feed, symbol = "AAA") {
   data.destroy();
 }
 
+{
+  // A failed reload leaves the compare on the failed target, so moving the
+  // main series anywhere else, back to the compare's previous target included,
+  // refetches it instead of leaving the line empty and unsubscribed.
+  const feed = makeFeed();
+  const { context, data, compare } = makeHost(feed);
+  await data.resolveAndLoad();
+  const id = await compare.create("BBB");
+  const entry = () => context.compare.find((item) => item.id === id);
+  feed.failingHistory.set("BBB@5", "rate limited");
+  const errors = await captureErrors(async () => {
+    await data.changeResolution("5");
+    await spinUntil(() => feed.callsFor("BBB").at(-1).resolution === "5", "the failing compare reload at 5");
+    await settle();
+  });
+  assert(
+    errors.length === 1 && entry().bars.length === 0 && entry().resolution === "5" && feed.subscriptionFor("BBB").length === 0,
+    "a reload failing at 5 leaves the compare empty at 5 with no live subscription",
+  );
+  feed.failingHistory.delete("BBB@5");
+  const callsBeforeBack = feed.callsFor("BBB").length;
+  await data.changeResolution("1");
+  await spinUntil(() => entry().bars.length > 0 && feed.subscriptionFor("BBB").length === 1, "the compare to recover at 1");
+  assert(
+    feed.callsFor("BBB").length === callsBeforeBack + 1 && feed.callsFor("BBB").at(-1).resolution === "1",
+    "returning the main series to the compare's previous resolution refetches it once",
+  );
+  const [recovered] = feed.subscriptionFor("BBB");
+  assert(
+    stepOf(entry().bars) === 60 && entry().resolution === "1" && recovered.resolution === "1",
+    "the recovered compare has 1-minute bars, the chart's resolution and one live subscription at 1",
+  );
+  recovered.onTick({ time: entry().bars.at(-1).time + 60_000, open: 1, high: 1, low: 1, close: 4 });
+  assert(entry().bars.at(-1).close === 4, "live ticks reach the recovered compare");
+
+  // A reload failing on a symbol-only change keeps the compare's bars (still
+  // valid at this resolution) live, parks it, and recovers on the next move.
+  feed.failingHistory.set("BBB@1", "rate limited");
+  const barsBefore = entry().bars.map((bar) => bar.time).join();
+  const callsBeforeSymbol = feed.callsFor("BBB").length;
+  const symbolErrors = await captureErrors(async () => {
+    await data.changeSymbol("CCCC");
+    await spinUntil(() => feed.callsFor("BBB").length > callsBeforeSymbol, "the failing compare reload after setSymbol");
+    await settle();
+  });
+  assert(
+    symbolErrors.length === 1 && /reload compare "BBB" at 1/.test(symbolErrors[0]),
+    "a reload failing after setSymbol is reported once",
+  );
+  assert(entry().bars.map((bar) => bar.time).join() === barsBefore && entry().resolution === "1", "a reload failing after setSymbol keeps the compare's bars at the unchanged resolution");
+  const [kept] = feed.subscriptionFor("BBB");
+  assert(feed.subscriptionFor("BBB").length === 1 && kept.guid !== recovered.guid && kept.resolution === "1", "the kept compare stays subscribed to live bars");
+  kept.onTick({ time: entry().bars.at(-1).time + 60_000, open: 1, high: 1, low: 1, close: 6 });
+  assert(entry().bars.at(-1).close === 6, "live ticks reach a compare whose reload failed");
+  const callsParked = feed.callsFor("BBB").length;
+  context.setViewport({ from: 0, to: 60 }, "pan");
+  await data.maybeLoadMoreHistory();
+  for (let i = 0; i < 3; i += 1) context.dataChanged.fire();
+  await settle();
+  assert(feed.callsFor("BBB").length === callsParked, "a compare whose reload failed is neither reloaded nor paged by later main updates");
+  feed.failingHistory.delete("BBB@1");
+  await data.changeSymbol("AAA");
+  await spinUntil(
+    () => feed.callsFor("BBB").length > callsParked && feed.subscriptionFor("BBB").length === 1 && !feed.subscriptions.has(kept.guid),
+    "the compare to recover after returning to the previous symbol",
+  );
+  assert(
+    feed.callsFor("BBB").at(-1).firstDataRequest === true && entry().bars[0].time <= context.bars[0].time && stepOf(entry().bars) === 60,
+    "returning the main series to the compare's previous symbol refetches it over the main window",
+  );
+  compare.destroy();
+  data.destroy();
+}
+
+{
+  // Removing the last compare restores the manual price range the percent
+  // switch cleared, unless the scale or the main target changed meanwhile.
+  const feed = makeFeed();
+  const { context, data, compare } = makeHost(feed);
+  await data.resolveAndLoad();
+  const range = (state) => (state.priceRange ? `${state.priceRange.min}..${state.priceRange.max}` : "auto");
+  context.setScaleMode({ priceRange: { min: 100, max: 200 } }, "axis-drag");
+  const first = await compare.create("BBB");
+  assert(context.scaleState().mode === "percent" && context.scaleState().autoScale === true, "the first compare switches to percent with autoscale");
+  compare.remove(first);
+  const restored = context.scaleState();
+  assert(
+    restored.mode === "normal" && restored.autoScale === false && range(restored) === "100..200",
+    "removing the last compare restores the mode and the manual price range it cleared",
+  );
+
+  const second = await compare.create("BBB");
+  context.setScaleMode({ priceRange: { min: 120, max: 180 } }, "axis-drag");
+  compare.remove(second);
+  const kept = context.scaleState();
+  assert(kept.mode === "normal" && kept.autoScale === false && range(kept) === "120..180", "a range the user set while comparing is kept when the last compare goes");
+
+  const third = await compare.create("BBB");
+  context.setScaleMode({ priceRange: { min: 130, max: 170 } }, "axis-drag");
+  context.setScaleMode({ autoScale: true }, "axis-reset");
+  compare.remove(third);
+  assert(context.scaleState().mode === "normal" && range(context.scaleState()) === "auto", "an autoscale the user chose while comparing is kept");
+
+  context.setScaleMode({ priceRange: { min: 100, max: 200 } }, "axis-drag");
+  const fourth = await compare.create("BBB");
+  await data.changeResolution("5");
+  await spinUntil(() => context.compare[0]?.resolution === "5" && context.compare[0].bars.length > 0, "the compare reload at 5");
+  compare.remove(fourth);
+  const refit = context.scaleState();
+  assert(refit.mode === "normal" && refit.autoScale === true && refit.priceRange === null, "after an interval change the old manual range is not restored");
+  compare.destroy();
+  data.destroy();
+}
+
 // ── Part B: the built widget, end to end ───────────────────────────────────
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true });
 const { window } = dom;

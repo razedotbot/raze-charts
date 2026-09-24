@@ -10,8 +10,13 @@
 //   - each compare has its own live subscription (its own listener GUID),
 //     honours its own reset-cache callback, and is unsubscribed on
 //     removeEntity(), on layout restore and on widget remove();
-//   - the first compare switches the price scale to percent, and removing the
-//     last one restores the previous mode unless the user changed it since.
+//   - a failed reload is reported once and leaves the compare on the failed
+//     target, so the next symbol or resolution move (back included) or a
+//     reset refetches it;
+//   - the first compare switches the price scale to percent with autoscale,
+//     and removing the last one restores the previous mode unless the user
+//     changed it since, plus the manual price range it cleared when nobody
+//     touched the scale and the main symbol and interval are unchanged.
 //
 // Datafeed access lives in src/data/CompareLoader.ts.
 
@@ -23,7 +28,7 @@ import {
   type CompareSubscription,
 } from "../../data/CompareLoader";
 import { resolutionToMs } from "../../util/resolution";
-import type { PriceScaleMode, ScaleChange } from "../context";
+import type { PriceRange, PriceScaleMode, ScaleChange } from "../context";
 import type { WidgetController, WidgetHost } from "./host";
 
 declare module "./host" {
@@ -41,6 +46,17 @@ const REMOVED_MESSAGE = "[raze-charts] widget was removed before compare data lo
 interface CompareTarget {
   readonly symbol: string;
   readonly resolution: ResolutionString;
+}
+
+/** Price-scale state the first compare replaced, restored when the last one goes. */
+interface ScaleBeforeCompare {
+  readonly mode: PriceScaleMode;
+  /** Manual price window the percent switch cleared; null when autoscale was on. */
+  readonly range: Readonly<PriceRange> | null;
+  /** Main-series target key at the switch; the range is restored only for the same target. */
+  readonly target: string;
+  /** True once a non-compare change touched autoscale or the range. */
+  rangeTouched: boolean;
 }
 
 /** A compare series fetched but not yet shown (see prepare() and restore()). */
@@ -69,7 +85,11 @@ interface CompareSeries {
   pending: "reload" | "page" | null;
   /** Target key of the running reload. */
   pendingKey: string | null;
-  /** Target key whose reload failed; retried after the next target change or resetData(). */
+  /**
+   * Target key whose reload failed. `target` then names that failed target,
+   * so the next move of the main series (anywhere, back included) reloads;
+   * the same target is retried only by resetData() or the feed's reset.
+   */
   failedKey: string | null;
   /** Main-series oldest second at the last failed page; retried once the main series pages further. */
   pageFailedFrom: number | null;
@@ -84,12 +104,16 @@ export class CompareController implements WidgetController {
   /** Request groups of in-flight createCompare()/prepare() calls, cancelled on destroy. */
   private readonly loads = new Set<CompareRequests>();
   private loaderInstance: CompareLoader | null = null;
-  /** Scale mode to restore when the last compare goes; null when the user owns the mode. */
-  private percentFrom: PriceScaleMode | null = null;
+  /** Scale state the first compare replaced; null when there is none or the user owns the mode since. */
+  private percentFrom: ScaleBeforeCompare | null = null;
   private destroyed = false;
   private readonly sync = (): void => this.syncWithMainSeries();
   private readonly onScaleChanged = (change: ScaleChange): void => {
-    if (change.reason !== "compare" && change.state.mode !== change.previous.mode) this.percentFrom = null;
+    if (change.reason === "compare" || !this.percentFrom) return;
+    // A mode the user picks is theirs to keep; a range they set replaces the
+    // one the first compare cleared.
+    if (change.state.mode !== change.previous.mode) this.percentFrom = null;
+    else this.percentFrom.rangeTouched = true;
   };
 
   constructor(private readonly host: WidgetHost) {}
@@ -406,8 +430,19 @@ export class CompareController implements WidgetController {
         if (series.requests !== requests || !this.isLive(series)) return;
         series.pending = null;
         series.pendingKey = null;
+        // The entry now belongs to the failed target (bars of another
+        // resolution were cleared above), so a later move to any other
+        // target, the previous one included, reloads. The failed target
+        // itself is retried only by resetData() or the feed's reset callback,
+        // and it is not paged meanwhile.
+        series.target = target;
         series.failedKey = key;
+        series.hasMore = false;
         this.host.lifecycle.reportError(`reload compare "${series.symbol}" at ${target.resolution}`, error);
+        // Bars kept at this resolution (a symbol-only change) are still this
+        // compare's data, so keep them live rather than freezing the line.
+        const current = this.entryOf(series.id);
+        if (current && current.bars.length && current.resolution === target.resolution) this.subscribe(series);
       });
   }
 
@@ -460,7 +495,10 @@ export class CompareController implements WidgetController {
     const key = targetKey(this.mainTarget());
     for (const series of Array.from(this.series.values())) {
       const wanted = series.pending === "reload" ? series.pendingKey : targetKey(series.target);
-      if (wanted !== key) {
+      // Guard the entry's resolution too: the painter maps compare bars with
+      // it, so it must never disagree with the chart once no reload runs.
+      const drifted = series.pending === null && this.entryOf(series.id)?.resolution !== series.target.resolution;
+      if (wanted !== key || drifted) {
         if (series.failedKey !== key) this.reloadSeries(series);
         continue;
       }
@@ -470,10 +508,16 @@ export class CompareController implements WidgetController {
 
   private enterPercent(): void {
     const context = this.host.context;
-    const mode = context.scaleState().mode;
-    if (mode === "percent") return;
-    this.percentFrom = mode;
-    // Autoscale too: a manual range in price units cannot frame percent values.
+    const before = context.scaleState();
+    if (before.mode === "percent") return;
+    this.percentFrom = {
+      mode: before.mode,
+      range: before.autoScale || !before.priceRange ? null : { ...before.priceRange },
+      target: targetKey(this.mainTarget()),
+      rangeTouched: false,
+    };
+    // Autoscale too: a manual window fitted to the main series alone would
+    // leave compares, each on its own base, outside the plot.
     context.setScaleMode({ mode: "percent", autoScale: true }, "compare");
   }
 
@@ -482,7 +526,18 @@ export class CompareController implements WidgetController {
     this.percentFrom = null;
     if (previous === null) return;
     const context = this.host.context;
-    if (context.scaleState().mode === "percent") context.setScaleMode({ mode: previous }, "compare");
+    const now = context.scaleState();
+    if (now.mode !== "percent") return;
+    // The manual range the first compare cleared comes back only while nobody
+    // touched the scale since and the main series shows the same symbol and
+    // interval (a new target refits the price scale anyway). Otherwise only
+    // the mode is restored and the current autoscale/range is kept.
+    const untouched = !previous.rangeTouched && now.autoScale && targetKey(this.mainTarget()) === previous.target;
+    if (previous.range && untouched) {
+      context.setScaleMode({ mode: previous.mode, autoScale: false, priceRange: { ...previous.range } }, "compare");
+    } else {
+      context.setScaleMode({ mode: previous.mode }, "compare");
+    }
   }
 }
 

@@ -48,7 +48,7 @@ exports are the stable resolver contract.
 | `createStudy` | Supported subset | EMA, SMA, RSI, VWAP, Bollinger, MACD, plus studies registered through `raze.custom_studies`. `forceOverlay` / `lock` are stored but not separately enforced. |
 | `createButton` | Supported | Use it for small host actions; own complex UI outside the widget. |
 | `save()` / `load()` | Supported | Versioned JSON snapshot of symbol, interval, range, style, shapes, and studies with stable entity IDs. `disableSave` omits a live shape. The host owns storage. |
-| `createCompare(symbol)` | Supported | Overlay another symbol on the same pane; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair across panes. |
+| `createCompare(symbol)` | Supported | Overlay another symbol on the same pane; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair across panes. It rejects with a `[raze-charts]` message when the symbol cannot be resolved or its history fails, and adds nothing. The first compare switches the price scale to percent with autoscale. Compares follow interval and symbol changes, `resetData()`, left pagination and live bars. `load()` rejects, keeping the committed chart, when a saved compare no longer resolves. |
 | unlisted TradingView option or event | Not guaranteed | A permissive compatibility type is not proof of runtime support. |
 
 ### Datafeed checklist
