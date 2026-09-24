@@ -44,10 +44,20 @@ const definition = defineChart({
 Mounted charts put a native toggle button over each series legend entry on
 both renderers. The buttons sit in a labelled "Series" group, are named by the
 series, expose visibility through `aria-pressed`, and toggle with Enter or
-Space. On a pie, each button toggles one slice. The static SVG markup itself
-carries no pointer cursor. Range presets are a labelled group of pressed-state buttons
-whose active indicator keeps at least 3:1 contrast against the pane in light
-and dark themes.
+Space. On a pie, each button toggles one slice. Each button is the only
+focusable control for its entry and takes no pointer events: the painted
+entry (the SVG row or the Canvas pixels) is the pointer target, so no second
+hit target is stacked over it, and the mount shows the pointer cursor there.
+Like a native button, a click or a tap toggles on release: a primary-button
+press arms the entry and the release toggles it only over that same entry, so
+moving off the entry before releasing cancels the toggle, and a right-click or
+a middle-click never toggles. A click that starts or ends on the legend never
+fires `onSelect`. The static SVG markup itself carries no pointer cursor. The
+`+N more` summary is translated through `chart.legend.more`.
+
+Range presets are a labelled group of pressed-state buttons whose active
+indicator keeps at least 3:1 contrast against the pane in light and dark
+themes.
 
 Pointer tooltips are not a screen-reader data browser. When exact values or
 point-by-point comparison are necessary, render an adjacent HTML table or

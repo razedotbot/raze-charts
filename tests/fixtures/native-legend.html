@@ -12,7 +12,9 @@
   <div id="host"></div>
   <script type="module">
     // Visual fixture for tests/native-legend.spec.ts: 12 series and 12 pie
-    // slices at 480x300 (?case=series|pie|hidden, &renderer=svg|canvas).
+    // slices at 480x300 (?case=series|pie|hidden, &renderer=svg|canvas,
+    // &interaction=off for a mount without gestures, which leaves touch
+    // scrolling to the page). window.__razeSelections counts onSelect calls.
     import { defineChart, line, mountChart, pie } from "/dist/chart.esm.js";
 
     const params = new URLSearchParams(location.search);
@@ -27,11 +29,14 @@
     const definition = kind === "pie"
       ? defineChart({ marks: [pie(slices, { valueKey: "value", labelKey: "name" })], ariaLabel: "Segments" })
       : defineChart({ marks: series, ariaLabel: "Portfolios" });
+    window.__razeSelections = 0;
     window.__razeHandle = mountChart(document.getElementById("host"), definition, {
       renderer,
+      onSelect: () => { window.__razeSelections++; },
       width: 480,
       height: 300,
       ...(kind === "hidden" ? { hiddenSeries: ["mark-1", "mark-4"] } : {}),
+      ...(params.get("interaction") === "off" ? { interaction: false } : {}),
     });
     window.__razeLegendReady = true;
   </script>

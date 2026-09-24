@@ -27,6 +27,13 @@ type PanDrag = {
 
 type BrushDrag = { kind: "brush"; startClientX: number };
 
+/**
+ * A press that began on a painted legend entry. It toggles `key` when it is
+ * released over the same entry; `key` is null for a press that never toggles
+ * (a secondary button, or a second touch), whose release still selects nothing.
+ */
+type LegendPress = { key: string | null; pointerId: number };
+
 const panActivationDistance = 4;
 /** Zoom per wheel pixel: a classic 100px notch zooms by 1.12x. */
 const ZOOM_PER_PIXEL = Math.log(1.12) / 100;
@@ -74,6 +81,8 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
   let lastPanClientX = 0;
   let wheelRaf = 0;
   let pendingWheel: [number, number] | null = null;
+  /** The press in progress on a painted legend entry, if any. */
+  let legendPress: LegendPress | null = null;
 
   const setDrag = (next: typeof drag): void => {
     drag = next;
@@ -204,32 +213,63 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
     }
   };
 
-  const toggleFromEvent = (ev: PointerEvent, compiled: CompiledChart): boolean => {
+  /**
+   * Key of the painted legend entry under a pointer event: the SVG row it
+   * targets, else the row box at its coordinates (Canvas, or an SVG gap).
+   * This is the legend's only pointer hit-test; the toggle buttons over the
+   * entries serve keyboard and assistive technology and take no pointer events.
+   */
+  const legendKeyAt = (ev: MouseEvent, compiled: CompiledChart): string | null => {
     const target = ev.target as Element | null;
     const marked = target?.closest?.("[data-series]");
     if (marked && stage.contains(marked)) {
       const key = marked.getAttribute("data-series");
-      if (key && layoutLegend(compiled).toggleable) {
-        rt.toggleSeries(key);
-        return true;
-      }
+      if (key && layoutLegend(compiled).toggleable) return key;
     }
     const frame = rt.frame();
-    if (!frame) return false;
+    if (!frame) return null;
     const { x, y } = clientToScene(frame, ev.clientX, ev.clientY);
-    const entry = legendEntryAt(compiled, x, y);
-    if (!entry) return false;
-    rt.toggleSeries(entry.key);
-    return true;
+    return legendEntryAt(compiled, x, y)?.key ?? null;
+  };
+
+  /** Show the pointer cursor over a painted legend entry (the static markup carries none). */
+  const syncLegendCursor = (ev: MouseEvent | null): void => {
+    const compiled = state.scene;
+    const over = !!ev && !!compiled && !rt.isChromeEvent(ev) && legendKeyAt(ev, compiled) !== null;
+    const cursor = over ? "pointer" : "";
+    if (stage.style.cursor !== cursor) stage.style.cursor = cursor;
+  };
+
+  /**
+   * Arm a legend entry. Like a button, it toggles on release (see onPointerUp),
+   * so a press can still be abandoned by moving off the entry (WCAG 2.5.2),
+   * and only a primary press arms it: a right-click (context menu) or a
+   * middle-click never toggles a series.
+   */
+  const pressLegend = (ev: PointerEvent, key: string): void => {
+    const primary = ev.button === 0 && ev.isPrimary !== false;
+    legendPress = { key: primary ? key : null, pointerId: ev.pointerId };
+    if (!primary) return;
+    // Touch implicitly captures the pointer to the pressed row; release it so
+    // the up event targets whatever is under the finger when it lifts.
+    const target = ev.target as Element | null;
+    try {
+      if (target?.hasPointerCapture?.(ev.pointerId)) target.releasePointerCapture(ev.pointerId);
+    } catch { /* jsdom / detached */ }
   };
 
   const onPointerDown = (ev: PointerEvent): void => {
+    legendPress = null;
     if (rt.isChromeEvent(ev)) return;
     flushWheel();
     const compiled = state.scene;
     const interact = rt.flags();
     if (!compiled) return;
-    if (toggleFromEvent(ev, compiled)) return;
+    const legendKey = legendKeyAt(ev, compiled);
+    if (legendKey !== null) {
+      pressLegend(ev, legendKey);
+      return;
+    }
     if (compiled.polar || compiled.heatmap) return;
     const frame = rt.frame();
     if (!frame) return;
@@ -303,6 +343,18 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
   };
 
   const onPointerUp = (ev: PointerEvent): void => {
+    const press = legendPress;
+    legendPress = null;
+    if (press && !drag) {
+      // A press that began on the legend is never also a data selection. It
+      // toggles only when released over the entry it armed.
+      const compiled = state.scene;
+      if (press.key !== null && press.pointerId === ev.pointerId && compiled && !rt.isChromeEvent(ev)
+        && legendKeyAt(ev, compiled) === press.key) {
+        rt.toggleSeries(press.key);
+      }
+      return;
+    }
     if (!drag && rt.isChromeEvent(ev)) return;
     const compiled = state.scene;
     const finished = drag;
@@ -323,6 +375,8 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
       applyPanPreview(0);
       rt.emitViewport({ x: viewport.x });
     } else if ((!finished || (finished.kind === "pan" && !finished.moved)) && compiled) {
+      // A release over a legend entry (a press dragged in from elsewhere) selects nothing either.
+      if (legendKeyAt(ev, compiled) !== null) return;
       const frame = rt.frame();
       if (!frame) return;
       const { x, y } = clientToScene(frame, ev.clientX, ev.clientY);
@@ -331,6 +385,8 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
   };
 
   const onPointerCancel = (): void => {
+    // A cancelled press (the browser took the touch for scrolling) toggles nothing.
+    legendPress = null;
     const cancelled = drag;
     setDrag(null);
     cancelPanRaf();
@@ -354,13 +410,18 @@ export function attachGestures(rt: MountRuntime, hover: HoverController): Gestur
       onPointerDrag(ev);
       return;
     }
+    syncLegendCursor(ev);
     hover.move(ev);
   };
 
   const onPointerLeave = (): void => {
+    // A press that leaves the chart is dropped: this mount never sees its release.
+    legendPress = null;
+    syncLegendCursor(null);
     hover.leave();
   };
 
+  /** Enter or Space on a toggle button (they take no pointer events, see legendKeyAt). */
   const onLegendClick = (ev: MouseEvent): void => {
     const button = (ev.target as Element | null)?.closest?.("button[data-series]");
     const key = button?.getAttribute("data-series");

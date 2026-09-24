@@ -152,7 +152,10 @@ export interface MountDom {
   dot: HTMLDivElement;
   tip: HTMLDivElement;
   a11y: HTMLDivElement;
-  /** Transparent, keyboard-reachable toggle buttons over the legend entries. */
+  /**
+   * Transparent, keyboard-reachable toggle buttons over the legend entries.
+   * They take no pointer events: pointers hit the painted entries in `stage`.
+   */
   legend: HTMLDivElement;
   presetsBar: HTMLDivElement;
   nav: HTMLDivElement;

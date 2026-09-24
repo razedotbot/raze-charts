@@ -297,9 +297,13 @@ export function createHoverController(rt: MountRuntime): HoverController {
 
 /**
  * Keep one transparent toggle button over each legend entry. They make the
- * legend reachable by keyboard and screen readers on both renderers, carry
- * the pointer cursor only where a click does something, and expose the
- * series state through aria-pressed.
+ * legend reachable by keyboard and screen readers on both renderers (named
+ * by the series, with its state in aria-pressed) and draw the focus ring
+ * around the painted entry. They are never pointer targets: mouse and touch
+ * land on the painted entry itself (the SVG row or the Canvas pixels), which
+ * the mount's gestures hit-test through the same row boxes and mark with the
+ * pointer cursor. Each entry so has one interactive element and one pointer
+ * target, instead of a button stacked over a clickable row.
  */
 export function syncLegendToggles(rt: MountRuntime): void {
   const { legend } = rt.dom;
@@ -329,7 +333,7 @@ export function syncLegendToggles(rt: MountRuntime): void {
     }
     button.style.cssText = `position:absolute;left:${cssX(frame, entry.box.x)}px;top:${cssY(frame, entry.box.y)}px;`
       + `width:${entry.box.w * frame.scale}px;height:${entry.box.h * frame.scale}px;margin:0;padding:0;border:0;`
-      + `border-radius:3px;background:transparent;cursor:pointer;touch-action:manipulation;outline-color:${accent}`;
+      + `border-radius:3px;background:transparent;pointer-events:none;outline-color:${accent}`;
     button.setAttribute("aria-label", entry.name);
     button.setAttribute("aria-pressed", String(!entry.hidden));
     return button;
