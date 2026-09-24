@@ -1,9 +1,5 @@
-/**
- * Trading primitives: order, position and bracket lines.
- *
- * Shaped after TradingView's trading primitives. Re-exported by
- * src/types/charting_library.d.ts.
- */
+// Trading primitives: order, position and bracket lines, shaped after
+// TradingView's trading primitives.
 
 // ── Trading primitives ────────────────────────────────────────────────────
 export type TradingSide = "buy" | "sell";

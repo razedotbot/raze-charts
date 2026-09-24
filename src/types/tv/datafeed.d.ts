@@ -1,9 +1,6 @@
-/**
- * Datafeed contract: bars, symbols, configuration, marks and callbacks.
- *
- * Mirrors TradingView's IBasicDataFeed so existing datafeeds compile unchanged.
- * Re-exported by src/types/charting_library.d.ts.
- */
+// Datafeed contract: bars, symbols, configuration, marks and callbacks.
+//
+// Mirrors TradingView's IBasicDataFeed so existing datafeeds compile unchanged.
 
 import type { ResolutionString, SeriesFormat, Timezone } from "./common";
 

@@ -1,8 +1,4 @@
-/**
- * Serialized chart layout exchanged by widget.save() and widget.load().
- *
- * Re-exported by src/types/charting_library.d.ts.
- */
+// Serialized chart layout exchanged by widget.save() and widget.load().
 
 import type { ChartStyleName, VolumeMode } from "./options";
 import type { ShapePoint } from "./shapes";

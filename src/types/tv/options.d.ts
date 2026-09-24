@@ -1,8 +1,5 @@
-/**
- * Widget constructor options: the TradingView-compatible subset plus the
- * Raze-specific `raze` chrome configuration. Re-exported by
- * src/types/charting_library.d.ts.
- */
+// Widget constructor options: the TradingView-compatible subset plus the
+// Raze-specific `raze` chrome configuration.
 
 import type { ResolutionString, ThemeName, Timezone } from "./common";
 import type { IBasicDataFeed, LibrarySymbolInfo } from "./datafeed";

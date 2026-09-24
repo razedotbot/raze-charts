@@ -1,8 +1,5 @@
-/**
- * The widget: its interface, header buttons, context menu hooks and the
- * runtime `widget` constructor and `version` exports. Re-exported by
- * src/types/charting_library.d.ts.
- */
+// The widget: its interface, header buttons, context menu hooks and the
+// runtime `widget` constructor and `version` exports.
 
 import type { ResolutionString } from "./common";
 import type { IChartWidgetApi } from "./chart-api";

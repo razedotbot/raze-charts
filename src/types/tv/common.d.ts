@@ -1,9 +1,7 @@
-/**
- * Shared primitives of the TradingView-compatible type surface.
- *
- * Branded ids, theme and timezone names, and the subscription shape used by
- * every event source. Re-exported by src/types/charting_library.d.ts.
- */
+// Shared primitives of the TradingView-compatible type surface.
+//
+// Branded ids, theme and timezone names, and the subscription shape used by
+// every event source.
 
 // ── Branded primitives (match TV's Nominal brand so assignments are compatible) ──
 export type Nominal<T, Name extends string> = T & {

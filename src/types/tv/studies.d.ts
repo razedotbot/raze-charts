@@ -1,7 +1,5 @@
-/**
- * Indicator definitions (built-in and `raze.custom_studies`) and the
- * Indicators panel presets. Re-exported by src/types/charting_library.d.ts.
- */
+// Indicator definitions (built-in and `raze.custom_studies`) and the
+// Indicators panel presets.
 
 import type { Bar } from "./datafeed";
 

@@ -1,8 +1,4 @@
-/**
- * The per-chart API returned by widget.activeChart() and widget.chart(index).
- *
- * Re-exported by src/types/charting_library.d.ts.
- */
+// The per-chart API returned by widget.activeChart() and widget.chart(index).
 
 import type { EntityId, ISubscription, ResolutionString } from "./common";
 import type { CreateShapeOptions, ILineDataSourceApi, ShapePoint } from "./shapes";

@@ -55,7 +55,14 @@ rules:
 - siblings are referenced only through `import type { A, B } from "./<module>"`,
   without renames;
 - re-exports live only in the barrel, and every `tv/` module is re-exported;
-- a name is declared in one module only.
+- a name is declared in one module only;
+- a `/** … */` comment sits directly above the declaration it documents.
+  TypeScript shows the last such comment before a declaration as its hover
+  documentation, even across blank lines and the imports that flattening
+  removes, so file headers and section notes are `//` comments.
+
+`tests/compat-types.mjs` checks that every declaration shows the same hover
+documentation in the flattened file as in its module.
 
 `tests/types-api-report.mjs` resolves every export of the published
 declaration entry points and compares a normalized report with

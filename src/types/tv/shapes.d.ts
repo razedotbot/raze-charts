@@ -1,8 +1,4 @@
-/**
- * Drawings created through the chart API (createShape and friends).
- *
- * Re-exported by src/types/charting_library.d.ts.
- */
+// Drawings created through the chart API (createShape and friends).
 
 // ── Shapes ──────────────────────────────────────────────────────────────────
 export interface ShapePoint {

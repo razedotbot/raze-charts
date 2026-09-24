@@ -15,7 +15,11 @@
 //     `import type { A, B } from "./<module>"` (no renames, no values), and
 //     every imported sibling is itself re-exported by the barrel;
 //   - no two modules declare the same name;
-//   - every src/types/tv/*.d.ts module is re-exported by the barrel.
+//   - every src/types/tv/*.d.ts module is re-exported by the barrel;
+//   - a `/** … */` comment sits directly above the declaration it documents.
+//     TypeScript shows the last such comment before a declaration as its hover
+//     documentation, even across blank lines, `//` notes and the imports that
+//     flattening removes, so file headers and section notes use `//` comments.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
@@ -39,9 +43,11 @@ const DECLARATION_KINDS = new Set([
 ]);
 
 class CompatibilityTypesError extends Error {
-  constructor(file, node, message) {
-    const location = node
-      ? `${file}:${node.getSourceFile().getLineAndCharacterOfPosition(node.getStart()).line + 1}`
+  /** `at` is a node, or `[sourceFile, position]` for trivia such as a comment. */
+  constructor(file, at, message) {
+    const [source, position] = Array.isArray(at) ? at : at ? [at.getSourceFile(), at.getStart()] : [];
+    const location = source
+      ? `${file}:${source.getLineAndCharacterOfPosition(position).line + 1}`
       : file;
     super(`[raze-charts] ${location}: ${message}`);
     this.name = "CompatibilityTypesError";
@@ -67,6 +73,47 @@ function declaredNames(statement) {
 const hasModifier = (node, kind) => (ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined)
   ?.some((modifier) => modifier.kind === kind) ?? false;
 
+const isDocComment = (text, range) => range.kind === ts.SyntaxKind.MultiLineCommentTrivia
+  && text.startsWith("/**", range.pos)
+  && !text.startsWith("/**/", range.pos);
+
+/**
+ * Rejects every top-level `/** … *\/` comment that is not directly above the
+ * declaration it documents: one before an import, at the end of a module, in
+ * the barrel, or separated from its declaration by a blank line or another
+ * comment. TypeScript would show it as the hover documentation of whichever
+ * declaration follows, in the module tree or once the modules are flattened.
+ */
+function checkDocComments(name, file, { barrel = false } = {}) {
+  const text = file.getFullText();
+  for (const node of [...file.statements, file.endOfFileToken]) {
+    const ranges = ts.getLeadingCommentRanges(text, node.getFullStart()) ?? [];
+    ranges.forEach((range, index) => {
+      if (!isDocComment(text, range)) return;
+      const declaration = !barrel && DECLARATION_KINDS.has(node.kind);
+      const adjacent = index === ranges.length - 1
+        && (text.slice(range.end, node.getStart(file)).match(/\n/g) ?? []).length <= 1;
+      if (declaration && adjacent) return;
+      const documented = declaration
+        ? `"${declaredNames(node).join('", "')}", although it is not directly above it`
+        : "the next declaration in the flattened file";
+      throw new CompatibilityTypesError(
+        name,
+        [file, range.pos],
+        `this /** */ comment would become the hover documentation of ${documented}. `
+          + "Keep /** */ comments directly above the declaration they document and write file headers "
+          + "and section notes as // comments.",
+      );
+    });
+  }
+}
+
+/** A `// ── label ───` divider, 79 columns wide like the modules' own section rules. */
+const divider = (label) => {
+  const head = `// ── ${label} `;
+  return head + "─".repeat(Math.max(3, 79 - head.length));
+};
+
 /** `./x`, `./x.js` and `./x.d.ts` all name the sibling `x.d.ts`. */
 const moduleFile = (directory, specifier) =>
   resolve(directory, `${specifier.replace(/\.(?:d\.ts|js)$/, "")}.d.ts`);
@@ -82,6 +129,7 @@ export function bundleCompatibilityTypes(root, { barrel = COMPATIBILITY_BARREL }
   const barrelPath = resolve(root, barrel);
   const barrelFile = parse(barrelPath);
   const barrelText = barrelFile.getFullText();
+  checkDocComments(display(barrelPath), barrelFile, { barrel: true });
 
   const modules = [];
   for (const statement of barrelFile.statements) {
@@ -132,6 +180,7 @@ export function bundleCompatibilityTypes(root, { barrel = COMPATIBILITY_BARREL }
     const file = parse(module.path);
     const name = display(module.path);
     const text = file.getFullText();
+    checkDocComments(name, file);
     const removed = [];
     for (const statement of file.statements) {
       if (ts.isImportDeclaration(statement)) {
@@ -196,8 +245,9 @@ export function bundleCompatibilityTypes(root, { barrel = COMPATIBILITY_BARREL }
     let body = text;
     for (const [start, end] of removed.reverse()) body = body.slice(0, start) + body.slice(end);
     body = normalizeNewlines(body);
-    const leading = normalizeNewlines(module.leading);
-    sections.push(leading && sections.length ? `${leading}\n${body}` : body);
+    // The first module's barrel comment is the file header, emitted below.
+    const leading = sections.length ? normalizeNewlines(module.leading) : "";
+    sections.push([leading, divider(name), body].filter(Boolean).join("\n"));
   }
 
   const header = normalizeNewlines(modules[0].leading);
