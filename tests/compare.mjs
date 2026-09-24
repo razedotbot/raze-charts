@@ -28,6 +28,17 @@ const spinUntil = async (predicate, message) => {
   }
   throw new Error(`Timed out waiting for ${message}`);
 };
+/**
+ * Scroll the main series to its left edge and wait for the page it loads.
+ * DataManager pages on its own when a "pan" viewport change nears the edge
+ * (W1B-18), so the explicit call below may find that page already in flight.
+ */
+const pageMainSeries = async (context, data, message) => {
+  const oldest = context.bars[0].time;
+  context.setViewport({ from: 0, to: 60 }, "pan");
+  await data.maybeLoadMoreHistory();
+  await spinUntil(() => context.bars[0].time < oldest, message);
+};
 const settle = async () => {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 };
@@ -314,9 +325,8 @@ function makeHost(feed, symbol = "AAA") {
 
   // Left pagination: the compare pages over the same range as the main series.
   const coveredBefore = entry().bars[0].time;
-  context.setViewport({ from: 0, to: 60 }, "pan");
   const callsBeforePage = feed.callsFor("BBB").length;
-  await data.maybeLoadMoreHistory();
+  await pageMainSeries(context, data, "the main history page");
   assert(context.bars[0].time < coveredBefore, "the main series paged older history");
   await spinUntil(() => entry().bars[0].time === context.bars[0].time, "the compare page");
   const pageCall = feed.callsFor("BBB")[callsBeforePage];
@@ -589,10 +599,7 @@ function makeHost(feed, symbol = "AAA") {
   const staleLast = context.bars.at(-1).time;
   assert(staleLast < deadSince * 1000 && entry().bars.at(-1).time === staleLast, "the compare ends where the stale main series ends");
   // Scroll far back, so the stale window is much deeper than a reset reloads.
-  for (let page = 0; page < 3; page += 1) {
-    context.setViewport({ from: 0, to: 60 }, "pan");
-    await data.maybeLoadMoreHistory();
-  }
+  for (let page = 0; page < 3; page += 1) await pageMainSeries(context, data, `main history page ${page + 1}`);
   await spinUntil(() => entry().bars[0].time === context.bars[0].time && feed.subscriptionFor("BBB").length === 1, "the compare to page with the main series");
   const staleLength = context.bars.length;
 
