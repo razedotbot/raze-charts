@@ -255,16 +255,18 @@ export class LeftSidebar {
     this.el.appendChild(b);
   }
 
-  private mkBtn(title: string, svg: string): HTMLButtonElement {
+  private mkBtn(title: string, icon: string | Element): HTMLButtonElement {
     const b = document.createElement("button");
     b.type = "button";
     b.title = title;
     b.setAttribute("aria-label", title);
     b.className = "raze-chart-focusable";
-    setMarkup(b, trustedMarkup(svg));
-    for (const icon of b.querySelectorAll("svg")) {
-      icon.setAttribute("aria-hidden", "true");
-      icon.setAttribute("focusable", "false");
+    if (typeof icon === "string") setMarkup(b, trustedMarkup(icon));
+    else if ((icon as Node | null)?.nodeType === 1) b.appendChild(icon.cloneNode(true));
+    else console.warn(`[raze-charts] sidebar item "${title}": icon must be SVG/HTML markup or an Element; the button has no icon.`);
+    for (const svg of b.querySelectorAll("svg")) {
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
     }
     const size = isCoarsePointer() ? 38 : 32;
     b.style.cssText = [
@@ -352,20 +354,25 @@ export class LeftSidebar {
     for (const s of this.chartStyles) {
       const on = s.id === this.chartStyle;
       const row = popupRow(
-        `<span style="display:inline-flex;width:18px;color:${on ? "var(--tv-color-toolbar-button-text-hover, #66d89e)" : "inherit"}">${s.svg}</span>${on ? "✓ " : ""}${s.title}`,
+        `${on ? "✓ " : ""}${s.title}`,
         () => {
           this.setChartStyle(s.id);
           this.cbs.onChartType(s.id);
           this.closeStylePanel();
         },
-        {
-          role: "menuitemradio",
-          checked: on,
-          label: s.title,
-          // Chart-style titles and SVGs come from the library-owned table above.
-          trustedHtml: true,
-        },
+        { role: "menuitemradio", checked: on, label: s.title },
       );
+      // Styled through CSSOM, not a style="" attribute in markup, so the menu
+      // renders under a strict style-src (no 'unsafe-inline').
+      const icon = document.createElement("span");
+      icon.style.cssText = `display:inline-flex;width:18px;color:${on ? "var(--tv-color-toolbar-button-text-hover, #66d89e)" : "inherit"}`;
+      // Chart-style SVGs come from the library-owned table above.
+      setMarkup(icon, trustedMarkup(s.svg));
+      for (const svg of icon.querySelectorAll("svg")) {
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("focusable", "false");
+      }
+      row.prepend(icon);
       popup.el.appendChild(row);
     }
     popup.reposition();

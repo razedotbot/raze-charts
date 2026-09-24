@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { build } from "esbuild";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
 // Real-browser acceptance for the UI kit: dialog accessibility and focus,
@@ -110,6 +113,36 @@ async function openSettings(page: Page, presentation = "auto"): Promise<void> {
   await expect(page.getByRole("dialog", { name: "Moving Average Exponential" })).toBeVisible();
 }
 
+/**
+ * axe-core, when installed. It is not a dependency yet (no network installs in
+ * package work), so the structural audit below always runs and axe joins it
+ * automatically once `axe-core` resolves from the repository root.
+ */
+const AXE_SOURCE: string | null = (() => {
+  try {
+    return readFileSync(createRequire(resolve(root, "package.json")).resolve("axe-core/axe.min.js"), "utf8");
+  } catch {
+    return null;
+  }
+})();
+
+/** Run axe on `selector` and expect no violations (annotated when axe is absent). */
+async function expectAxeClean(page: Page, selector: string): Promise<void> {
+  if (!AXE_SOURCE) {
+    test.info().annotations.push({ type: "axe", description: `axe-core not installed; ${selector} got the structural audit only` });
+    return;
+  }
+  if (!(await page.evaluate(() => "axe" in window))) await page.addScriptTag({ content: AXE_SOURCE });
+  const violations = await page.evaluate(async (sel) => {
+    const axe = (window as unknown as { axe: { run(context: Element, options: object): Promise<{ violations: { id: string; nodes: { target: string[] }[] }[] }> } }).axe;
+    const target = document.querySelector(sel);
+    if (!target) return [`missing ${sel}`];
+    const result = await axe.run(target, { resultTypes: ["violations"] });
+    return result.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`);
+  }, selector);
+  expect(violations).toEqual([]);
+}
+
 /** Axe-style structural audit of an accessibility subtree (no external deps). */
 async function audit(page: Page, selector: string): Promise<string[]> {
   return page.evaluate((sel) => {
@@ -159,6 +192,13 @@ async function audit(page: Page, selector: string): Promise<string[]> {
     };
     const requiredChildren: Record<string, string> = { tablist: "tab", radiogroup: "radio", listbox: "option" };
     const requiredParent: Record<string, string> = { tab: "tablist", radio: "radiogroup", option: "listbox" };
+    // Explicit roles ARIA in HTML allows on elements the kit uses (axe aria-allowed-role).
+    const allowedRoles: Record<string, string[]> = {
+      form: ["search", "none", "presentation"],
+      input: ["spinbutton", "slider", "combobox", "searchbox", "switch", "checkbox", "radio", "textbox"],
+      ul: ["listbox", "menu", "tablist", "radiogroup", "group", "none", "presentation"],
+      h2: ["tab", "none", "presentation"],
+    };
 
     const all = [rootEl, ...rootEl.querySelectorAll("*")];
     const seen = new Map<string, number>();
@@ -183,6 +223,9 @@ async function audit(page: Page, selector: string): Promise<string[]> {
       if (needsName.has(role) && !nameOf(el)) problems.push(`name: ${where} has no accessible name`);
       if (requiredChildren[role] && !el.querySelector(`[role="${requiredChildren[role]}"]`)) problems.push(`aria-required-children: ${where}`);
       if (requiredParent[role] && !el.parentElement?.closest(`[role="${requiredParent[role]}"]`)) problems.push(`aria-required-parent: ${where}`);
+      const explicitRole = el.getAttribute("role");
+      const allowed = allowedRoles[el.tagName.toLowerCase()];
+      if (explicitRole && allowed && !allowed.includes(explicitRole)) problems.push(`aria-allowed-role: ${where}`);
       if (interactive.has(role) && el.querySelector(focusable)) problems.push(`nested-interactive: ${where}`);
       if (el.getAttribute("aria-hidden") === "true" && (el.matches(focusable) || el.querySelector(focusable))) {
         const tabbable = [el, ...el.querySelectorAll(focusable)].some((node) => (node as HTMLElement).tabIndex >= 0);
@@ -217,6 +260,7 @@ test.describe("dialog", () => {
     await expect(dialog).toHaveAccessibleDescription("Settings for EMA 9");
     await expect(page.getByRole("spinbutton", { name: "Length" })).toBeFocused();
     expect(await audit(page, ".raze-kit-dialog")).toEqual([]);
+    await expectAxeClean(page, ".raze-kit-dialog");
 
     // Tab cycles forward through every control and wraps inside the dialog.
     const count = await page.evaluate(() => (window as any).RazeKit.tabbables(document.querySelector(".raze-kit-dialog")).length);
@@ -285,6 +329,7 @@ test.describe("dialog", () => {
     await expect(styleTab).toHaveAttribute("aria-selected", "true");
     await expect(dialog.getByRole("tabpanel", { name: "Style" })).toBeVisible();
     expect(await audit(page, ".raze-kit-dialog")).toEqual([]);
+    await expectAxeClean(page, ".raze-kit-dialog");
 
     const width = dialog.getByRole("radiogroup", { name: "Line width" });
     await width.getByRole("radio", { checked: true }).focus();
@@ -300,6 +345,7 @@ test.describe("dialog", () => {
     await expect(picker).toBeVisible();
     await expect(swatch).toHaveAttribute("aria-expanded", "true");
     expect(await audit(page, ".raze-kit-popover")).toEqual([]);
+    await expectAxeClean(page, ".raze-kit-popover");
     const palette = picker.getByRole("listbox", { name: "Palette" });
     await expect(palette.getByRole("option", { name: "#2962ff" })).toBeFocused();
     await page.keyboard.press("ArrowRight");
@@ -365,6 +411,7 @@ test.describe("phone presentation", () => {
     await expect(page.getByRole("button", { name: "Close" }).first()).toBeVisible();
     await expect(page.locator(".raze-kit-sheet-handle")).toBeVisible();
     expect(await audit(page, ".raze-kit-dialog")).toEqual([]);
+    await expectAxeClean(page, ".raze-kit-dialog");
     const tabHeight = await dialog.getByRole("tab", { name: "Inputs" }).evaluate((el) => el.getBoundingClientRect().height);
     expect(tabHeight).toBeGreaterThanOrEqual(48);
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflow)).toBe("hidden");
@@ -459,6 +506,68 @@ test.describe("phone presentation", () => {
     // Opening moves focus to the first row (deferred past the opening tap).
     await expect(menu.getByRole("menuitemcheckbox").first()).toBeFocused();
     await expect(menu.getByRole("menuitemcheckbox").first()).toHaveAttribute("aria-checked", "false");
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+  });
+
+  test("Tab and Shift+Tab stay inside a sheet menu", async ({ page }) => {
+    const { button, menu } = await openIndicators(page);
+    const items = menu.locator('[role^="menuitem"],button');
+    const first = menu.getByRole("menuitemcheckbox").first();
+    await expect(first).toBeFocused();
+    // Regression: Shift+Tab used to close the sheet and drop focus onto a
+    // control hidden behind the backdrop.
+    await page.keyboard.press("Shift+Tab");
+    await expect(menu).toBeVisible();
+    await expect(items.last()).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(first).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(menu).toBeVisible();
+    expect(await page.evaluate(() => !!document.activeElement?.closest(".raze-kit-sheet"))).toBe(true);
+    // Focus moved behind the sheet programmatically is pulled back inside.
+    await button.evaluate((element) => (element as HTMLElement).focus());
+    expect(await page.evaluate(() => !!document.activeElement?.closest(".raze-kit-sheet"))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(button).toBeFocused();
+  });
+
+  test("on wide touch screens a sheet stays a centred 640px column", async ({ page }) => {
+    const { menu } = await openIndicators(page);
+    // Rotating/resizing a touch device keeps the sheet (the pointer is still
+    // coarse), but it must not stretch across a tablet-width screen.
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await expect(menu).toBeVisible();
+    await expect.poll(async () => (await page.locator(".raze-kit-sheet").boundingBox())?.width).toBe(640);
+    const box = (await page.locator(".raze-kit-sheet").boundingBox())!;
+    expect(box.x).toBe(180);
+    expect(Math.round(box.y + box.height)).toBe(700);
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+  });
+});
+
+test.describe("narrow desktop window", () => {
+  test.use({ viewport: { width: 480, height: 700 } });
+
+  test("a sheet menu closes and restores focus when the window widens past 520px", async ({ page }) => {
+    await page.goto("/examples/visual.html?case=dark", { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => (window as unknown as { __razeReady?: boolean }).__razeReady === true, { timeout: 30_000 });
+    const button = page.getByRole("toolbar", { name: "Drawing and chart tools" }).getByRole("button", { name: "Indicators" });
+    await button.click();
+    const menu = page.getByRole("menu", { name: "Indicators" });
+    await expect(menu.getByRole("menuitemcheckbox").first()).toBeFocused();
+    await expect(menu).toHaveAttribute("data-presentation", "sheet");
+    await page.setViewportSize({ width: 1100, height: 700 });
+    await expect(menu).toHaveCount(0);
+    await expect(button).toBeFocused();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflow)).not.toBe("hidden");
+    // Reopening at the new width picks the anchored presentation.
+    await button.click();
+    await expect(menu).toHaveAttribute("data-presentation", "anchored");
+    await expect(menu.getByRole("menuitemcheckbox").first()).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
   });
@@ -562,6 +671,89 @@ test.describe("content security", () => {
     expect(await page.locator("style[data-raze-styles]").count()).toBe(1);
   });
 
+  test("the financial widget's chrome needs no 'unsafe-inline' styles", async ({ page }) => {
+    // Record every CSP violation from the first byte on.
+    await page.addInitScript(() => {
+      const log: string[] = [];
+      (window as unknown as { __csp: string[] }).__csp = log;
+      document.addEventListener("securitypolicyviolation", (event) => {
+        log.push(`${event.effectiveDirective} ${event.sourceFile || event.blockedURI}:${event.lineNumber} ${event.sample}`);
+      });
+    });
+    // The example page's own inline <style> and module <script> are allowed by
+    // hash, so the policy contains no 'unsafe-inline' at all and any
+    // violation comes from the library. (The HTML parser normalises CRLF
+    // before hashing, so a Windows checkout hashes the LF form.)
+    await page.route("**/examples/visual.html*", async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      const hashes = (pattern: RegExp): string => [...body.matchAll(pattern)]
+        .map((match) => `'sha256-${createHash("sha256").update(match[1]!.replace(/\r\n?/g, "\n"), "utf8").digest("base64")}'`)
+        .join(" ");
+      const csp = [
+        "default-src 'self'",
+        `script-src 'self' ${hashes(/<script type="module">([\s\S]*?)<\/script>/g)}`,
+        `style-src 'self' ${hashes(/<style>([\s\S]*?)<\/style>/g)}`,
+        "img-src 'self' data: blob:",
+      ].join("; ");
+      await route.fulfill({ response, body, headers: { ...response.headers(), "content-security-policy": csp } });
+    });
+    await page.goto("/examples/visual.html?case=dark", { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => (window as unknown as { __razeReady?: boolean }).__razeReady === true, { timeout: 30_000 });
+    const violations = () => page.evaluate(() => (window as unknown as { __csp: string[] }).__csp.slice());
+
+    // The loading spinner's keyframes ship in the adopted chrome sheet rather
+    // than an inline <style> element.
+    const chrome = await page.evaluate(() => ({
+      spinKeyframes: document.adoptedStyleSheets.some((sheet) =>
+        [...sheet.cssRules].some((rule) => rule instanceof CSSKeyframesRule && rule.name === "raze-chart-spin")),
+      inlineStyleElements: document.querySelectorAll("style:not([data-raze-styles])").length,
+    }));
+    expect(chrome).toEqual({ spinKeyframes: true, inlineStyleElements: 1 }); // the page's own hashed <style>
+
+    const sidebar = page.getByRole("toolbar", { name: "Drawing and chart tools" });
+    // Chart type: the checked row keeps its accent colour and icon layout.
+    await sidebar.getByRole("button", { name: /Chart type/ }).click();
+    const typeMenu = page.getByRole("menu", { name: "Chart type" });
+    await expect(typeMenu).toBeVisible();
+    const icons = await typeMenu.getByRole("menuitemradio").evaluateAll((rows) => rows.map((row) => {
+      const icon = row.querySelector("span")!;
+      const style = getComputedStyle(icon);
+      return { checked: row.getAttribute("aria-checked"), color: style.color, display: style.display, width: style.width, text: row.textContent };
+    }));
+    const checked = icons.find((icon) => icon.checked === "true")!;
+    const unchecked = icons.find((icon) => icon.checked === "false")!;
+    // inline-flex, blockified by the flex row (a blocked style="" gives "block").
+    expect(checked.display).toBe("flex");
+    expect(checked.width).toBe("18px");
+    expect(checked.text).toMatch(/^✓ /);
+    expect(checked.color).not.toBe(unchecked.color);
+    expect(unchecked.color).toBe(await typeMenu.evaluate((menu) => getComputedStyle(menu).color));
+    await page.keyboard.press("Escape");
+    await expect(typeMenu).toHaveCount(0);
+
+    // Indicators: add a study so its legend row renders too.
+    await sidebar.getByRole("button", { name: "Indicators" }).click();
+    const indicators = page.getByRole("menu", { name: "Indicators" });
+    await expect(indicators.getByRole("menuitemcheckbox").first()).toBeFocused();
+    await indicators.getByRole("menuitemcheckbox").first().click();
+    await expect(indicators.getByRole("menuitemcheckbox").first()).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+    await expect(indicators).toHaveCount(0);
+
+    // Objects tree and the chart context menu.
+    await sidebar.getByRole("button", { name: "Objects tree" }).click();
+    await expect(page.locator('[role="menu"],[role="dialog"]').first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    const canvas = page.locator("canvas").first();
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+    await expect(page.getByRole("menu").first()).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    expect(await violations()).toEqual([]);
+  });
+
   test("the widget renders under an enforced Trusted Types policy", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -589,6 +781,47 @@ test.describe("content security", () => {
     await chartType.click();
     const menu = page.getByRole("menu", { name: "Chart type" });
     await expect(menu.locator("svg").first()).toBeAttached();
+
+    // Custom sidebar icons: an Element involves no markup sink at all (the
+    // option for hosts that enforce Trusted Types); host markup strings still
+    // go through the raze-charts policy.
+    await page.keyboard.press("Escape");
+    const custom = await page.evaluate(async () => {
+      const libraryUrl = "/dist/charting_library.esm.js";
+      const feedUrl = "/examples/mock-datafeed.mjs";
+      const { widget } = await import(libraryUrl);
+      const { makeMockDatafeed } = await import(feedUrl);
+      const ns = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("viewBox", "0 0 18 18");
+      svg.appendChild(document.createElementNS(ns, "circle"));
+      const host = document.createElement("div");
+      host.style.cssText = "position:fixed;left:0;top:0;width:640px;height:360px";
+      document.body.appendChild(host);
+      new widget({
+        symbol: "MOCK",
+        interval: "1",
+        container: host,
+        autosize: true,
+        datafeed: makeMockDatafeed({ bars: 60, live: false }),
+        raze: {
+          sidebar: [
+            "cursor",
+            { id: "alerts", title: "Alerts", icon: svg, onClick() {} },
+            { id: "notes", title: "Notes", icon: '<svg viewBox="0 0 18 18"><rect width="6" height="6"/></svg>', onClick() {} },
+          ],
+        },
+      });
+      const alerts = host.querySelector<HTMLElement>('button[aria-label="Alerts"]');
+      const notes = host.querySelector<HTMLElement>('button[aria-label="Notes"]');
+      return {
+        element: !!alerts?.querySelector("svg circle"),
+        cloned: svg.parentNode === null,
+        hidden: alerts?.querySelector("svg")?.getAttribute("aria-hidden"),
+        markup: !!notes?.querySelector("svg rect"),
+      };
+    });
+    expect(custom).toEqual({ element: true, cloned: true, hidden: "true", markup: true });
     expect(errors).toEqual([]);
   });
 });

@@ -88,7 +88,9 @@ indicator menu rerender preserves focus on the corresponding row.
 On phones (coarse primary pointer) and viewports narrower than 520px, menus
 open as bottom sheets with 48px rows. A named drag handle ("Close"), a
 backdrop tap, a swipe down or Escape closes a sheet and returns focus to the
-button that opened it. The page behind a sheet does not scroll.
+button that opened it. Tab and Shift+Tab stay inside an open sheet, and the
+page behind it does not scroll. If a resize or rotation means the menu should
+switch between sheet and flyout, it closes and focus returns to its button.
 
 Animation on the loading state and on sheets respects
 `prefers-reduced-motion`. Built-in focus styles remain visible in

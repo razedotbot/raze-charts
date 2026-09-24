@@ -53,6 +53,9 @@ export interface I18n {
    * locale (or its base language) has loaded; listeners run once the new
    * messages are available. A locale without any messages keeps the English
    * defaults and warns once, so a typo is visible rather than silently ignored.
+   * Overlapping calls resolve in call order: the most recent call wins even
+   * when an earlier call's pack loads later, and a superseded call resolves
+   * without changing the locale or notifying listeners.
    */
   setLocale(locale: string): Promise<void>;
   /** Register or extend a locale pack. Later registrations win per key. */
@@ -74,6 +77,8 @@ interface State {
   chain: string[];
   hook: TranslateHook | null;
   rules: Intl.PluralRules | null;
+  /** Ticket of the most recent setLocale() call; older calls are superseded. */
+  requested: number;
   readonly packs: Map<string, Record<string, string>>;
   readonly loaders: Map<string, MessageLoader>;
   readonly loading: Map<string, Promise<void>>;
@@ -121,6 +126,7 @@ function createState(locale: string): State {
     chain: localeChain(normalized),
     hook: null,
     rules: null,
+    requested: 0,
     packs: new Map(),
     loaders: new Map(),
     loading: new Map(),
@@ -204,7 +210,13 @@ function load(state: State, tag: string): Promise<void> {
 async function changeLocale(state: State, next: string): Promise<void> {
   const locale = normalizeLocale(next);
   const chain = localeChain(locale);
+  // Packs load asynchronously, so overlapping calls can settle out of order.
+  // Only the most recent call may apply its locale; earlier ones still load
+  // (and cache) their packs but must not overwrite a newer choice.
+  // A failing loader still rejects the call that asked for it.
+  const ticket = ++state.requested;
   await Promise.all(chain.map((tag) => load(state, tag)));
+  if (ticket !== state.requested) return;
   const english = chain[chain.length - 1]!.toLowerCase() === "en";
   if (!english && !state.hook && !chain.some((tag) => state.packs.has(tag)) && !state.warned.has(locale)) {
     state.warned.add(locale);

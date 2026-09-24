@@ -59,15 +59,8 @@ export class LoadingScreen {
       "color:var(--tv-color-toolbar-button-text, currentColor)",
     ].join(";");
     this.el.appendChild(this.message);
-
-    if (!document.getElementById("raze-chart-spin-kf")) {
-      const style = document.createElement("style");
-      style.id = "raze-chart-spin-kf";
-      style.textContent =
-        "@keyframes raze-chart-spin{to{transform:rotate(360deg)}}" +
-        "@media (prefers-reduced-motion:reduce){.raze-chart-loading-spinner{animation:none!important}}";
-      document.head.appendChild(style);
-    }
+    // The raze-chart-spin keyframes and the reduced-motion rule live in the
+    // scoped chrome stylesheet (BASE_STYLES), which a strict style-src allows.
   }
 
   hide(): void {

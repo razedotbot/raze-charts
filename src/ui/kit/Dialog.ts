@@ -25,6 +25,7 @@ import { button, ICON_CLOSE, iconButton, SURFACE_STYLES } from "./surface";
 export const DIALOG_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "kit-dialog",
   ".raze-kit-dialog{display:flex;flex-direction:column;margin:0;min-height:0;font-size:var(--raze-font-size-lg,14px)}" +
+  ".raze-kit-dialog-form{display:contents}" +
   ".raze-kit-dialog[data-presentation=dialog]{position:fixed;left:50%;top:50%;width:var(--raze-dialog-width,420px);" +
   "max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);" +
   "transform:translate(calc(-50% + var(--raze-dialog-dx,0px)),calc(-50% + var(--raze-dialog-dy,0px)));" +
@@ -80,7 +81,10 @@ export interface DialogOptions {
   onReset?(): void;
   /**
    * Called on OK / Enter. Return (or resolve) `false` to keep the dialog
-   * open, e.g. after showing a validation message.
+   * open, e.g. after showing a validation message. While a returned promise
+   * is pending the dialog is busy: Escape, Cancel, the close button, the
+   * backdrop and swipes are ignored so a half-applied submit is never
+   * reported as a cancel (`close()` from code still closes it).
    */
   onSubmit?(): boolean | void | Promise<boolean | void>;
   /** Called when the dialog is dismissed without OK. */
@@ -144,14 +148,20 @@ export function openDialog(options: DialogOptions): DialogHandle {
   });
   portal.adopt([SURFACE_STYLES, SHEET_STYLES, DIALOG_STYLES]);
 
-  const dialog = doc.createElement("form");
+  // ARIA in HTML does not allow role="dialog" on <form>, so the dialog is a
+  // div and a layout-neutral form inside it provides Enter-to-submit. The
+  // submit event bubbles to the dialog, where it is handled.
+  const dialog = doc.createElement("div");
   dialog.className = "raze-kit-surface raze-kit-dialog";
   dialog.dataset.presentation = presentation;
-  dialog.noValidate = true;
   dialog.tabIndex = -1;
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
   if (options.width) dialog.style.setProperty("--raze-dialog-width", options.width);
+  const form = doc.createElement("form");
+  form.className = "raze-kit-dialog-form";
+  form.noValidate = true;
+  dialog.appendChild(form);
 
   const titleId = uid("dialog-title");
   const header = doc.createElement("div");
@@ -163,7 +173,7 @@ export function openDialog(options: DialogOptions): DialogHandle {
   const closeButton = iconButton(doc, t("kit.dialog.close", "Close"), ICON_CLOSE);
   header.append(title, closeButton);
   dialog.setAttribute("aria-labelledby", titleId);
-  dialog.appendChild(header);
+  form.appendChild(header);
 
   if (options.description) {
     const description = doc.createElement("p");
@@ -171,7 +181,7 @@ export function openDialog(options: DialogOptions): DialogHandle {
     description.id = uid("dialog-description");
     description.textContent = options.description;
     dialog.setAttribute("aria-describedby", description.id);
-    dialog.appendChild(description);
+    form.appendChild(description);
   }
 
   const body = doc.createElement("div");
@@ -254,17 +264,18 @@ export function openDialog(options: DialogOptions): DialogHandle {
       event.preventDefault();
       selectTab(order[next]!, { focus: true });
     });
-    dialog.appendChild(tabList);
+    form.appendChild(tabList);
   } else if (typeof options.content === "function") {
     options.content(body);
   } else if (options.content) {
     body.append(options.content); // strings render as text
   }
-  dialog.appendChild(body);
+  form.appendChild(body);
 
   // ── Footer ────────────────────────────────────────────────────────────
   const actions = options.actions ?? "ok-cancel";
   let okButton: HTMLButtonElement | null = null;
+  let cancelButton: HTMLButtonElement | null = null;
   if (actions !== "none" || options.onReset) {
     const footer = doc.createElement("div");
     footer.className = "raze-kit-dialog-footer";
@@ -283,15 +294,15 @@ export function openDialog(options: DialogOptions): DialogHandle {
     spacer.className = "raze-kit-dialog-footer-spacer";
     footer.appendChild(spacer);
     if (actions === "ok-cancel") {
-      const cancel = button(doc, options.cancelLabel ?? t("kit.dialog.cancel", "Cancel"));
-      cancel.addEventListener("click", () => dismiss("cancel"));
-      footer.appendChild(cancel);
+      cancelButton = button(doc, options.cancelLabel ?? t("kit.dialog.cancel", "Cancel"));
+      cancelButton.addEventListener("click", () => dismiss("cancel"));
+      footer.appendChild(cancelButton);
     }
     if (actions !== "none") {
       okButton = button(doc, options.okLabel ?? t("kit.dialog.ok", "OK"), { variant: "primary", type: "submit" });
       footer.appendChild(okButton);
     }
-    dialog.appendChild(footer);
+    form.appendChild(footer);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -320,20 +331,37 @@ export function openDialog(options: DialogOptions): DialogHandle {
     if (returnFocus?.isConnected) focusWithoutScroll(returnFocus);
   };
 
-  const dismiss = (reason: DialogCloseReason): void => {
-    if (closed) return;
+  /**
+   * Close without OK. User dismissals are refused (returning false) while a
+   * submit is pending; `force` is the programmatic `close()` path.
+   */
+  const dismiss = (reason: DialogCloseReason, force = false): boolean => {
+    if (closed) return false;
+    if (submitting && !force) return false;
     try {
       options.onCancel?.(reason);
     } catch (error) {
       console.error("[raze-charts] dialog onCancel threw.", error);
     }
     finish(reason);
+    return true;
+  };
+
+  const setBusy = (busy: boolean): void => {
+    submitting = busy;
+    for (const control of [cancelButton, closeButton]) if (control) control.disabled = busy;
+    if (busy) {
+      dialog.setAttribute("aria-busy", "true");
+      okButton?.setAttribute("aria-busy", "true");
+    } else {
+      dialog.removeAttribute("aria-busy");
+      okButton?.removeAttribute("aria-busy");
+    }
   };
 
   const submit = async (): Promise<void> => {
     if (closed || submitting) return;
-    submitting = true;
-    okButton?.setAttribute("aria-busy", "true");
+    setBusy(true);
     let keepOpen = false;
     try {
       keepOpen = (await options.onSubmit?.()) === false;
@@ -341,8 +369,7 @@ export function openDialog(options: DialogOptions): DialogHandle {
       keepOpen = true;
       console.error("[raze-charts] dialog onSubmit threw; the dialog stays open.", error);
     } finally {
-      submitting = false;
-      okButton?.removeAttribute("aria-busy");
+      setBusy(false);
     }
     if (!keepOpen) finish("ok");
   };
@@ -398,7 +425,7 @@ export function openDialog(options: DialogOptions): DialogHandle {
     },
     close(reason = "api") {
       if (reason === "ok") finish("ok");
-      else dismiss(reason);
+      else dismiss(reason, true);
     },
     selectTab,
     panel: (id) => ensurePanel(id),

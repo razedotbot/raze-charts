@@ -103,9 +103,10 @@ Raze.
 ### Content Security Policy
 
 TradingView's library renders inside an iframe. Raze renders in your page,
-so your page's CSP applies to it. Chrome styles use constructable stylesheets
-and need no `'unsafe-inline'`. Where those are unavailable, provide a nonce
-through `<meta property="csp-nonce" nonce="…">` or
+so your page's CSP applies to it. The widget's chrome styles use
+constructable stylesheets and CSSOM, so `style-src 'self'` works without
+`'unsafe-inline'`. Where constructable stylesheets are unavailable, provide a
+nonce through `<meta property="csp-nonce" nonce="…">` or
 `ensureBaseStyles(target, { nonce })`. With Trusted Types enforced, allow the
 `raze-charts` policy (`trusted-types raze-charts`). The
 [capability matrix](./capabilities.md#ui-kit-csp-and-localization) lists the

@@ -2,7 +2,9 @@
 // a short delay, instantly while "warm") and on keyboard focus, hoverable,
 // dismissible with Escape, never shown for touch, and linked to the target
 // with aria-describedby while visible. A target without an accessible name
-// gets the tooltip text as its aria-label.
+// gets the tooltip text as its aria-label. A visible tooltip hides itself when
+// its target leaves the DOM (chrome re-render, widget destroy), which fires
+// neither pointerleave nor blur reliably.
 
 import { defineStyles, type StyleChunk } from "../styles";
 import { uid } from "./dom";
@@ -35,6 +37,8 @@ export interface TooltipHandle {
 }
 
 const WARM_WINDOW = 400;
+/** How often a visible tooltip checks that its target is still attached. */
+const DETACH_CHECK_MS = 250;
 let lastHiddenAt = -Infinity;
 
 function accessibleName(target: HTMLElement): string {
@@ -49,6 +53,7 @@ export function attachTooltip(target: HTMLElement, text: string, options: Toolti
   let bubble: HTMLDivElement | null = null;
   let showTimer = 0;
   let hideTimer = 0;
+  let detachTimer = 0;
   let destroyed = false;
   const id = uid("tooltip");
 
@@ -87,6 +92,8 @@ export function attachTooltip(target: HTMLElement, text: string, options: Toolti
 
   const hide = (): void => {
     clearTimers();
+    window.clearInterval(detachTimer);
+    detachTimer = 0;
     if (!bubble) return;
     doc.removeEventListener("keydown", onDocumentKey, true);
     portal?.destroy();
@@ -112,6 +119,9 @@ export function attachTooltip(target: HTMLElement, text: string, options: Toolti
     position();
     describe(true);
     doc.addEventListener("keydown", onDocumentKey, true);
+    detachTimer = window.setInterval(() => {
+      if (!target.isConnected) hide();
+    }, DETACH_CHECK_MS);
   };
 
   function scheduleHide(): void {

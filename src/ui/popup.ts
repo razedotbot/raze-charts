@@ -4,8 +4,9 @@
 // consistent — and are implemented once. On phones and narrow viewports menus
 // render as kit bottom sheets instead of anchored flyouts.
 
-import { lockScroll } from "./kit/focus";
-import { isCoarsePointer } from "./kit/media";
+import { lockScroll, trapFocus, type FocusTrap } from "./kit/focus";
+import { pushLayer, type Layer } from "./kit/layers";
+import { isCoarsePointer, watchSheetPreference } from "./kit/media";
 import { resolvePresentation } from "./kit/Popover";
 import { createPortal, mirrorTheme, type Portal } from "./kit/portal";
 import { setMarkup, trustedMarkup } from "./kit/safe";
@@ -38,8 +39,10 @@ export interface PopupOptions {
   initialFocus?: boolean;
   /**
    * `auto` renders a bottom sheet (backdrop, drag handle, 48px rows) when the
-   * primary pointer is coarse or the viewport is narrower than 520px.
-   * Defaults to `auto` for menus and `anchored` for dialog-role popups.
+   * primary pointer is coarse or the viewport is narrower than 520px, and
+   * closes the popup (restoring focus) if a rotation, resize or pointer change
+   * later flips that choice. Defaults to `auto` for menus and `anchored` for
+   * dialog-role popups.
    */
   presentation?: "auto" | "anchored" | "sheet";
   onClose?: () => void;
@@ -87,7 +90,8 @@ function popupItems(el: HTMLElement): HTMLElement[] {
 
 export function openPopup(opts: PopupOptions): PopupHandle {
   const role = opts.role ?? "menu";
-  const presentation = resolvePresentation(opts.presentation ?? (role === "menu" ? "auto" : "anchored"), opts.anchor);
+  const requested = opts.presentation ?? (role === "menu" ? "auto" : "anchored");
+  const presentation = resolvePresentation(requested, opts.anchor);
   const sheet = presentation === "sheet";
   const el = document.createElement("div");
   el.id = `raze-chart-popup-${++popupId}`;
@@ -136,7 +140,9 @@ export function openPopup(opts: PopupOptions): PopupHandle {
 
   // Bottom sheet: a kit portal (follows fullscreen and shadow roots) holding
   // a backdrop and a full-width surface. Tapping the backdrop, activating the
-  // handle, or swiping down closes the menu and restores focus.
+  // handle, or swiping down closes the menu and restores focus. The sheet is
+  // modal: Tab and Shift+Tab cycle inside it instead of reaching the page
+  // hidden behind the backdrop.
   let portal: Portal | null = null;
   let frame: SheetFrame | null = null;
   let unlockScroll: (() => void) | null = null;
@@ -155,6 +161,18 @@ export function openPopup(opts: PopupOptions): PopupHandle {
   }
   // Pointer/focus containment covers the whole sheet (backdrop and handle).
   const surface: HTMLElement = portal?.el ?? el;
+  // Every popup joins the overlay stack, so focus traps below it (a sheet, a
+  // kit dialog) let focus move into it.
+  const layer: Layer = { el: surface, modal: sheet };
+  const popLayer = pushLayer(layer);
+  const trap: FocusTrap | null = sheet ? trapFocus(surface, layer, returnFocus) : null;
+  // A presentation chosen automatically must not outlive the environment it
+  // was chosen for (a narrow window widened, a tablet rotated or docked).
+  const stopWatching = requested === "auto"
+    ? watchSheetPreference((wantsSheet) => {
+      if (wantsSheet !== sheet) close();
+    })
+    : null;
 
   const focusItem = (index = 0): void => {
     const items = popupItems(el);
@@ -199,6 +217,9 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     document.removeEventListener("keydown", onKey, true);
     el.removeEventListener("keydown", onMenuKey);
     el.removeEventListener("focusout", onFocusOut);
+    stopWatching?.();
+    trap?.release({ restoreFocus: false });
+    popLayer();
     frame?.destroy();
     portal?.destroy();
     unlockScroll?.();
@@ -244,8 +265,11 @@ export function openPopup(opts: PopupOptions): PopupHandle {
     items[next]?.focus();
   };
   const onFocusOut = (): void => {
+    // A sheet's focus trap keeps focus inside; focus-out dismissal is for
+    // anchored menus, where Tab leaving the menu closes it.
+    if (sheet) return;
     queueMicrotask(() => {
-      if (closed || el.contains(document.activeElement) || document.activeElement === opts.anchor) return;
+      if (closed || surface.contains(document.activeElement) || document.activeElement === opts.anchor) return;
       close({ restoreFocus: false });
     });
   };

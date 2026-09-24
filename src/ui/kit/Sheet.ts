@@ -2,7 +2,8 @@
 // and narrow viewports: a dimmed backdrop, a full-width surface anchored to
 // the bottom edge (max 70% of the viewport height, safe-area padded), a drag
 // handle, swipe-down-to-dismiss (from the handle, or from the content while it
-// is scrolled to the top) and touch-sized rows.
+// is scrolled to the top) and touch-sized rows. On wide touch screens
+// (tablets) the sheet stays a readable 640px column, centred.
 
 import { t } from "../../i18n";
 import { defineStyles, type StyleChunk } from "../styles";
@@ -12,8 +13,8 @@ export const SHEET_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "kit-sheet",
   ".raze-kit-backdrop{position:fixed;inset:0;background:var(--raze-backdrop,rgba(0,0,0,.5));" +
   "animation:raze-kit-fade var(--raze-duration,160ms) ease-out;touch-action:none}" +
-  ".raze-kit-sheet{position:fixed;left:0;right:0;bottom:0;width:100%;max-height:70vh;display:flex;flex-direction:column;" +
-  "margin:0;background:var(--raze-surface,#1e222d);color:var(--raze-text,#d1d4dc);" +
+  ".raze-kit-sheet{position:fixed;left:0;right:0;bottom:0;width:100%;max-width:var(--raze-sheet-max-width,640px);max-height:70vh;display:flex;flex-direction:column;" +
+  "margin:0 auto;background:var(--raze-surface,#1e222d);color:var(--raze-text,#d1d4dc);" +
   "border-radius:var(--raze-radius-lg,12px) var(--raze-radius-lg,12px) 0 0;box-shadow:0 -8px 28px rgba(0,0,0,.35);" +
   "padding:0 0 env(safe-area-inset-bottom,0px);font-size:var(--raze-font-size-lg,14px);outline:none;" +
   "animation:raze-kit-rise .24s cubic-bezier(.2,.8,.2,1)}" +
@@ -37,8 +38,12 @@ export interface SheetFrameOptions {
   content: HTMLElement;
   /** Element whose scroll position gates content swipes (defaults to `content`). */
   scroller?: HTMLElement;
-  /** Called once when the user dismisses by backdrop, swipe or handle. */
-  onDismiss(reason: SheetDismissReason): void;
+  /**
+   * Called once when the user dismisses by backdrop, swipe or handle. Return
+   * `false` to refuse (for example while a dialog is submitting): the sheet
+   * snaps back and can be dismissed again later.
+   */
+  onDismiss(reason: SheetDismissReason): boolean | void;
 }
 
 export interface SheetFrame {
@@ -83,17 +88,33 @@ export function createSheetFrame(parent: HTMLElement, options: SheetFrameOptions
   let startTime = 0;
   let suppressClick = false;
 
-  const dismiss = (reason: SheetDismissReason): void => {
-    if (dismissed) return;
-    dismissed = true;
-    options.onDismiss(reason);
-  };
-
   const setOffset = (value: number): void => {
     offset = Math.max(0, value);
     sheet.style.transform = offset ? `translateY(${offset}px)` : "";
     const height = sheet.offsetHeight || 1;
     backdrop.style.opacity = offset ? String(Math.max(0, 1 - offset / height)) : "";
+  };
+
+  /** Return to the resting position, animated unless motion is reduced. */
+  const snapBack = (): void => {
+    if (offset && !prefersReducedMotion(doc.defaultView ?? undefined)) {
+      sheet.style.transition = "transform .18s ease-out";
+      const clear = (): void => {
+        sheet.style.transition = "";
+      };
+      sheet.addEventListener("transitionend", clear, { once: true });
+      setTimeout(clear, 250);
+    }
+    setOffset(0);
+  };
+
+  const dismiss = (reason: SheetDismissReason): void => {
+    if (dismissed) return;
+    dismissed = true;
+    if (options.onDismiss(reason) === false) {
+      dismissed = false;
+      snapBack();
+    }
   };
 
   const begin = (y: number, time: number): void => {
@@ -112,15 +133,7 @@ export function createSheetFrame(parent: HTMLElement, options: SheetFrameOptions
       dismiss("swipe");
       return;
     }
-    if (offset && !prefersReducedMotion(doc.defaultView ?? undefined)) {
-      sheet.style.transition = "transform .18s ease-out";
-      const clear = (): void => {
-        sheet.style.transition = "";
-      };
-      sheet.addEventListener("transitionend", clear, { once: true });
-      setTimeout(clear, 250);
-    }
-    setOffset(0);
+    snapBack();
   };
 
   // Keep focus where it is (inside the sheet or on its opener) when the

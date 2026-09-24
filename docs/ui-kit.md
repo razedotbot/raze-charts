@@ -29,9 +29,9 @@ public widget API is unchanged except where noted in the
 
 | Primitive | Use for | Behaviour |
 | --- | --- | --- |
-| `openDialog(options)` | Settings, go-to, shortcuts, search | `role="dialog"` + `aria-modal`, named by its title; Tab and Shift+Tab are trapped; Escape cancels; focus returns to the opener; optional tab list with arrow/Home/End keys and lazily rendered panels; OK, Cancel and "Reset to defaults"; Enter submits and `onSubmit` may return `false` to stay open; draggable by the header on desktop; page scroll is locked. A backdrop click dismisses sheets, but desktop dialogs ignore it unless `closeOnBackdrop` is set, so a stray click cannot discard edits. |
+| `openDialog(options)` | Settings, go-to, shortcuts, search | `role="dialog"` + `aria-modal`, named by its title; Tab and Shift+Tab are trapped; Escape cancels; focus returns to the opener; optional tab list with arrow/Home/End keys and lazily rendered panels; OK, Cancel and "Reset to defaults"; Enter submits and `onSubmit` may return `false` to stay open; while an async `onSubmit` is pending the dialog is `aria-busy`, Cancel and Close are disabled, and Escape, backdrop and swipe dismissals are refused (a sheet snaps back), so a half-applied submit is never reported as a cancel, though `close()` from code still closes it; draggable by the header on desktop; page scroll is locked. A backdrop click dismisses sheets, but desktop dialogs ignore it unless `closeOnBackdrop` is set, so a stray click cannot discard edits. |
 | `openPopover(options)` | Colour picker, inline pickers | Anchored and non-modal. It flips and shifts to stay in the viewport, caps its height to the available space, and closes on Escape, an outside press or focus leaving it. |
-| `attachTooltip(target, text)` | Icon buttons | Replaces `title`. It shows on hover after a short delay (instantly while warm) and on keyboard focus, never on touch. It stays open while hovered, Escape dismisses it, and it is linked with `aria-describedby`. A target without a name gets the text as its `aria-label`. |
+| `attachTooltip(target, text)` | Icon buttons | Replaces `title`. It shows on hover after a short delay (instantly while warm) and on keyboard focus, never on touch. It stays open while hovered, Escape dismisses it, and it is linked with `aria-describedby`. A target without a name gets the text as its `aria-label`. A visible tooltip hides itself when its target leaves the DOM. |
 | `showToast(message, options)` | Confirmations, errors | Bottom-centre stack inside a named region. Persistent live regions announce toasts (polite for info/success, assertive for warning/error). Timers pause on hover or focus, one optional action is allowed, and at most three toasts are visible. |
 
 On a coarse primary pointer or a viewport narrower than 520px (`prefersSheet()`),
@@ -40,10 +40,16 @@ width, anchored to the bottom edge, at most 70% of the viewport height,
 padded by `env(safe-area-inset-bottom)`, with 48px rows and a dimmed
 backdrop. Tapping the backdrop, activating the drag handle, or swiping down
 (on the handle, or on the content while it is scrolled to the top) dismisses
-the sheet and restores focus. The page behind is scroll-locked. Touch-capable
-laptops with a mouse keep anchored menus. `openPopup()` exposes this as
+the sheet and restores focus. Sheets are modal: the page behind is
+scroll-locked and Tab and Shift+Tab stay inside the sheet. On wider touch
+screens (tablets) a sheet is a centred column of at most 640px
+(`--raze-sheet-max-width`). Touch-capable laptops with a mouse keep anchored
+menus. `openPopup()` exposes this as
 `presentation: "auto" | "anchored" | "sheet"`: menus default to `auto`, and
-dialog-role popups such as search results stay anchored.
+dialog-role popups such as search results stay anchored. An `auto` menu closes,
+restoring focus to its opener, when a resize, rotation or pointer change flips
+`prefersSheet()` (`watchSheetPreference()`); reopening picks the presentation
+that fits.
 
 ### Portals
 
@@ -80,8 +86,10 @@ exactly one library stylesheet that grows as chunks are adopted:
   strict `style-src` without `'unsafe-inline'` does not block.
 - Otherwise a `<style>` element is created with the configured nonce
   (`configureStyles({ nonce })`, `ensureBaseStyles(target, { nonce })`, or
-  `<meta property="csp-nonce" nonce="…">`). The document element keeps the
-  historic id `raze-chart-base-css`.
+  `<meta property="csp-nonce" nonce="…">`). A nonce passed explicitly is
+  remembered for its document, so overlays that later adopt styles into a
+  shadow root or fullscreen element of the same page reuse it. The document
+  element keeps the historic id `raze-chart-base-css`.
 
 `--raze-*` tokens (surface, text, border, hover, active, accent, focus, danger,
 success, warning, shadow, backdrop, radius, row heights, duration, z-index) are
@@ -105,7 +113,9 @@ await setLocale("ja-JP"); // loads ja lazily, then notifies onLocaleChange liste
 
 Lookups walk the locale chain (`pt-BR`, then `pt`, then the inline English
 default). Selecting a locale with no registered messages warns once instead of
-silently staying English. `setTranslateHook()` installs a host hook, the seam
+silently staying English. Overlapping `setLocale()` calls apply in call order:
+the most recent call wins even if an earlier call's pack loads later, and a
+superseded call resolves without changing the locale or notifying listeners. `setTranslateHook()` installs a host hook, the seam
 for a TradingView `custom_translate_function` adapter. `direction()` and
 `isRtlLocale()` drive RTL mirroring. `createI18n()` returns an isolated
 runtime. The top-level functions are separate exports, so a bundle only pays
@@ -132,6 +142,9 @@ mismatches.
 - The `html` tagged template escapes every interpolated value in text and
   attribute context. Nested `html` results and arrays of them stay markup.
 - `trustedMarkup(constant)` marks library-owned constants such as icon SVG.
+  The lint accepts only a string literal or an ALL_CAPS constant (or a member
+  of one) as its argument. Any other argument needs an allow-list entry that
+  says where the markup comes from.
 - `setMarkup(element, markup)` accepts only those results. When the browser
   supports Trusted Types, it writes through a lazily created `raze-charts`
   policy that converts only the markup it is currently writing. Allow it with
@@ -142,26 +155,37 @@ mismatches.
   attributes and refuses `on*`, `srcdoc` and `style` attributes.
 
 `node scripts/check-dom-sinks.mjs` fails on `innerHTML`/`outerHTML`
-assignment, `insertAdjacentHTML`, `document.write`,
-`createContextualFragment`, `DOMParser.parseFromString`, `srcdoc`,
-event-handler attributes, `eval`/`new Function`, string timers and
-`javascript:` URLs anywhere in `src/`. The exceptions are the allow-listed
-statements in the script: `setMarkup()`, and the native SVG stage, whose
-markup is generated with escaped text. Comments and string contents are
-ignored, so documentation that mentions a sink does not trip the lint.
+assignment (including `+=`, `??=`, `||=` and `&&=`), the property named as a
+string (`el["innerHTML"]`, `Reflect.set`, `Object.defineProperty`) or as an
+object key (`Object.assign(el, { innerHTML })`), `insertAdjacentHTML`,
+`setHTMLUnsafe`, `document.write`, `createContextualFragment`,
+`DOMParser.parseFromString`, `srcdoc`, event-handler attributes,
+`eval`/`new Function`, string timers, `javascript:` URLs, `new SafeMarkup()`,
+renaming `trustedMarkup` on import, and `trustedMarkup()` with a non-constant
+argument, anywhere in `src/`. The exceptions are the allow-listed statements
+in the script, each with its reason: `setMarkup()` and the two `SafeMarkup`
+factories, the documented host-markup opt-ins (`popupRow`'s `trustedHtml` and
+a string `SidebarCustomItem.icon`), the library chart-type icon table, and the
+native SVG stage, whose markup is generated with escaped text. Comments and
+string contents are ignored, so documentation that mentions a sink does not
+trip the lint. A property name computed at run time (`el[name] = s`) cannot be
+checked statically; keep such code out of UI modules.
 
 ## Tests
 
 | Test | Covers |
 | --- | --- |
-| `tests/ui-kit.spec.ts` | Real Chromium: dialog audit, Tab trap and focus return, keyboard-operable controls and colour popover, header drag, 390×844 touch sheets (kit dialog and the widget's Indicators menu), swipe and backdrop dismissal, fullscreen and shadow-root portals, strict CSP and nonce fallback, Trusted Types enforcement on the full widget, tooltips, toasts, reduced motion |
-| `tests/ui-kit-dom.mjs` | Stylesheet adoption and nonces, placement math, control semantics, dialog lifecycle, popup presentation |
-| `tests/i18n-runtime.mjs` | Defaults, packs, fallback chain, lazy loaders, plurals, hooks, isolation, misuse |
+| `tests/ui-kit.spec.ts` | Real Chromium: dialog audit (plus axe when installed), Tab trap and focus return, keyboard-operable controls and colour popover, header drag, 390×844 touch sheets (kit dialog and the widget's Indicators menu), swipe and backdrop dismissal, Tab trapping in sheet menus, sheet width on tablets, sheet menus closing when a narrow window widens, fullscreen and shadow-root portals, strict CSP for the kit and for the whole widget (zero violations with no `'unsafe-inline'`), nonce fallback, Trusted Types enforcement on the full widget including Element sidebar icons, tooltips, toasts, reduced motion |
+| `tests/ui-kit-dom.mjs` | Stylesheet adoption and nonces (including reuse across roots), placement math, control semantics, dialog lifecycle and busy submits, tooltip and toast lifecycles, the sheet-preference watcher, popup presentation |
+| `tests/i18n-runtime.mjs` | Defaults, packs, fallback chain, lazy loaders, overlapping `setLocale()` calls, plurals, hooks, isolation, misuse |
 | `tests/safe-text.mjs` | Escaping, `setMarkup`, Trusted Types policy behaviour, URL filtering, `h()` |
 | `tests/dom-sinks.mjs` | The lint on the repository and on each sink family |
 | `tests/extract-messages.mjs` | Extraction, conflicts, pack coverage |
 
-The browser spec builds the kit from source with esbuild. It does not depend
-on axe-core, so the dialog audit is an in-page structural check of names,
-roles, ARIA references and values, required parents and children, nested
-interactive controls and `aria-hidden` focus.
+The browser spec builds the kit from source with esbuild. Every audited
+surface (desktop dialog, sheet dialog, colour popover) gets an in-page
+structural check of names, allowed roles, ARIA references and values,
+required parents and children, nested interactive controls and `aria-hidden`
+focus. axe-core is not a dependency yet. The spec runs axe on the same
+surfaces automatically once `axe-core` resolves from the repository root, and
+otherwise records an `axe` annotation on the test.

@@ -13,7 +13,7 @@ export { lockScroll, tabbables, trapFocus } from "./focus";
 export type { FocusTrap } from "./focus";
 export { isInLayerAbove, isTopLayer, openLayerCount, pushLayer } from "./layers";
 export type { Layer } from "./layers";
-export { isCoarsePointer, prefersReducedMotion, prefersSheet, SHEET_BREAKPOINT } from "./media";
+export { isCoarsePointer, prefersReducedMotion, prefersSheet, SHEET_BREAKPOINT, watchSheetPreference } from "./media";
 export { openPopover, resolvePresentation } from "./Popover";
 export type { PopoverCloseReason, PopoverHandle, PopoverOptions, Presentation } from "./Popover";
 export { createPortal, mirrorTheme, portalContainerFor } from "./portal";

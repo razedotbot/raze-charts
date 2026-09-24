@@ -53,10 +53,53 @@ try {
       return { default: { "test.ok": "Gut", "test.items.one": "{count} Eintrag", "test.items.other": "{count} Einträge" } };
     });
     await Promise.all([i18n.setLocale("de"), i18n.setLocale("de-AT")]);
+    assert.equal(i18n.getLocale(), "de-AT", "the most recent of two overlapping calls wins");
     await i18n.setLocale("de");
     assert.equal(loads, 1, "a lazy pack loads once");
-    assert.deepEqual(seen[0], ["de", "Gut"], "listeners observe the loaded messages");
+    assert.deepEqual(seen, [["de-AT", "Gut"], ["de", "Gut"]], "listeners observe the loaded messages, once per applied locale");
     off();
+
+    // Regression: overlapping calls apply in call order, not in the order
+    // their loaders settle. A slow earlier pack must not overwrite a newer
+    // choice, and listeners hear only the winning locale.
+    {
+      const runtime = i18n.createI18n("en");
+      const heard = [];
+      runtime.onLocaleChange((locale) => heard.push([locale, runtime.t("race.a", "EN")]));
+      let releaseDe;
+      runtime.registerLocaleLoader("de", () => new Promise((resolveDe) => {
+        releaseDe = () => resolveDe({ "race.a": "DE" });
+      }));
+      runtime.registerLocaleLoader("fr", () => Promise.resolve({ "race.a": "FR" }));
+      const slow = runtime.setLocale("de");
+      const fast = runtime.setLocale("fr");
+      await fast;
+      assert.equal(runtime.getLocale(), "fr");
+      releaseDe();
+      await slow;
+      assert.equal(runtime.getLocale(), "fr", "a superseded setLocale() does not win when its pack loads later");
+      assert.equal(runtime.t("race.a", "EN"), "FR");
+      assert.deepEqual(heard, [["fr", "FR"]], "exactly one listener call, for the winning locale");
+      // The superseded pack is still cached for the next switch.
+      await runtime.setLocale("de");
+      assert.equal(runtime.t("race.a", "EN"), "DE");
+
+      // Switching back to the current locale supersedes a pending switch.
+      runtime.registerLocaleLoader("it", () => new Promise((resolveIt) => setTimeout(() => resolveIt({ "race.a": "IT" }), 20)));
+      const pending = runtime.setLocale("it");
+      await runtime.setLocale("de");
+      await pending;
+      assert.equal(runtime.getLocale(), "de", "returning to the current locale cancels the pending switch");
+      assert.deepEqual(heard.map(([locale]) => locale), ["fr", "de"]);
+
+      // A superseded call whose pack fails still rejects (the failure is real)
+      // without disturbing the winning locale.
+      runtime.registerLocaleLoader("nl", () => new Promise((_, rejectNl) => setTimeout(() => rejectNl(new Error("nl offline")), 10)));
+      const failing = runtime.setLocale("nl");
+      await runtime.setLocale("fr");
+      await assert.rejects(failing, /nl offline/);
+      assert.equal(runtime.getLocale(), "fr");
+    }
 
     // Plurals use CLDR categories with inline fallbacks.
     const forms = { one: "{count} item", other: "{count} items" };

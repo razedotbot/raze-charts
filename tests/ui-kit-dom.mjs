@@ -82,6 +82,29 @@ try {
   assert.equal(shadowStyle.nonce, "shadow-nonce", "an explicit nonce wins");
   assert.equal(shadow.firstChild, shadowStyle, "shadow sheets are prepended so component CSS can override");
   assert.equal(kit.styleRootOf(inner), shadow);
+
+  // Regression: a nonce given only to the public ensureBaseStyles() also
+  // reaches overlays that later adopt styles into another root of the same
+  // document (here a kit portal in a shadow root, <style> fallback).
+  {
+    const doc2 = new JSDOM("<!doctype html><html><head></head><body></body></html>").window.document;
+    kit.ensureBaseStyles(doc2, { nonce: "x" });
+    assert.equal(doc2.querySelector("style[data-raze-styles]").nonce, "x");
+    const host2 = doc2.createElement("div");
+    doc2.body.appendChild(host2);
+    const shadow2 = host2.attachShadow({ mode: "open" });
+    const anchor2 = doc2.createElement("button");
+    shadow2.appendChild(anchor2);
+    const portal2 = kit.createPortal({ anchor: anchor2 });
+    assert.equal(portal2.el.parentNode, shadow2, "the portal renders in the anchor's shadow root");
+    const style2 = shadow2.querySelector("style[data-raze-styles]");
+    assert(style2, "the portal adopts its styles into the shadow root");
+    assert.equal(style2.nonce, "x", "the document's explicit nonce is reused for other roots");
+    portal2.destroy();
+    const explicit = doc2.createElement("div").attachShadow({ mode: "open" });
+    kit.adoptStyles(explicit, kit.defineStyles("nonce-override", ".raze-o{}"), { nonce: "y" });
+    assert.equal(explicit.querySelector("style").nonce, "y", "an explicit per-call nonce still wins");
+  }
   kit.configureStyles({ nonce: "configured" });
   const other = document.createElement("div").attachShadow({ mode: "open" });
   kit.adoptStyles(other, chunk);
@@ -188,6 +211,9 @@ try {
   });
   const el = dialog.el;
   assert.equal(el.getAttribute("role"), "dialog");
+  // Regression (axe aria-allowed-role): role="dialog" is not allowed on <form>.
+  assert.equal(el.tagName, "DIV", "the dialog element is not a <form>");
+  assert.equal(el.querySelector("form")?.noValidate, true, "a form inside the dialog provides Enter-to-submit");
   assert.equal(el.getAttribute("aria-modal"), "true");
   assert.equal(document.getElementById(el.getAttribute("aria-labelledby")).textContent, "Moving Average");
   assert.equal(document.documentElement.style.overflow, "hidden", "the page behind is scroll-locked");
@@ -242,6 +268,124 @@ try {
   document.querySelector(".raze-kit-backdrop").click();
   assert.equal(await sheetDialog.result, "backdrop");
 
+  // Regression: while an async onSubmit is pending, user dismissals are
+  // refused, so a half-applied submit is never reported as a cancel.
+  {
+    opener.focus();
+    let release;
+    const cancels = [];
+    const busy = kit.openDialog({
+      title: "Apply",
+      presentation: "dialog",
+      content: kit.textField({ label: "Name", value: "" }).el,
+      onSubmit: () => new Promise((resolveSubmit) => {
+        release = resolveSubmit;
+      }),
+      onCancel: (reason) => cancels.push(reason),
+    });
+    busy.el.dispatchEvent(new window.Event("submit", { cancelable: true }));
+    await wait();
+    assert.equal(busy.el.getAttribute("aria-busy"), "true", "the dialog reports that it is busy");
+    const cancelButton = [...busy.el.querySelectorAll("button")].find((candidate) => candidate.textContent === "Cancel");
+    const closeButton = busy.el.querySelector('button[aria-label="Close"]');
+    assert.equal(cancelButton.disabled, true, "Cancel is disabled while submitting");
+    assert.equal(closeButton.disabled, true, "the close button is disabled while submitting");
+    assert.equal(key(busy.el.querySelector("input"), "Escape").defaultPrevented, true, "Escape is consumed by the busy dialog");
+    cancelButton.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(busy.closed, false, "Escape and Cancel do not close a submitting dialog");
+    assert.deepEqual(cancels, []);
+    release();
+    assert.equal(await busy.result, "ok", "the pending submit completes as OK");
+    assert.deepEqual(cancels, [], "onCancel never ran");
+    assert.equal(document.activeElement, opener);
+
+    // Sheets snap back from a refused backdrop tap and can be dismissed once
+    // the submit settles (here with a veto).
+    let veto;
+    const sheetCancels = [];
+    const busySheet = kit.openDialog({
+      title: "Apply",
+      presentation: "sheet",
+      content: "text",
+      onSubmit: () => new Promise((resolveSubmit) => {
+        veto = () => resolveSubmit(false);
+      }),
+      onCancel: (reason) => sheetCancels.push(reason),
+    });
+    busySheet.el.dispatchEvent(new window.Event("submit", { cancelable: true }));
+    await wait();
+    document.querySelector(".raze-kit-backdrop").click();
+    assert.equal(busySheet.closed, false, "a backdrop tap does not dismiss a submitting sheet");
+    veto();
+    await wait();
+    assert.equal(busySheet.el.hasAttribute("aria-busy"), false, "a vetoed submit clears the busy state");
+    assert.equal(busySheet.closed, false, "a vetoed submit keeps the sheet open");
+    document.querySelector(".raze-kit-backdrop").click();
+    assert.equal(await busySheet.result, "backdrop", "the sheet accepts a dismissal after the submit settles");
+    assert.deepEqual(sheetCancels, ["backdrop"]);
+
+    // Code can always close a busy dialog.
+    const forced = kit.openDialog({ title: "Apply", presentation: "dialog", content: "text", onSubmit: () => new Promise(() => {}) });
+    forced.el.dispatchEvent(new window.Event("submit", { cancelable: true }));
+    await wait();
+    forced.close("cancel");
+    assert.equal(await forced.result, "cancel", "close() from code is the forced path");
+  }
+
+  // ── Tooltip and toast lifecycles ─────────────────────────────────────
+  {
+    // Regression: a visible tooltip whose target is removed (re-render or
+    // destroy fires no pointerleave/blur) hides itself and its listeners.
+    const tipTarget = document.createElement("button");
+    tipTarget.textContent = "Fit";
+    document.body.appendChild(tipTarget);
+    const tip = kit.attachTooltip(tipTarget, "Fit chart (Alt+R)");
+    tip.show();
+    assert(document.querySelector('[role="tooltip"]'), "the tooltip is visible");
+    assert.equal(tipTarget.getAttribute("aria-describedby"), document.querySelector('[role="tooltip"]').id);
+    tipTarget.remove();
+    await wait(400);
+    assert.equal(document.querySelector('[role="tooltip"]'), null, "a detached target's tooltip hides");
+    assert.equal(document.querySelector("[data-raze-portal]"), null, "its portal is removed");
+    tip.destroy();
+
+    // Regression: a pointerleave without a prior pause must not start a
+    // second timer that later closes the toast while it is hovered.
+    const toast = kit.showToast("Layout saved", { duration: 150 });
+    await wait(80); // the first toast in a new region is inserted after 50ms
+    assert(toast.el.isConnected, "the toast is shown");
+    toast.el.dispatchEvent(new window.Event("pointerleave"));
+    toast.el.dispatchEvent(new window.Event("pointerenter"));
+    await wait(300);
+    assert(toast.el.isConnected, "a hovered toast stays open (no orphaned timer)");
+    // Focus keeps it open even after the pointer leaves.
+    toast.el.dispatchEvent(new window.FocusEvent("focusin"));
+    toast.el.dispatchEvent(new window.Event("pointerleave"));
+    await wait(300);
+    assert(toast.el.isConnected, "a focused toast stays open when the pointer leaves");
+    toast.el.dispatchEvent(new window.FocusEvent("focusout", { relatedTarget: null }));
+    toast.close();
+    assert.equal(document.querySelector(".raze-kit-toasts"), null, "the toast region is removed with its last toast");
+  }
+
+  // ── Sheet preference watcher (rotation / resize across 520px) ────────
+  {
+    const flips = [];
+    const width = window.innerWidth;
+    const stop = kit.watchSheetPreference((sheet) => flips.push(sheet), window);
+    const resizeTo = (next) => {
+      window.innerWidth = next;
+      window.dispatchEvent(new window.Event("resize"));
+    };
+    resizeTo(400);
+    resizeTo(390); // still narrow: no second notification
+    resizeTo(1024);
+    stop();
+    resizeTo(300); // no longer watching
+    window.innerWidth = width;
+    assert.deepEqual(flips, [true, false], "only real flips are reported, until stopped");
+  }
+
   // ── Popup presentation ───────────────────────────────────────────────
   const menuAnchor = document.createElement("button");
   document.body.appendChild(menuAnchor);
@@ -262,6 +406,22 @@ try {
   assert.equal(document.activeElement, menuAnchor, "focus returns to the menu button");
   assert.equal(menuAnchor.getAttribute("aria-expanded"), "false");
   assert.equal(document.documentElement.style.overflow, "");
+
+  // A menu opened from a modal kit dialog joins the overlay stack, so the
+  // dialog's focus trap lets focus into it.
+  {
+    const host = kit.openDialog({ title: "Settings", presentation: "dialog", content: kit.textField({ label: "Name", value: "" }).el });
+    const nestedAnchor = document.createElement("button");
+    host.body.appendChild(nestedAnchor);
+    const nested = kit.openPopup({ anchor: nestedAnchor, fontFamily: "sans-serif", label: "Options", presentation: "anchored" });
+    const nestedRow = kit.popupRow("Duplicate", () => {});
+    nested.el.appendChild(nestedRow);
+    nestedRow.focus();
+    assert.equal(document.activeElement, nestedRow, "focus can enter a popup stacked above a modal dialog");
+    nested.close();
+    host.close();
+    await host.result;
+  }
 
   const dialogRole = kit.openPopup({ anchor: menuAnchor, fontFamily: "sans-serif", role: "dialog" });
   assert.equal(dialogRole.presentation, "anchored", "dialog-role popups (search results) stay anchored by default");

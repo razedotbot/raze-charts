@@ -16,17 +16,38 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Injection sinks. Patterns run on source with comments blanked out. */
 export const SINKS = [
-  { id: "innerHTML", pattern: /\.\s*(?:inner|outer)HTML\s*\+?=(?!=)/g },
+  // el.innerHTML = / += / ??= / ||= / &&= (and outerHTML).
+  { id: "innerHTML", pattern: /\.\s*(?:inner|outer)HTML\s*(?:\+|\?\?|\|\||&&)?=(?!=)/g },
+  // The property named as a string: el["innerHTML"] = …, Reflect.set(el, "innerHTML", …),
+  // Object.defineProperty(el, "outerHTML", …).
+  { id: "innerHTML-string", pattern: /["'`](?:inner|outer)HTML["'`]/g },
+  // The property as an object key: Object.assign(el, { innerHTML: … }).
+  { id: "innerHTML-key", pattern: /(?<![\w$.])(?:inner|outer)HTML\s*:(?!:)/g },
   { id: "insertAdjacentHTML", pattern: /\binsertAdjacentHTML\s*\(/g },
+  { id: "setHTMLUnsafe", pattern: /\b(?:setHTMLUnsafe|parseHTMLUnsafe)\s*\(/g },
   { id: "document.write", pattern: /\bdocument\s*\.\s*write(?:ln)?\s*\(/g },
   { id: "createContextualFragment", pattern: /\bcreateContextualFragment\s*\(/g },
   { id: "DOMParser.parseFromString", pattern: /\bparseFromString\s*\(/g },
-  { id: "srcdoc", pattern: /\.\s*srcdoc\s*=(?!=)|\bsetAttribute\s*\(\s*["'`]srcdoc["'`]/g },
+  { id: "srcdoc", pattern: /\.\s*srcdoc\s*=(?!=)|\bsetAttribute(?:NS)?\s*\([^)]*?["'`]srcdoc["'`]/g },
   { id: "event-handler-attribute", pattern: /\bsetAttribute(?:NS)?\s*\([^)]*?["'`]on[a-z]+["'`]/gi },
   { id: "eval", pattern: /(?<![\w$.])eval\s*\(|\bnew\s+Function\s*\(/g },
   { id: "string-timer", pattern: /\bset(?:Timeout|Interval)\s*\(\s*["'`]/g },
   { id: "javascript-url", pattern: /["'`]\s*javascript:/gi },
+  // SafeMarkup is only minted by html`…` and trustedMarkup() in safe.ts.
+  { id: "SafeMarkup", pattern: /\bnew\s+SafeMarkup\s*\(/g },
+  // Renaming trustedMarkup on import would hide it from the argument rule.
+  { id: "trustedMarkup-alias", pattern: /\btrustedMarkup\s+as\b/g },
 ];
+
+/**
+ * `trustedMarkup(x)` turns a string into markup that setMarkup() writes
+ * through the Trusted Types policy, so its argument must be a library
+ * constant: a string literal (templates without `${}`), or an ALL_CAPS
+ * constant or member of one (`ICON_CLOSE`, `ICONS.trend`). Any other
+ * argument is reported as a `trustedMarkup` finding and needs an allow-list
+ * entry explaining where the markup comes from.
+ */
+export const TRUSTED_ARGUMENT = /^(?:"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\$]|\\.|\$(?!\{))*`|[A-Z][A-Z0-9_]*(?:\.[A-Za-z_$][\w$]*)*)$/;
 
 /**
  * Allowed sinks. `file` is a path prefix (or RegExp) relative to the repo
@@ -37,8 +58,32 @@ export const ALLOW = [
   {
     file: "src/ui/kit/safe.ts",
     sink: "innerHTML",
-    match: /\(element as \{ innerHTML: unknown \}\)\.innerHTML = value/,
+    match: /^element\.innerHTML = value as string;$/,
     reason: "setMarkup(): the single HTML sink; accepts only SafeMarkup and routes through the Trusted Types policy.",
+  },
+  {
+    file: "src/ui/kit/safe.ts",
+    sink: "SafeMarkup",
+    match: /^return new SafeMarkup\((?:out|libraryConstant)\);$/,
+    reason: "html`…` (escapes every interpolated value) and trustedMarkup() are the only SafeMarkup factories.",
+  },
+  {
+    file: "src/ui/popup.ts",
+    sink: "trustedMarkup",
+    match: /^if \(options\?\.trustedHtml\) setMarkup\(row, trustedMarkup\(content\)\);$/,
+    reason: "popupRow(content, …, { trustedHtml: true }) is the public, documented opt-in for caller-owned markup. Datafeed and user strings take the default text path.",
+  },
+  {
+    file: "src/ui/LeftSidebar.ts",
+    sink: "trustedMarkup",
+    match: /^if \(typeof icon === "string"\) setMarkup\(b, trustedMarkup\(icon\)\);$/,
+    reason: "Built-in icons from the library-owned ICONS table, and SidebarCustomItem.icon strings: host-authored markup (documented). Hosts enforcing Trusted Types can pass an Element instead.",
+  },
+  {
+    file: "src/ui/LeftSidebar.ts",
+    sink: "trustedMarkup",
+    match: /^setMarkup\((?:this\.styleBtn|icon), trustedMarkup\((?:def|s)\.svg\)\);$/,
+    reason: "Chart-type icons from the library-owned ALL_CHART_STYLES table.",
   },
   {
     file: /^src\/chart\/render(?:\.ts$|\/)/,
@@ -162,27 +207,70 @@ function allowed(file, sink, lineText) {
   });
 }
 
+/**
+ * Arguments of the call whose `(` is at `open`, split on top-level commas
+ * (string contents and nested brackets are skipped). Comments are already
+ * blanked in `masked`.
+ */
+function callArguments(masked, inString, open) {
+  const args = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let k = open + 1; k < masked.length; k++) {
+    if (inString[k]) continue;
+    const ch = masked[k];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      if (depth === 0) {
+        args.push(masked.slice(start, k).trim());
+        return args.filter((arg, index) => arg || index < args.length - 1);
+      }
+      depth--;
+    } else if (ch === "," && depth === 0) {
+      args.push(masked.slice(start, k).trim());
+      start = k + 1;
+    }
+  }
+  return args;
+}
+
+/** Calls of trustedMarkup() (not its declaration) whose argument is not a library constant. */
+function untrustedMarkupCalls(masked, inString) {
+  const calls = [];
+  for (const match of masked.matchAll(/(?<!function\s+)\btrustedMarkup\s*\(/g)) {
+    if (inString[match.index]) continue;
+    const args = callArguments(masked, inString, match.index + match[0].length - 1);
+    if (args.length === 1 && TRUSTED_ARGUMENT.test(args[0])) continue;
+    calls.push(match.index);
+  }
+  return calls;
+}
+
 /** Find sinks in one source text. `file` is repo-relative with `/` separators. */
 export function scanSource(source, file) {
   const { masked, inString } = tokenize(source);
   const findings = [];
   const used = [];
+  const report = (index, sink) => {
+    const position = lineAt(masked, index);
+    const lineEnd = source.indexOf("\n", position.lineStart);
+    const lineText = source.slice(position.lineStart, lineEnd < 0 ? source.length : lineEnd).trim();
+    const entry = allowed(file, sink, lineText);
+    if (entry) {
+      used.push(entry);
+      return;
+    }
+    findings.push({ file, line: position.line, column: position.column, sink, text: lineText });
+  };
   for (const sink of SINKS) {
     sink.pattern.lastIndex = 0;
     for (const match of masked.matchAll(sink.pattern)) {
       // Sinks are code; text that merely mentions one inside a string is not.
       if (inString[match.index]) continue;
-      const position = lineAt(masked, match.index);
-      const lineEnd = source.indexOf("\n", position.lineStart);
-      const lineText = source.slice(position.lineStart, lineEnd < 0 ? source.length : lineEnd).trim();
-      const entry = allowed(file, sink.id, lineText);
-      if (entry) {
-        used.push(entry);
-        continue;
-      }
-      findings.push({ file, line: position.line, column: position.column, sink: sink.id, text: lineText });
+      report(match.index, sink.id);
     }
   }
+  for (const index of untrustedMarkupCalls(masked, inString)) report(index, "trustedMarkup");
   return { findings, used };
 }
 
@@ -218,8 +306,10 @@ function main() {
   const args = process.argv.slice(2);
   if (args.includes("--help")) {
     console.log("Usage: node scripts/check-dom-sinks.mjs [--json] [file-or-directory ...]\n\n" +
-      "Fails when src/ uses innerHTML, insertAdjacentHTML, document.write, eval-like APIs or\n" +
-      "event-handler attributes outside the sanitizer allow-list in this script.");
+      "Fails when src/ uses innerHTML/outerHTML (assigned, named as a string or as an object key),\n" +
+      "insertAdjacentHTML, setHTMLUnsafe, document.write, eval-like APIs, event-handler attributes,\n" +
+      "new SafeMarkup(), or trustedMarkup() with anything but a library constant, outside the\n" +
+      "sanitizer allow-list in this script.");
     return;
   }
   const json = args.includes("--json");
@@ -231,7 +321,8 @@ function main() {
     for (const finding of result.findings) {
       console.error(`${finding.file}:${finding.line}:${finding.column}  ${finding.sink}  ${finding.text}`);
     }
-    for (const entry of result.unusedAllowances) {
+    // Stale allowances only mean something for a full scan of src/.
+    for (const entry of paths.length ? [] : result.unusedAllowances) {
       console.warn(`[raze-charts] note: allow-list entry for ${entry.file} (${entry.sink}) matched nothing; remove it if the sink is gone.`);
     }
   }
@@ -239,8 +330,9 @@ function main() {
     if (!json) {
       console.error(
         `\n[raze-charts] ${result.findings.length} DOM injection sink(s) found. Write untrusted strings as text ` +
-        "(textContent, setText, h()); build library markup with html`…`/trustedMarkup() and write it with " +
-        "setMarkup() from src/ui/kit/safe.ts.",
+        "(textContent, setText, h()); build library markup with html`…` or trustedMarkup(LIBRARY_CONSTANT) and " +
+        "write it with setMarkup() from src/ui/kit/safe.ts. Any other trustedMarkup() argument needs an allow-list " +
+        "entry in scripts/check-dom-sinks.mjs that explains where the markup comes from.",
       );
     }
     process.exit(1);

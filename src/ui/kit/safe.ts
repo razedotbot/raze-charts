@@ -149,7 +149,8 @@ export function setMarkup(element: Element, markup: SafeMarkup): void {
     }
   }
   try {
-    (element as { innerHTML: unknown }).innerHTML = value;
+    // `value` is a TrustedHTML object under Trusted Types, a string otherwise.
+    element.innerHTML = value as string;
   } catch (error) {
     if (policyError || (!active && trustedTypesFactory())) {
       throw Object.assign(new Error(

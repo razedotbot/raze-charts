@@ -10,8 +10,9 @@
 // CSP: constructable stylesheets (`adoptedStyleSheets`) are used where the
 // browser supports them because they are not inline `<style>` elements and do
 // not need `'unsafe-inline'`. Elsewhere a `<style>` element is created with
-// the configured nonce (`configureStyles({ nonce })`), falling back to the
-// conventional `<meta property="csp-nonce" nonce="…">` tag.
+// the nonce passed to this call, the configured nonce
+// (`configureStyles({ nonce })`), a nonce passed earlier for the same
+// document, or the conventional `<meta property="csp-nonce" nonce="…">` tag.
 //
 // Every selector is scoped to `.raze-chart-root` or `.raze-kit-*` classes;
 // the library never styles host elements.
@@ -50,6 +51,12 @@ export const STYLE_ELEMENT_ID = "raze-chart-base-css";
 
 const config: StyleConfig = { strategy: "auto" };
 const installed = new WeakMap<StyleRoot, RootSheet>();
+/**
+ * Last explicit nonce passed to `adoptStyles`/`ensureBaseStyles` per Document.
+ * A page has one CSP nonce, so overlays that later adopt styles into another
+ * root of the same document (a shadow root, a fullscreen element) reuse it.
+ */
+const documentNonces = new WeakMap<Document, string>();
 
 /** Declare a style chunk. Pure: nothing is inserted until it is adopted. */
 export function defineStyles(id: string, css: string): StyleChunk {
@@ -95,9 +102,12 @@ function ownerDocumentOf(root: StyleRoot): Document {
   return root.nodeType === 9 ? root as Document : (root as ShadowRoot).ownerDocument;
 }
 
-/** Nonce from explicit options, configuration, or a `csp-nonce` meta tag. */
+/**
+ * Nonce from explicit options, configuration, a nonce previously passed for
+ * this document, or a `csp-nonce` meta tag.
+ */
 export function resolveStyleNonce(doc: Document, options?: StyleOptions): string | undefined {
-  const explicit = options?.nonce ?? config.nonce;
+  const explicit = options?.nonce || config.nonce || documentNonces.get(doc);
   if (explicit) return explicit;
   const meta = doc.querySelector<HTMLMetaElement>('meta[property="csp-nonce"],meta[name="csp-nonce"]');
   const value = meta?.nonce || meta?.getAttribute("nonce") || meta?.content;
@@ -152,6 +162,7 @@ export function adoptStyles(
 ): void {
   if (typeof document === "undefined") return;
   const root = styleRootOf(node);
+  if (options?.nonce) documentNonces.set(ownerDocumentOf(root), options.nonce);
   let entry = installed.get(root);
   if (!entry) {
     entry = { ids: new Set(), css: [], sheet: null, element: null };
@@ -221,5 +232,6 @@ export const BASE_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   ".raze-chart-focusable:focus{outline:none}" +
   ".raze-chart-focusable:focus-visible{outline:2px solid var(--tv-color-toolbar-button-text-hover,#2962ff);outline-offset:1px}" +
   "@media (forced-colors:active){.raze-chart-focusable:focus-visible{outline-color:Highlight}}" +
+  "@keyframes raze-chart-spin{to{transform:rotate(360deg)}}" +
   "@media (prefers-reduced-motion:reduce){.raze-chart-loading-screen{transition:none!important}.raze-chart-loading-spinner{animation:none!important}.raze-chart-toolbar{scroll-behavior:auto!important}}",
 );

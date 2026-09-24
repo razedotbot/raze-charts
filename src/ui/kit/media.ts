@@ -41,6 +41,38 @@ export function prefersSheet(win: Window | undefined = currentWindow()): boolean
   return width > 0 && width < SHEET_BREAKPOINT;
 }
 
+/**
+ * Call `onChange` when `prefersSheet()` flips after a rotation, a window
+ * resize across `SHEET_BREAKPOINT` or a primary-pointer change, so an open
+ * overlay can leave a presentation that no longer fits. Returns a function
+ * that stops watching.
+ */
+export function watchSheetPreference(
+  onChange: (sheet: boolean) => void,
+  win: Window | undefined = currentWindow(),
+): () => void {
+  if (!win) return () => {};
+  let current = prefersSheet(win);
+  const check = (): void => {
+    const next = prefersSheet(win);
+    if (next === current) return;
+    current = next;
+    onChange(next);
+  };
+  let query: MediaQueryList | null = null;
+  try {
+    query = win.matchMedia?.("(pointer: coarse)") ?? null;
+  } catch {
+    query = null;
+  }
+  win.addEventListener("resize", check);
+  query?.addEventListener?.("change", check);
+  return () => {
+    win.removeEventListener("resize", check);
+    query?.removeEventListener?.("change", check);
+  };
+}
+
 /** The user asked the OS to minimise non-essential motion. */
 export function prefersReducedMotion(win: Window | undefined = currentWindow()): boolean {
   return matches("(prefers-reduced-motion: reduce)", win);

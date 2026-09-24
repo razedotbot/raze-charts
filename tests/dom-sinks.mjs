@@ -31,6 +31,24 @@ const cases = {
   "new Function": "new Function(code)();",
   "string timer": 'setTimeout("run()", 10);',
   "javascript url": 'a.href = "javascript:void 0";',
+  // Property-name forms that bypass a plain `.innerHTML =` match.
+  "innerHTML (bracket)": 'el["innerHTML"] = name;',
+  "outerHTML (bracket)": "el['outerHTML'] = name;",
+  "innerHTML (Object.assign)": "Object.assign(el, { innerHTML: name });",
+  "innerHTML (Reflect.set)": 'Reflect.set(el, "innerHTML", name);',
+  "innerHTML (defineProperty)": 'Object.defineProperty(el, "innerHTML", { value: name });',
+  "innerHTML (logical assignment)": "el.innerHTML ??= name;",
+  setHTMLUnsafe: "el.setHTMLUnsafe(name);",
+  "srcdoc (setAttributeNS)": 'frame.setAttributeNS(null, "srcdoc", name);',
+  // Laundering a runtime string into SafeMarkup.
+  "new SafeMarkup": "setMarkup(el, new SafeMarkup(name));",
+  "trustedMarkup(variable)": "setMarkup(el, trustedMarkup(name));",
+  "trustedMarkup(member)": "setMarkup(el, trustedMarkup(item.icon));",
+  "trustedMarkup(template with interpolation)": "setMarkup(el, trustedMarkup(`<b>${name}</b>`));",
+  "trustedMarkup(concatenation)": 'setMarkup(el, trustedMarkup("<b>" + name));',
+  "trustedMarkup(call)": "setMarkup(el, trustedMarkup(String(name)));",
+  "trustedMarkup(two arguments)": "setMarkup(el, trustedMarkup(ICON_CLOSE, name));",
+  "trustedMarkup alias": 'import { trustedMarkup as tm } from "./kit/safe";',
 };
 for (const [label, line] of Object.entries(cases)) {
   const { findings } = scanSource(`const x = 1;\n${line}\n`, "src/ui/Example.ts");
@@ -48,6 +66,19 @@ const benign = [
   "const re = /innerHTML = /; el.textContent = name;",
   "const tpl = `${a}//${b}`; el.textContent = tpl;",
   "evaluate(x); retrieval(y);",
+  // trustedMarkup() of library constants, and its own declaration.
+  "setMarkup(el, trustedMarkup(ICON_CLOSE));",
+  "setMarkup(el, trustedMarkup(ICONS.trend));",
+  'setMarkup(el, trustedMarkup("<svg viewBox=\\"0 0 18 18\\"></svg>"));',
+  "setMarkup(el, trustedMarkup('<svg></svg>'));",
+  'setMarkup(el, trustedMarkup(`<svg><path d="M0 0"/></svg>`));',
+  "setMarkup(el, trustedMarkup( /* icon */ ICON_PLUS ));",
+  "export function trustedMarkup(libraryConstant: string) { return libraryConstant; }",
+  'const hint = "never call trustedMarkup(name) with feed data";',
+  // Reads and prose are not sinks.
+  "const value = cond ? el.innerHTML : other;",
+  'const label = "innerHTML is a sink";',
+  'el.textContent = name; // el["innerHTML"] = name',
 ];
 for (const line of benign) {
   assert.deepEqual(scanSource(`${line}\n`, "src/ui/Example.ts").findings, [], line);
@@ -56,11 +87,22 @@ assert.equal(maskComments("a // b\nc /* d */ e").replace(/ +/g, " "), "a \nc e",
 assert.equal(maskComments('x = "//not a comment"'), 'x = "//not a comment"');
 
 // 4. Allow-list entries are statement-specific and path-scoped.
-const sanitizer = "(element as { innerHTML: unknown }).innerHTML = value;\n";
+const sanitizer = "element.innerHTML = value as string;\n";
 assert.deepEqual(scanSource(sanitizer, "src/ui/kit/safe.ts").findings, []);
 assert.equal(scanSource(`${sanitizer}el.innerHTML = other;\n`, "src/ui/kit/safe.ts").findings.length, 1,
   "a second sink in the sanitizer file still fails");
 assert.equal(scanSource(sanitizer, "src/ui/Other.ts").findings.length, 1, "allowances do not leak to other files");
+assert.deepEqual(scanSource("return new SafeMarkup(out);\n", "src/ui/kit/safe.ts").findings, [], "html`…` may mint SafeMarkup");
+assert.equal(scanSource("return new SafeMarkup(name);\n", "src/ui/kit/safe.ts").findings.length, 1, "no other SafeMarkup in safe.ts");
+const popupRowSink = "if (options?.trustedHtml) setMarkup(row, trustedMarkup(content));\n";
+assert.deepEqual(scanSource(popupRowSink, "src/ui/popup.ts").findings, [], "the documented popupRow trustedHtml opt-in is allowed");
+assert.equal(scanSource("setMarkup(row, trustedMarkup(content));\n", "src/ui/popup.ts").findings.length, 1,
+  "the popupRow allowance covers only the trustedHtml statement");
+assert.equal(scanSource(popupRowSink, "src/ui/ContextMenu.ts").findings.length, 1, "trustedMarkup allowances are file-scoped");
+assert.deepEqual(scanSource('if (typeof icon === "string") setMarkup(b, trustedMarkup(icon));\n', "src/ui/LeftSidebar.ts").findings, []);
+assert.deepEqual(scanSource("setMarkup(icon, trustedMarkup(s.svg));\n", "src/ui/LeftSidebar.ts").findings, []);
+assert.equal(scanSource("setMarkup(b, trustedMarkup(item.title));\n", "src/ui/LeftSidebar.ts").findings.length, 1,
+  "a new trustedMarkup() argument in the sidebar still fails");
 for (const file of ["src/chart/render.ts", "src/chart/render/mount.ts"]) {
   assert.deepEqual(scanSource("stage.innerHTML = markup;\n", file).findings, [], `${file}: native SVG stage allowance survives the render split`);
 }

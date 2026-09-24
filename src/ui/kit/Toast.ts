@@ -99,6 +99,9 @@ export function showToast(message: string, options: ToastOptions = {}): ToastHan
   let timer = 0;
   let remaining = options.duration ?? (kind === "error" ? 8000 : 5000);
   let startedAt = 0;
+  // The countdown runs only while the toast is neither hovered nor focused.
+  let hovered = false;
+  let focused = false;
 
   const close = (): void => {
     if (closed) return;
@@ -112,7 +115,9 @@ export function showToast(message: string, options: ToastOptions = {}): ToastHan
     }
   };
   const start = (): void => {
-    if (closed || remaining <= 0 || !Number.isFinite(remaining)) return;
+    // One timer at a time: a second one would be orphaned and close the toast
+    // while it is hovered or focused.
+    if (closed || timer || hovered || focused || remaining <= 0 || !Number.isFinite(remaining)) return;
     startedAt = Date.now();
     timer = window.setTimeout(close, remaining);
   };
@@ -138,11 +143,22 @@ export function showToast(message: string, options: ToastOptions = {}): ToastHan
   const dismiss = iconButton(doc, t("kit.toast.dismiss", "Dismiss notification"), ICON_CLOSE);
   dismiss.addEventListener("click", close);
   el.appendChild(dismiss);
-  el.addEventListener("pointerenter", pause);
-  el.addEventListener("pointerleave", start);
-  el.addEventListener("focusin", pause);
+  el.addEventListener("pointerenter", () => {
+    hovered = true;
+    pause();
+  });
+  el.addEventListener("pointerleave", () => {
+    hovered = false;
+    start();
+  });
+  el.addEventListener("focusin", () => {
+    focused = true;
+    pause();
+  });
   el.addEventListener("focusout", (event) => {
-    if (!el.contains(event.relatedTarget as Node | null)) start();
+    if (el.contains(event.relatedTarget as Node | null)) return;
+    focused = false;
+    start();
   });
 
   const handle: ToastHandle = { el, close };
