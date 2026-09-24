@@ -457,24 +457,11 @@ export function compileBar(ctx: MarkCompileContext, m: BarChartMark, s: MarkSeri
       ? mixHex(theme.background, m.fill || color, 0.22 + 0.78 * tFade)
       : (m.fill || color);
     const tip = `${name}\n${formatX(rawX)}   ${formatY(yv)}`;
-    const proxied = h < MIN_BAR_HIT;
-    nodes.push({
-      type: "rect",
-      x, y: top, w, h,
-      fill,
-      stroke: "none",
-      corner: stacked ? "all" : (yv >= 0 ? "top" : "bottom"),
-      valueY: y2,
-      datum: row,
-      series: name,
-      tip,
-      role: "bar",
-      highlight: !stacked,
-      ...(proxied ? { hit: false } : {}),
-    });
-    if (proxied) {
+    if (h < MIN_BAR_HIT) {
       // A zero or hairline bar paints (almost) nothing but must stay
-      // hoverable: an invisible hit band straddles its value.
+      // hoverable: an invisible hit band straddles its value. It precedes the
+      // painted rect, so hit tests (last node first) pick the painted bar
+      // wherever it is drawn and the band only around it.
       const mid = top + h / 2;
       const hitTop = Math.min(top, Math.round(mid - MIN_BAR_HIT / 2));
       nodes.push({
@@ -489,9 +476,24 @@ export function compileBar(ctx: MarkCompileContext, m: BarChartMark, s: MarkSeri
         series: name,
         tip,
         role: "bar",
-        highlight: false,
+        highlight: !stacked,
       });
     }
+    nodes.push({
+      type: "rect",
+      x, y: top, w, h,
+      fill,
+      stroke: "none",
+      corner: stacked ? "all" : (yv >= 0 ? "top" : "bottom"),
+      valueY: y2,
+      datum: row,
+      series: name,
+      tip,
+      role: "bar",
+      highlight: !stacked,
+      // Nothing painted, nothing to hit: the band above answers for it.
+      ...(h === 0 ? { hit: false } : {}),
+    });
     lastBarEndpointY = y2;
     lastBarValue = yv;
   }

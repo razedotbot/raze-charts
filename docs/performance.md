@@ -67,7 +67,7 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
 | | Scenario: Widget only | `import { widget }` | 63 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 50 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 51 KiB |
 | | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 38 KiB |
 | | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 27 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
@@ -105,7 +105,14 @@ ellipsis) and its shared SVG/Canvas painter (about 2.9 KiB), stable series ids
 with disambiguated names and reversible hidden rows (about 1 KiB), structured
 hover samples, rule-label options, zero-bar hit proxies and the curve-following
 ranged-area fill (about 1.5 KiB), and the validation of the new mark options
-(about 0.8 KiB).
+(about 0.8 KiB). Its review fixes then raised the artifact budget from 50 to
+51 KiB. With legend toggles that can show series hidden through
+`hiddenSeries` (the keys that hide each row), numbered rows for reused
+explicit names, a second legend-planning pass for plugin rows, legend rows for
+hidden plugins and value chips formatted from the datum, the artifact measured
+50.15 KiB. That is about 0.4 KiB of new code, less 0.2 KiB saved by dropping
+the renderer's duplicate monotone-tangent code in favour of the compiler's
+copy. The scenario budgets did not change.
 
 The root artifact budget was raised from 55 KiB to the 72 KiB hard cap set by
 architecture decision AD-01, and the "Widget only" scenario from 49 KiB to

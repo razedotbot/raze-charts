@@ -191,7 +191,8 @@ function colorBarSvg(c: CompiledChart, uid: string): string {
   const zeroY = min < 0 && max > 0
     ? y + h * (max / (max - min))
     : null;
-  const fmt = (v: number) => v.toFixed(Math.abs(v) < 10 ? 1 : 0);
+  // The scene's colour-bar formatter when the compiler sets one (a heatmap value format).
+  const fmt = c.formatters?.color ?? ((v: number) => v.toFixed(Math.abs(v) < 10 ? 1 : 0));
   return [
     `<defs><linearGradient id="${gid}" x1="0" y1="1" x2="0" y2="0">${stops.join("")}</linearGradient></defs>`,
     `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1" fill="url(#${gid})" />`,

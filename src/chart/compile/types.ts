@@ -153,7 +153,8 @@ export interface ChartSpec {
   /**
    * Series omitted from geometry (legend toggle). Each entry matches a series
    * id (the mark's `id`, else `mark-<index>`), a legend row id (pie slices use
-   * `<seriesId>/<label>`), or a series name. Hidden series keep their legend
+   * `<seriesId>/<label>`), or a series name (a shared name such as `"value"`
+   * also hides its numbered `"value (2)"`). Hidden series keep their legend
    * row, flagged `hidden`, so the toggle can always be reversed.
    */
   hiddenSeries?: readonly string[];
@@ -244,7 +245,7 @@ export interface LegendEntry {
   /**
    * Stable row id, the value a legend toggle adds to `hiddenSeries`: the
    * mark's `id`, else `mark-<index>`. Pie slices use `<seriesId>/<label>`.
-   * Marks sharing an explicit `name` share the first mark's row.
+   * Marks sharing an explicit `name` and colour share the first mark's row.
    */
   id: string;
   name: string;

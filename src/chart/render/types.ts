@@ -28,6 +28,10 @@ export interface MountChartOptions {
   idPrefix?: string;
   viewport?: ChartViewport;
   interaction?: boolean | MountInteraction;
+  /**
+   * Series to hide (ids, legend row ids, or names). When set, it replaces
+   * `spec.hiddenSeries`; legend clicks then toggle from it.
+   */
   hiddenSeries?: readonly string[];
   onViewportChange?: (viewport: ChartViewport) => void;
   onSelect?: (event: ChartPointerEvent) => void;
@@ -54,6 +58,8 @@ export interface MountState {
   viewport: ChartViewport | null;
   /** Series toggled off through the legend or options.hiddenSeries. */
   hidden: Set<string>;
+  /** True once options.hiddenSeries or a legend click set `hidden`; it then replaces spec.hiddenSeries. */
+  hiddenOwned: boolean;
   /** Full-data X extent used by presets and the navigator. */
   fullXExtent: [number, number] | null;
   lastInputWidth: number;

@@ -322,7 +322,8 @@ src/chart/compile/
   axes.ts       margins, plot rectangle, time/band/linear ticks
   format.ts     number, date, and signed formatting; axis formatters
   cartesian.ts  line/area, point, ruleY/ruleX, grouped and stacked bars
-  curve.ts      monotone/step curve flattening shared with ranged-area fills
+  curve.ts      monotone tangents (also used by the renderers) and the
+                monotone/step flattening behind ranged-area fills
   decimate.ts   extrema decimation and per-series budget allocation
   polar.ts      pie and radar
   heatmap.ts    square-cell layout and colour cells

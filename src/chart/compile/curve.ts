@@ -5,9 +5,9 @@
 import type { ChartCurve, ScenePoint } from "./types";
 
 /**
- * Fritsch-Carlson monotone tangents: no Catmull overshoot on peaks. Mirrors
- * the renderers' monotone path exactly, so a flattened curve lies on the
- * stroked one.
+ * Fritsch-Carlson monotone tangents: no Catmull overshoot on peaks. The
+ * renderers stroke monotone paths with this same function, so a flattened
+ * curve lies on the stroked one.
  */
 export function monotoneTangents(pts: readonly ScenePoint[]): number[] {
   const n = pts.length;

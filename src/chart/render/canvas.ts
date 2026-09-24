@@ -244,7 +244,7 @@ function paintColorBarCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): v
   traceRoundRect(ctx, x, y, w, h, 1);
   ctx.fillStyle = gradient;
   ctx.fill();
-  const format = (value: number): string => value.toFixed(Math.abs(value) < 10 ? 1 : 0);
+  const format = c.formatters?.color ?? ((value: number): string => value.toFixed(Math.abs(value) < 10 ? 1 : 0));
   ctx.font = `9px ${theme.font}`;
   ctx.fillStyle = theme.muted;
   ctx.textAlign = "start";

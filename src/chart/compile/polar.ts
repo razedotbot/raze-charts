@@ -2,7 +2,7 @@
 
 import { chartPalette } from "../theme";
 import type { MarkCompileContext } from "./context";
-import { pieSliceIds, type LegendRowDraft, type MarkSeries, type SeriesInfo } from "./legend";
+import { pieSliceIds, seriesKeys, type LegendRowDraft, type MarkSeries, type SeriesInfo } from "./legend";
 import { isBuiltinKind, type ChartMark, type PieChartMark, type RadarChartMark } from "./marks";
 import { sceneSample } from "./cartesian";
 import { asNumber, readChannel } from "./shared";
@@ -68,6 +68,8 @@ function sliceRows(ctx: MarkCompileContext, slices: readonly PieSlice[], s: Seri
       hidden: slice.hidden,
       markIndex: s.markIndex,
       symbol: "rect",
+      // A slice is hidden by its id or label, or by hiding the whole pie.
+      keys: [slice.id, slice.label, ...seriesKeys(s)],
     };
   });
 }

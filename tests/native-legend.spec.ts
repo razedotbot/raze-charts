@@ -54,6 +54,25 @@ test.describe("native legend", () => {
     expect(await sceneKey()).toBe(original);
   });
 
+  test("a series hidden through mount options comes back on the first click", async ({ page }) => {
+    await openLegend(page, "case=hidden");
+    const row = (id: string) => page.locator(`#host svg [data-series="${id}"]`);
+    const seriesCount = () => page.evaluate(() => {
+      const scene = (window as unknown as { __razeHandle: { getScene(): { nodes: { role?: string }[] } } }).__razeHandle.getScene();
+      return scene.nodes.filter((node) => node.role === "line").length;
+    });
+    await expect(row("mark-1")).toHaveAttribute("data-hidden", "true");
+    await expect(row("mark-4")).toHaveAttribute("data-hidden", "true");
+    expect(await seriesCount()).toBe(10);
+    await row("mark-1").click();
+    await expect(row("mark-1")).not.toHaveAttribute("data-hidden", "true");
+    await expect(row("mark-4")).toHaveAttribute("data-hidden", "true");
+    expect(await seriesCount()).toBe(11);
+    await row("mark-1").click();
+    await expect(row("mark-1")).toHaveAttribute("data-hidden", "true");
+    expect(await seriesCount()).toBe(10);
+  });
+
   test("12 pie slices compact into one readable column", async ({ page }) => {
     await openLegend(page, "case=pie");
     const host = page.locator("#host");

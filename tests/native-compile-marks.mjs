@@ -17,7 +17,7 @@ import { JSDOM } from "jsdom";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const {
-  area, bar, compileChart, customMark, defineChart, defineMarkPlugin, hitTestCompiled, line, mountChart,
+  area, bar, compileChart, customMark, defineChart, defineMarkPlugin, heatmap, hitTestCompiled, line, mountChart,
   paintChartCanvas, parseChartColor, pie, point, radar, ruleX, ruleY, svgFromCompiled,
   LIGHT_CHART_THEME, DARK_CHART_THEME,
 } = await import(pathToFileURL(resolve(root, "dist/chart.esm.js")).href);
@@ -81,7 +81,26 @@ check("hover samples carry series id, source row, datum and raw values", () => {
   const withPlugin = compile({ marks: [line(rows, { x: "x", y: "y" }), customMark(probe, [], {})], scales: { x: { type: "linear" } } });
   const pluginSample = withPlugin.hoverSamples.find((sample) => sample.series === "Probe");
   assert.equal(pluginSample.seriesId, "mark-1");
+  assert.equal(pluginSample.index, -1, "plugins report no source row");
   assert.ok(Math.abs(pluginSample.xValue - 2) < 1e-9 && Math.abs(pluginSample.yValue - 4) < 1e-9, "plugin samples recover data values");
+
+  const day = Date.UTC(2024, 0, 1);
+  const timeProbe = defineMarkPlugin({
+    kind: "time-probe",
+    compile: ({ mapX, mapY }) => ({ nodes: [], samples: [{ x: mapX(new Date(day + 86400000)), y: mapY(3), series: "T", color: "red", tip: "t", kind: "point" }] }),
+  });
+  const timeRows = [{ t: new Date(day), v: 1 }, { t: new Date(day + 2 * 86400000), v: 5 }];
+  const onTime = compile({ marks: [line(timeRows, { x: "t", y: "v" }), customMark(timeProbe, [], {})] });
+  const timeSample = onTime.hoverSamples.find((sample) => sample.series === "T");
+  assert.ok(timeSample.xValue instanceof Date, "time axes recover a Date");
+  assert.ok(Math.abs(timeSample.xValue.getTime() - (day + 86400000)) < 1000);
+
+  const bandProbe = defineMarkPlugin({
+    kind: "band-probe",
+    compile: ({ mapX, mapY }) => ({ nodes: [], samples: [{ x: mapX("Feb"), y: mapY(8), series: "B", color: "red", tip: "b", kind: "point" }] }),
+  });
+  const onBand = compile({ marks: [bar([{ m: "Jan", v: 4 }, { m: "Feb", v: 8 }], { x: "m", y: "v" }), customMark(bandProbe, [], {})] });
+  assert.equal(onBand.hoverSamples.find((sample) => sample.series === "B").xValue, "Feb", "band axes recover the category");
 });
 
 // ---------------------------------------------------------------------------
@@ -95,14 +114,14 @@ check("series with the same default name get two legend entries and separate ids
   const hidden = compile({ marks: [line(rows, { x: "x", y: "y" }), line(rows, { x: "x", y: "y" })], hiddenSeries: ["mark-1"] });
   assert.equal(hidden.nodes.filter((node) => node.role === "line").length, 1, "hiding one id hides only that series");
 
-  const grouped = compile({
-    marks: [area(rows, { x: "x", y: "y", name: "Revenue", id: "rev-fill" }), line(rows, { x: "x", y: "y", name: "Revenue" })],
-  });
-  assert.deepEqual(grouped.legend.map((row) => row.id), ["rev-fill"], "marks sharing an explicit name share one row");
-  const groupHidden = compile({
-    marks: [area(rows, { x: "x", y: "y", name: "Revenue", id: "rev-fill" }), line(rows, { x: "x", y: "y", name: "Revenue" })],
-    hiddenSeries: ["rev-fill"],
-  });
+  // An area plus its outline: same explicit name, same colour, one row.
+  const revenueGroup = [
+    area(rows, { x: "x", y: "y", name: "Revenue", id: "rev-fill", fill: "#0f766e", stroke: "#0f766e" }),
+    line(rows, { x: "x", y: "y", name: "Revenue", stroke: "#0F766E" }),
+  ];
+  const grouped = compile({ marks: revenueGroup });
+  assert.deepEqual(grouped.legend.map((row) => row.id), ["rev-fill"], "marks sharing an explicit name and colour share one row");
+  const groupHidden = compile({ marks: revenueGroup, hiddenSeries: ["rev-fill"] });
   assert.equal(groupHidden.nodes.filter((node) => node.series === "Revenue").length, 0, "toggling the row hides the whole group");
 
   assert.throws(
@@ -114,6 +133,45 @@ check("series with the same default name get two legend entries and separate ids
     (error) => error.code === "E_MARK_OPTION" && /default id/.test(error.message),
   );
   assert.throws(() => compile({ marks: [line(rows, { x: "x", y: "y", id: "" })] }), (error) => error.code === "E_MARK_OPTION");
+});
+
+check("explicit names reused with different colours get separate rows and a one-time warning", () => {
+  const rows = [{ x: 1, y: 1 }, { x: 2, y: 3 }];
+  const marks = [
+    line(rows, { x: "x", y: "y", name: "Turnover", stroke: "#ff0000" }),
+    bar(rows, { x: "x", y: "y", name: "Turnover", fill: "#00ff00" }),
+  ];
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  let scene;
+  try {
+    scene = compile({ marks });
+    compile({ marks });
+    // Two series named y (the React adapter names series after their dataKey) keep two rows too.
+    const twoY = compile({ marks: [line(rows, { x: "x", y: "y", name: "y" }), line(rows, { x: "x", y: "y", name: "y" })] });
+    assert.deepEqual(twoY.legend.map((row) => row.name), ["y", "y (2)"]);
+    assert.notEqual(twoY.legend[0].color, twoY.legend[1].color);
+  } finally {
+    console.warn = warn;
+  }
+  assert.deepEqual(scene.legend.map((row) => [row.id, row.name, row.color]), [
+    ["mark-0", "Turnover", "#ff0000"],
+    ["mark-1", "Turnover (2)", "#00ff00"],
+  ], "each colour keeps its own row and swatch");
+  assert.equal(scene.nodes.find((node) => node.role === "bar").tip.split("\n")[0], "Turnover (2)", "tooltips name the series as the legend does");
+  const turnover = warnings.filter((message) => message.includes('"Turnover"'));
+  assert.equal(turnover.length, 1, "the collision is reported once");
+  assert.match(turnover[0], /Turnover \(2\)/);
+  assert.equal(warnings.filter((message) => message.includes('"y"')).length, 1);
+
+  const bySecond = compile({ marks, hiddenSeries: ["Turnover (2)"] });
+  assert.deepEqual(bySecond.legend.map((row) => row.hidden), [false, true], "a numbered name hides only its series");
+  const byBase = compile({ marks, hiddenSeries: ["Turnover"] });
+  assert.deepEqual(byBase.legend.map((row) => row.hidden), [true, true], "the shared name still hides every series that uses it");
+  // Default names keep matching the same way: ["y"] hides `y` and `y (2)`, as it did before numbering.
+  const defaults = compile({ marks: [line(rows, { x: "x", y: "y" }), line(rows, { x: "x", y: "y" })], hiddenSeries: ["y"] });
+  assert.deepEqual(defaults.legend.map((row) => [row.name, row.hidden]), [["y", true], ["y (2)", true]]);
 });
 
 const salesRows = [
@@ -170,6 +228,74 @@ check("a mounted legend toggles a series off and back on through its row id", ()
     assert.ok(!handle.getScene().nodes.some((node) => node.series === "A"));
     click();
     assert.equal(sceneKey(handle.getScene()), original, "second click restores the original scene");
+    handle.destroy();
+  } finally {
+    dom.window.close();
+    globalThis.window = previous.window;
+    globalThis.document = previous.document;
+  }
+});
+
+check("a legend click shows a series hidden by options or spec hiddenSeries; a second click hides it again", () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true });
+  const previous = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  const visible = sceneKey(compile(toggleSpec()));
+  const pointerdown = (host, rowId) => host.querySelector(`[data-series="${rowId}"]`)
+    .dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+  const run = (label, spec, options, rowId, hiddenAfter) => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const handle = mountChart(host, defineChart(spec), { width: 480, height: 300, ...options });
+    const row = () => handle.getScene().legend.find((entry) => entry.id === rowId);
+    assert.equal(row().hidden, true, `${label}: starts hidden`);
+    pointerdown(host, rowId);
+    assert.equal(row().hidden, false, `${label}: the first click shows it`);
+    assert.deepEqual(
+      handle.getScene().legend.filter((entry) => entry.hidden).map((entry) => entry.id),
+      hiddenAfter,
+      `${label}: other hidden series stay hidden`,
+    );
+    if (!hiddenAfter.length) assert.equal(sceneKey(handle.getScene()), visible, `${label}: the scene is the fully visible one`);
+    pointerdown(host, rowId);
+    assert.equal(row().hidden, true, `${label}: the second click hides it again`);
+    pointerdown(host, rowId);
+    assert.equal(row().hidden, false, `${label}: and the toggle keeps working`);
+    handle.destroy();
+  };
+  try {
+    run("options by id", toggleSpec(), { hiddenSeries: ["mark-0"] }, "mark-0", []);
+    run("options by name", toggleSpec(), { hiddenSeries: ["A"] }, "mark-0", []);
+    run("spec by id", toggleSpec(["mark-0"]), {}, "mark-0", []);
+    run("spec by name", toggleSpec(["A"]), {}, "mark-0", []);
+    run("options with another hidden series", toggleSpec(), { hiddenSeries: ["A", "B"] }, "mark-0", ["mark-1"]);
+    run("spec with another hidden series", toggleSpec(["mark-0", "B"]), {}, "mark-1", ["mark-0"]);
+
+    // A grouped row (an area plus its outline) hidden by its shared name shows both marks again.
+    const grouped = {
+      marks: [
+        area(salesRows, { x: "m", y: "a", name: "A", fill: "#0f766e", stroke: "#0f766e" }),
+        line(salesRows, { x: "m", y: "a", name: "A", stroke: "#0f766e" }),
+        bar(salesRows, { x: "m", y: "b", name: "B" }),
+      ],
+    };
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const handle = mountChart(host, defineChart(grouped), { width: 480, height: 300, hiddenSeries: ["A"] });
+    assert.equal(handle.getScene().nodes.filter((node) => node.series === "A").length, 0);
+    pointerdown(host, "mark-0");
+    const shown = handle.getScene();
+    assert.ok(shown.nodes.some((node) => node.role === "area" && node.series === "A"), "the area is back");
+    assert.ok(shown.nodes.some((node) => node.role === "line" && node.series === "A"), "and so is its outline");
+    pointerdown(host, "mark-0");
+    assert.equal(handle.getScene().nodes.filter((node) => node.series === "A").length, 0, "the row hides the whole group");
+    pointerdown(host, "mark-0");
+    handle.update(defineChart(grouped));
+    assert.equal(handle.getScene().legend[0].hidden, false, "a legend toggle survives update()");
+    handle.update(defineChart(grouped), { hiddenSeries: ["B"] });
+    assert.deepEqual(handle.getScene().legend.map((entry) => entry.hidden), [false, true], "options.hiddenSeries replaces the toggled set");
     handle.destroy();
   } finally {
     dom.window.close();
@@ -287,6 +413,54 @@ check("Canvas paints the legend in the compiled boxes, dimming hidden rows", () 
   assert.equal(text("B")[2], b.box.x + 8 + 5);
   assert.equal(text("B")[4], 0.42, "the hidden row paints at reduced opacity");
   assert.equal(text("A")[4], 1);
+});
+
+check("colour-bar labels go through the scene's colour formatter when it has one", () => {
+  const cells = [];
+  for (const h of ["00", "06", "12"]) for (const token of ["A", "B"]) cells.push({ h, token, value: (h.charCodeAt(1) % 7) - 3 });
+  const scene = compile({ marks: [heatmap(cells, { x: "h", y: "token", valueKey: "value" })] });
+  const percent = (value) => `${Number(value).toFixed(0)}%`;
+  const formatted = { ...scene, formatters: { ...scene.formatters, color: percent } };
+  const svg = svgFromCompiled(formatted, { idPrefix: "heat" });
+  assert.ok(svg.includes(`>${percent(scene.colorBar.max)}</text>`) && svg.includes(`>${percent(scene.colorBar.min)}</text>`));
+  const texts = [];
+  const ctx = new Proxy({}, {
+    get(_, prop) {
+      if (prop === "fillText") return (text) => texts.push(text);
+      if (prop === "createLinearGradient") return () => ({ addColorStop() {} });
+      if (prop === "measureText") return (text) => ({ width: text.length * 5 });
+      return () => {};
+    },
+    set() { return true; },
+  });
+  paintChartCanvas(ctx, formatted);
+  assert.ok(texts.includes(percent(scene.colorBar.max)) && texts.includes(percent(scene.colorBar.min)));
+  // Without one, the bar keeps its number format: a heatmap's y formatter labels categories.
+  assert.ok(svgFromCompiled(scene, { idPrefix: "heat" }).includes(`>${scene.colorBar.max.toFixed(1)}</text>`));
+});
+
+check("the Canvas legend leaves no line cap behind for the grid", () => {
+  const stack = [];
+  let state = { lineCap: "butt" };
+  const strokes = [];
+  const ctx = new Proxy({}, {
+    get(_, prop) {
+      if (prop === "save") return () => stack.push({ ...state });
+      if (prop === "restore") return () => { state = stack.pop() ?? state; };
+      if (prop === "stroke") return () => strokes.push({ ...state });
+      if (prop in state) return state[prop];
+      if (prop === "createLinearGradient") return () => ({ addColorStop() {} });
+      if (prop === "measureText") return (text) => ({ width: text.length * 5 });
+      return () => {};
+    },
+    set(_, prop, value) { state[prop] = value; return true; },
+  });
+  const scene = compile(toggleSpec());
+  paintChartCanvas(ctx, scene);
+  const grid = strokes.filter((entry) => entry.strokeStyle === scene.theme.grid);
+  assert.ok(grid.length > 0);
+  assert.ok(grid.every((entry) => entry.lineCap === "butt"), "grid lines keep butt caps, as in SVG");
+  assert.ok(strokes.some((entry) => entry.lineCap === "round"), "the line swatch itself is rounded");
 });
 
 // ---------------------------------------------------------------------------
@@ -430,6 +604,34 @@ check("a ranged area's fill follows the stroke's monotone curve on both edges", 
       assert.ok(distanceToPolyline(point, fill.points) < 0.6, `stroke point ${point.x},${point.y} leaves the fill edge`);
     }
   }
+  // The compiler flattens the curve into the fill; the renderer strokes cubic paths from
+  // rounded control points. Random bands pin that the two stay within 0.6px.
+  let seed = 7;
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  for (let trial = 0; trial < 25; trial++) {
+    const count = 3 + Math.floor(random() * 9);
+    let level = 50;
+    const rows = Array.from({ length: count }, (_, x) => {
+      level += (random() - 0.5) * 40;
+      const spread = 1 + random() * 20;
+      return { x: x + (random() < 0.2 ? 0.01 : 0), hi: level + spread, lo: level - spread * random() };
+    });
+    const randomScene = compile({
+      marks: [area(rows, { x: "x", y: "hi", y0: "lo", stroke0: true, lastValue: false })],
+      scales: { x: { type: "linear" } },
+    }, { width: 360 + Math.floor(random() * 240), height: 180 + Math.floor(random() * 160) });
+    const outline = randomScene.nodes.find((node) => node.role === "ranged-area").points;
+    const strokes = [...svgFromCompiled(randomScene, { idPrefix: `r${trial}` }).matchAll(/<path fill="none"[^>]* d="([^"]+)"/g)];
+    assert.equal(strokes.length, 2);
+    for (const [, d] of strokes) {
+      for (const point of samplePath(d)) {
+        assert.ok(distanceToPolyline(point, outline) < 0.6, `trial ${trial}: stroke point ${point.x},${point.y} leaves the fill edge`);
+      }
+    }
+  }
   const stepped = compile({ marks: [area(band, { x: "x", y: "hi", y0: "lo", curve: "step" })], scales: { x: { type: "linear" } } });
   const stepFill = stepped.nodes.find((node) => node.role === "ranged-area");
   assert.equal(stepFill.points.length, (band.length * 2 - 1) * 2, "step bands trace both edges as steps");
@@ -455,10 +657,106 @@ check("zero bars paint nothing but stay hoverable; minBarHeight adds a stub", ()
   assert.equal(stubBars[2].h, 3, "tiny values get the stub");
   assert.equal(stubBars[2].y + stubBars[2].h, Math.round(stub.yScale.map(0)), "the stub grows up from the baseline");
   const negative = compile({ marks: [bar([{ c: "A", v: -0.001 }, { c: "B", v: 5 }], { x: "c", y: "v", minBarHeight: 4 })] });
-  const down = negative.nodes.find((node) => node.role === "bar");
+  const down = negative.nodes.find((node) => node.role === "bar" && node.fillOpacity !== 0);
   assert.equal(down.y, Math.round(negative.yScale.map(0)), "negative stubs grow down from the baseline");
   assert.equal(down.h, 4);
   assert.throws(() => compile({ marks: [bar(rows, { x: "c", y: "v", minBarHeight: -1 })] }), (error) => error.code === "E_MARK_OPTION");
+});
+
+check("a short visible bar is hit and highlighted as itself; its hit band only surrounds it", () => {
+  const scene = compile({ marks: [bar([{ c: "A", v: 100 }, { c: "B", v: 1.2 }], { x: "c", y: "v", name: "Volume" })] });
+  const bars = scene.nodes.filter((node) => node.role === "bar");
+  const painted = bars.find((node) => node.tip === "Volume\nB   1.2" && node.fillOpacity !== 0);
+  const band = bars.find((node) => node.tip === "Volume\nB   1.2" && node.fillOpacity === 0);
+  assert.ok(painted.h >= 1 && painted.h < 6, `a ${painted.h}px bar`);
+  assert.notEqual(painted.hit, false, "the painted bar stays hittable");
+  assert.equal(band.highlight, true, "its hit band highlights like the bar");
+  assert.ok(bars.indexOf(band) < bars.indexOf(painted), "the band sits under the painted bar");
+  const cx = painted.x + painted.w / 2;
+  assert.equal(hitTestCompiled(scene, cx, painted.y + painted.h / 2), painted, "hovering the bar hits the painted rect");
+  assert.equal(hitTestCompiled(scene, cx, band.y + 0.5)?.tip, painted.tip, "just outside it, the band still answers");
+  const tall = bars.find((node) => node.tip === "Volume\nA   100");
+  assert.equal(bars.filter((node) => node.tip === tall.tip).length, 1, "tall bars need no band");
+});
+
+check("plugin legend rows are planned into the top band; hidden plugins keep their rows", () => {
+  const many = defineMarkPlugin({
+    kind: "many-rows",
+    compile: () => ({ nodes: [], legend: Array.from({ length: 10 }, (_, i) => ({ name: `Plugin row ${i + 1}`, color: "#e11d48" })) }),
+  });
+  const marks = [line(salesRows, { x: "m", y: "a", name: "A" }), customMark(many, [], {})];
+  const scene = compile({ marks });
+  const { legendLayout: layout } = scene;
+  assert.equal(layout.rows.length + layout.overflow, 11);
+  assert.ok(new Set(layout.rows.map((row) => row.box.y)).size >= 2, "plugin rows wrap");
+  assert.ok(Math.max(...layout.rows.map((row) => row.box.y + row.box.h)) <= scene.plot.y, "no legend row reaches the plot");
+  assertNoOverlap(layout.rows.map((row) => row.box), "plugin legend");
+
+  const hidden = compile({ marks, hiddenSeries: ["mark-1"] });
+  assert.deepEqual(hidden.legend.map((row) => row.name), scene.legend.map((row) => row.name), "a hidden plugin keeps its own rows");
+  assert.ok(hidden.legend.slice(1).every((row) => row.hidden && row.id === "mark-1"));
+  assert.equal(hidden.margin.top, scene.margin.top, "hiding the plugin does not move the band");
+
+  // A plugin with no rows reserves no line of its own.
+  // Kinds as wide as the series names, so the preview (one row per plugin, named by kind) wraps.
+  const oneRow = defineMarkPlugin({ kind: "Series number 90", compile: () => ({ nodes: [] }) });
+  const noRows = defineMarkPlugin({ kind: "Series number 91", compile: () => ({ nodes: [], legend: [] }) });
+  const series = (n) => Array.from({ length: n }, (_, i) => line(salesRows, { x: "m", y: "a", name: `Series number ${i + 1}`, lastValue: false }));
+  let n = 1;
+  while (compile({ marks: [...series(n + 1)] }).margin.top === compile({ marks: series(1) }).margin.top) n += 1;
+  // n series fill one line exactly; one more row wraps.
+  assert.ok(compile({ marks: [...series(n), customMark(oneRow, [], {})] }).margin.top > compile({ marks: series(n) }).margin.top);
+  assert.equal(
+    compile({ marks: [...series(n), customMark(noRows, [], {})] }).margin.top,
+    compile({ marks: series(n) }).margin.top,
+    "an empty plugin legend does not grow the band",
+  );
+});
+
+check("the hover value chip shows the datum through the axis formatter", () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true });
+  const previous = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  try {
+    const money = (value) => `$${Number(value).toFixed(3)}`;
+    const rows = [{ x: 1, y: 1.1 }, { x: 2, y: 1.15 }, { x: 3, y: 1.2 }];
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const handle = mountChart(host, defineChart({
+      marks: [line(rows, { x: "x", y: "y", name: "Rev" })],
+      scales: { y: { tickFormat: money } },
+    }), { width: 480, height: 300 });
+    const wrap = host.firstElementChild;
+    const scene = handle.getScene();
+    const sample = scene.samples[scene.samples.length - 1];
+    const move = (x, y) => wrap.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientX: x, clientY: y }));
+    const chips = () => [...wrap.children].filter((node) => node.style.display === "block").map((node) => node.textContent);
+    move(sample.x, sample.y);
+    assert.ok(chips().includes("$1.200"), `the value chip reads the datum: ${JSON.stringify(chips())}`);
+    handle.destroy();
+    // Over empty plot space (above a short bar) the chip formats the cursor's value through the axis too.
+    const barHost = document.createElement("div");
+    document.body.appendChild(barHost);
+    const bars = mountChart(barHost, defineChart({
+      marks: [bar([{ c: "A", v: 1.2 }, { c: "B", v: 0.5 }], { x: "c", y: "v", name: "Rev" })],
+      scales: { y: { tickFormat: money } },
+    }), { width: 480, height: 300 });
+    const barWrap = barHost.firstElementChild;
+    const barScene = bars.getScene();
+    const short = barScene.nodes.find((node) => node.role === "bar" && node.tip.endsWith("$0.500"));
+    barWrap.dispatchEvent(new dom.window.MouseEvent("pointermove", {
+      bubbles: true, clientX: short.x + short.w / 2, clientY: barScene.plot.y + 4,
+    }));
+    const texts = [...barWrap.children].filter((node) => node.style.display === "block").map((node) => node.textContent);
+    assert.ok(texts.some((text) => /^\$1\.\d{3}$/.test(text)), `the free-cursor chip uses the formatter: ${JSON.stringify(texts)}`);
+    bars.destroy();
+  } finally {
+    dom.window.close();
+    globalThis.window = previous.window;
+    globalThis.document = previous.document;
+  }
 });
 
 console.log(`NATIVE COMPILE MARKS: PASS (${checks} checks)`);

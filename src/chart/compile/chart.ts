@@ -6,7 +6,7 @@
 //   (scales) -> axes (ticks) -> cartesian/polar/heatmap/plugin marks
 //   -> legend rows and layout
 
-import type { AnyScale } from "../scales";
+import type { AnyScale, BandScale } from "../scales";
 import type { SceneHoverSample } from "../sceneTypes";
 import { resolveChartTheme, type DashboardTheme } from "../theme";
 import { buildTicks, plotArea, resolveMargin } from "./axes";
@@ -31,6 +31,7 @@ import {
   markSeries,
   mergeLegendRows,
   planTopLegend,
+  recordLegendToggles,
   resolveLegendPlacement,
   resolveSeries,
   seriesLegendRow,
@@ -38,7 +39,7 @@ import {
   type LegendRowDraft,
   type SeriesInfo,
 } from "./legend";
-import { isBuiltinKind, isBuiltinMark, isPluginMark, type CartesianChartMark } from "./marks";
+import { isBuiltinKind, isBuiltinMark, isPluginMark, type CartesianChartMark, type PluginChartMark } from "./marks";
 import type { MarkCompileContext } from "./context";
 import { compilePluginMark, resolvePluginDomains } from "./plugin";
 import { compilePie, compileRadar, createRadarState, pieLegendRows } from "./polar";
@@ -47,6 +48,20 @@ import type { ChartDefinition, CompiledChart, HoverSample } from "./types";
 import { validateChartSpec } from "./validate";
 
 export function compileChart(definition: ChartDefinition, size: { width: number; height: number }): CompiledChart {
+  return compilePass(definition, size, null);
+}
+
+/**
+ * One compile. The top legend band is planned before any mark compiles, from
+ * preview rows that count each plugin mark as one row. When the rows the
+ * marks actually produce need a different number of wrapped lines, a second
+ * pass plans the band from those rows, so plugin rows never spill onto the plot.
+ */
+function compilePass(
+  definition: ChartDefinition,
+  size: { width: number; height: number },
+  plannedRows: readonly LegendRowDraft[] | null,
+): CompiledChart {
   if (!definition || typeof definition.spec !== "function") {
     throw new ChartCompileError("E_CHART_SPEC", "compileChart() requires a definition created by defineChart().");
   }
@@ -94,7 +109,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
   const baseMargin = resolveMargin(spec, { polar, isPie, heatmap, hideLegend, pieHasLegendRows, isHist: bars.isHist });
   // A wrapping top legend grows the top margin one row at a time.
   const legendBand = planTopLegend(
-    legendPlacement === "top" ? previewLegendRows(seriesTable.series) : [],
+    legendPlacement === "top" ? plannedRows ?? previewLegendRows(seriesTable.series) : [],
     spec, width, height, baseMargin, theme.font,
   );
   const margin = growTopMargin(baseMargin, legendBand, spec);
@@ -134,6 +149,8 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       // Hidden series keep their legend rows so a toggle can bring them back.
       if (series.mark.kind === "pie") {
         for (const row of pieLegendRows(ctx, series, seriesTable.isHidden)) ctx.legend.push(row);
+      } else if (isPluginMark(series.mark)) {
+        for (const row of hiddenPluginRows(ctx, series)) ctx.legend.push(row);
       } else {
         const row = seriesLegendRow(series);
         if (row) ctx.legend.push(row);
@@ -148,7 +165,7 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       compilePluginMark(ctx, m, ms.name, ms.color);
       for (let k = legendStart; k < ctx.legend.length; k++) ctx.legend[k] = stampLegendRow(ctx.legend[k]!, ms);
       for (let k = sampleStart; k < ctx.samples.length; k++) {
-        ctx.samples[k] = pluginHoverSample(ctx, ctx.samples[k]!, ms, k - sampleStart);
+        ctx.samples[k] = pluginHoverSample(ctx, ctx.samples[k]!, ms);
       }
       continue;
     }
@@ -166,14 +183,21 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
 
   const { nodes, samples } = ctx;
   const legendRows = hideLegend ? [] : mergeLegendRows(ctx.legend.map((item) => item as LegendRowDraft));
-  return {
+  const explicitTop = spec.margin?.top !== undefined;
+  if (plannedRows === null && legendPlacement === "top" && !explicitTop) {
+    const needed = planTopLegend(legendRows, spec, width, height, baseMargin, theme.font);
+    if (Math.max(1, needed.lines) !== Math.max(1, legendBand.lines)) return compilePass(definition, size, legendRows);
+  }
+  const scene: CompiledChart = {
     width, height, margin, plot,
     xScale, yScale, xTicks, yTicks,
     grid: heatmap ? spec.grid === true : spec.grid !== false,
     legend: legendEntries(legendRows),
     legendPlacement,
     legendLayout: layoutLegend(legendRows, {
-      placement: legendPlacement, width, height, plot, margin, font: theme.font, maxLines: legendBand.maxLines,
+      placement: legendPlacement, width, height, plot, margin, font: theme.font,
+      // Never more lines than the band reserved above the plot.
+      maxLines: explicitTop ? legendBand.maxLines : Math.max(1, legendBand.lines),
     }),
     formatters: { x: formatters.formatX, y: formatters.formatY },
     hoverSamples: samples as SceneHoverSample[],
@@ -196,6 +220,8 @@ export function compileChart(definition: ChartDefinition, size: { width: number;
       decimatedPoints: ctx.decimatedPoints,
     },
   };
+  recordLegendToggles(scene, legendRows, seriesTable.series);
+  return scene;
 }
 
 /** Rows the top legend will show, known before any mark compiles (plugins count as one row). */
@@ -208,15 +234,56 @@ function previewLegendRows(series: readonly SeriesInfo[]): LegendRowDraft[] {
   return mergeLegendRows(rows);
 }
 
-/** Structured fields for a plugin's hover sample, recovered from its pixel position. */
-function pluginHoverSample(ctx: MarkCompileContext, sample: HoverSample, s: SeriesInfo, index: number): SceneHoverSample {
+/**
+ * A hidden plugin keeps the legend rows it shows while visible, so toggling it
+ * never reshapes the legend. Its output is compiled against the visible
+ * series' scales and only the rows are kept; if that fails, it falls back to
+ * one series row.
+ */
+function hiddenPluginRows(ctx: MarkCompileContext, s: SeriesInfo): LegendRowDraft[] {
+  const scratch: MarkCompileContext = { ...ctx, nodes: [], legend: [], samples: [], lastValues: [] };
+  try {
+    compilePluginMark(scratch, s.mark as PluginChartMark, s.name, s.color);
+  } catch {
+    const row = seriesLegendRow(s);
+    return row ? [row] : [];
+  }
+  return scratch.legend.map((row) => stampLegendRow(row, s));
+}
+
+/** Data-space x at a plugin sample's pixel: the nearest category on band scales, a Date on time scales. */
+function pluginXValue(ctx: MarkCompileContext, px: number): unknown {
+  const scale = ctx.xScale;
+  if (scale.kind === "band") {
+    const band = scale as BandScale<string | number>;
+    const half = band.bandwidth() / 2;
+    let best: string | number | undefined;
+    let bestDistance = Infinity;
+    for (const value of band.domain) {
+      const distance = Math.abs(band.start(value) + half - px);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = value;
+      }
+    }
+    return best;
+  }
+  const value = scale.invert(px);
+  return ctx.xType === "time" ? new Date(value) : value;
+}
+
+/**
+ * Structured fields for a plugin's hover sample, recovered from its pixel
+ * position. Plugins report no source row, so `index` is -1 and `datum` is undefined.
+ */
+function pluginHoverSample(ctx: MarkCompileContext, sample: HoverSample, s: SeriesInfo): SceneHoverSample {
   return {
     ...sample,
     seriesId: s.id,
     markIndex: s.markIndex,
-    index,
+    index: -1,
     datum: undefined,
-    xValue: ctx.xScale.kind === "linear" ? ctx.xScale.invert(sample.x) : undefined,
+    xValue: pluginXValue(ctx, sample.x),
     yValue: ctx.yScale.kind === "linear" ? ctx.yScale.invert(sample.y) : null,
   };
 }

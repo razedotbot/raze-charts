@@ -1,6 +1,7 @@
 // Mount gestures: legend toggles, click-to-select, wheel zoom, drag pan with
 // a live SVG preview, and Shift-drag brush selection.
 
+import { toggleHiddenSeries } from "../compile/legend";
 import type { ChartViewport, CompiledChart } from "../compile/types";
 import { hitTestCompiled, nearestSample } from "./hit";
 import type { MountRuntime } from "./types";
@@ -117,8 +118,9 @@ export function attachGestures(rt: MountRuntime, onHover: (ev: PointerEvent) => 
     const target = ev.target as Element | null;
     const series = target?.closest?.("[data-series]")?.getAttribute("data-series");
     if (series) {
-      if (state.hidden.has(series)) state.hidden.delete(series);
-      else state.hidden.add(series);
+      // Showing a row removes every key that hides it (an id, a name, or spec.hiddenSeries).
+      state.hidden = new Set(toggleHiddenSeries(compiled, state.hidden, series));
+      state.hiddenOwned = true;
       rt.paint();
       return;
     }

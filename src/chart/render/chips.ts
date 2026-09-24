@@ -1,8 +1,10 @@
 // Axis chips: last-value chips on the value axis (SVG and Canvas share one
 // placement pass) and the crosshair chip labels shown by mounted charts.
 
+import { formatTick } from "../compile/format";
 import type { HoverSample, CompiledChart, SceneNode } from "../compile/types";
 import type { LinearScale } from "../scales";
+import type { SceneHoverSample } from "../sceneTypes";
 import { chartColorWithOpacity, readableTextColor } from "../theme";
 import { esc, hair, traceRoundRect } from "./primitives";
 
@@ -122,7 +124,10 @@ export interface CrosshairTarget {
   y: number;
 }
 
-/** Value-axis crosshair chip text. */
+/**
+ * Value-axis crosshair chip text, through the scene's Y formatter: the
+ * hovered datum's own value on a line or point, never a pixel read back.
+ */
 export function crosshairValueLabel(c: CompiledChart, target: CrosshairTarget): string {
   const { hit, sample, isBar, isLine, isPoint, scanY, y } = target;
   if (c.yScale.kind === "band") {
@@ -132,12 +137,13 @@ export function crosshairValueLabel(c: CompiledChart, target: CrosshairTarget): 
     const bits = hit.tip.split("\n")[1]?.trim().split(/\s{2,}/) ?? [];
     return bits[1] ?? bits[0] ?? "";
   }
+  // Hand-built scenes without formatters get the compiler's default number format.
+  const format = c.formatters?.y ?? formatTick;
   if ((isLine || isPoint) && sample) {
-    const yVal = (c.yScale as LinearScale).invert(sample.y);
-    return Number.isInteger(yVal) ? String(yVal) : yVal.toFixed(Math.abs(yVal) < 1 ? 2 : 1);
+    const value = (sample as Partial<SceneHoverSample>).yValue;
+    return format(typeof value === "number" ? value : (c.yScale as LinearScale).invert(sample.y));
   }
-  const yVal = (c.yScale as LinearScale).invert(y);
-  return Number.isInteger(yVal) ? String(yVal) : yVal.toFixed(Math.abs(yVal) < 1 ? 2 : 1);
+  return format((c.yScale as LinearScale).invert(y));
 }
 
 /** Category/time-axis crosshair chip text. */

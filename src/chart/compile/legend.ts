@@ -19,9 +19,11 @@ export interface SeriesInfo {
   readonly markIndex: number;
   /** Explicit `id`, else `mark-<index>`. */
   readonly id: string;
-  /** Display name: explicit `name`, else the y accessor or kind, disambiguated. */
+  /** Display name: `baseName`, numbered (`y (2)`) when another series row already uses it. */
   readonly name: string;
-  /** Legend row id. Marks sharing an explicit name share the first mark's row. */
+  /** Name before numbering: explicit `name`, else the y accessor or kind. `hiddenSeries` matches it too. */
+  readonly baseName: string;
+  /** Legend row id. Marks sharing an explicit name and colour share the first mark's row. */
   readonly rowId: string;
   readonly color: string;
   readonly hidden: boolean;
@@ -58,35 +60,59 @@ function defaultSeriesName(mark: ChartMark): string {
   return "y" in mark && typeof mark.y === "string" ? mark.y : mark.kind;
 }
 
+/** The colour a series' legend swatch shows: an explicit fill wins over the stroke. */
+function swatchColor(mark: ChartMark, color: string): string {
+  return (isPluginMark(mark) ? undefined : markFill(mark)) || color;
+}
+
+/** Names already warned about, so a mount that recompiles on every paint warns once. */
+const warnedNames = new Set<string>();
+
+function warnDuplicateName(name: string, renamed: string): void {
+  if (warnedNames.has(name) || typeof console === "undefined") return;
+  warnedNames.add(name);
+  console.warn(
+    `[@razedotbot/charts] Series named "${name}" differ in colour, so the legend lists one as "${renamed}". `
+    + "Rename one, or give both the same colour to share a legend row.",
+  );
+}
+
 /**
- * Resolve every input mark's id, name, colour, and hidden state. Default
- * names that collide (two `line(..., { y: "value" })` marks) are numbered
- * `value`, `value (2)`, so each series keeps its own legend row. Marks that
- * share an explicit `name` deliberately share one row and toggle together.
+ * Resolve every input mark's id, name, colour, and hidden state. Each series
+ * keeps its own legend row: names that collide are numbered (`value`,
+ * `value (2)`), and an explicit name reused with a different colour also
+ * logs a one-time warning. Marks that share an explicit `name` and paint the
+ * same colour (an area plus its outline) deliberately share one row and
+ * toggle together. `hiddenSeries` matches ids, row ids, display names, and
+ * base names, so `["value"]` still hides every series named `value`.
  */
 export function resolveSeries(spec: ChartSpec, theme: DashboardTheme): SeriesTable {
   const hidden = new Set(spec.hiddenSeries ?? []);
-  const used = new Set<string>();
-  for (const mark of spec.marks) if (typeof mark.name === "string") used.add(mark.name);
-  const groupRows = new Map<string, string>();
+  // Explicit names are reserved, so a numbered default never takes one.
+  const reserved = new Set<string>();
+  for (const mark of spec.marks) if (typeof mark.name === "string") reserved.add(mark.name);
+  const taken = new Set<string>();
+  const groups = new Map<string, { rowId: string; name: string }>();
   const series = spec.marks.map((mark, markIndex): SeriesInfo => {
     const id = mark.id ?? `mark-${markIndex}`;
-    const legendSeries = carriesSeriesRow(mark);
-    let name: string;
+    const color = seriesColor(mark, markIndex, theme);
+    const explicit = typeof mark.name === "string";
+    const baseName = explicit ? mark.name! : defaultSeriesName(mark);
+    let name = baseName;
     let rowId = id;
-    if (typeof mark.name === "string") {
-      name = mark.name;
-      if (legendSeries) {
-        const first = groupRows.get(name);
-        if (first === undefined) groupRows.set(name, id);
-        else rowId = first;
-      }
-    } else {
-      const base = defaultSeriesName(mark);
-      name = base;
-      if (legendSeries) {
-        for (let n = 2; used.has(name); n++) name = `${base} (${n})`;
-        used.add(name);
+    if (carriesSeriesRow(mark)) {
+      const groupKey = `${baseName}\u0000${swatchColor(mark, color).trim().toLowerCase()}`;
+      const group = explicit ? groups.get(groupKey) : undefined;
+      if (group) {
+        rowId = group.rowId;
+        name = group.name;
+      } else {
+        if (explicit ? taken.has(name) : reserved.has(name) || taken.has(name)) {
+          for (let n = 2; reserved.has(name) || taken.has(name); n++) name = `${baseName} (${n})`;
+          if (explicit) warnDuplicateName(baseName, name);
+        }
+        taken.add(name);
+        if (explicit) groups.set(groupKey, { rowId, name });
       }
     }
     return {
@@ -94,12 +120,18 @@ export function resolveSeries(spec: ChartSpec, theme: DashboardTheme): SeriesTab
       markIndex,
       id,
       name,
+      baseName,
       rowId,
-      color: seriesColor(mark, markIndex, theme),
-      hidden: hidden.has(id) || hidden.has(rowId) || hidden.has(name),
+      color,
+      hidden: hidden.has(id) || hidden.has(rowId) || hidden.has(name) || hidden.has(baseName),
     };
   });
   return { series, isHidden: (key) => hidden.has(key) };
+}
+
+/** Keys that hide a series: its id, row id, display name, and base name. */
+export function seriesKeys(s: SeriesInfo): string[] {
+  return [s.rowId, s.id, s.name, s.baseName];
 }
 
 /** A visible series as its mark compiler sees it (the mark itself may be viewport-windowed). */
@@ -146,6 +178,8 @@ export interface LegendRowDraft {
   hidden: boolean;
   markIndex: number;
   symbol: LegendSymbol;
+  /** Every `hiddenSeries` key that hides this row; a legend click that shows the row removes them all. */
+  keys?: readonly string[];
 }
 
 /** A row as mark compilers append it; plugin rows carry only name, colour, and detail. */
@@ -161,6 +195,7 @@ export function stampLegendRow(row: LegendRowInput, s: SeriesInfo): LegendRowDra
     hidden: row.hidden ?? s.hidden,
     markIndex: row.markIndex ?? s.markIndex,
     symbol: row.symbol ?? seriesSymbol(s.mark),
+    keys: row.keys ?? seriesKeys(s),
   };
 }
 
@@ -178,18 +213,18 @@ export function seriesLegendRow(s: SeriesInfo): LegendRowDraft | null {
   return {
     id: s.rowId,
     name: s.name,
-    // The swatch shows the painted colour: an explicit fill wins over the stroke.
-    color: (isPluginMark(s.mark) ? undefined : markFill(s.mark)) || s.color,
+    color: swatchColor(s.mark, s.color),
     hidden: s.hidden,
     markIndex: s.markIndex,
     symbol: seriesSymbol(s.mark),
+    keys: seriesKeys(s),
   };
 }
 
 /**
- * Merge rows that share an id and name (marks grouped by an explicit name,
- * such as an area plus its outline). The merged row is hidden only when
- * every member is.
+ * Merge rows that share an id and name (marks grouped by an explicit name and
+ * colour, such as an area plus its outline). The merged row is hidden only
+ * when every member is, and any member's key hides it.
  */
 export function mergeLegendRows(rows: readonly LegendRowDraft[]): LegendRowDraft[] {
   const byKey = new Map<string, LegendRowDraft>();
@@ -199,6 +234,7 @@ export function mergeLegendRows(rows: readonly LegendRowDraft[]): LegendRowDraft
     const first = byKey.get(key);
     if (first) {
       first.hidden = first.hidden && row.hidden;
+      if (row.keys) first.keys = Array.from(new Set([...(first.keys ?? []), ...row.keys]));
       continue;
     }
     const copy = { ...row };
@@ -206,6 +242,52 @@ export function mergeLegendRows(rows: readonly LegendRowDraft[]): LegendRowDraft
     out.push(copy);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Legend toggles
+
+interface LegendToggleInfo {
+  /** Keys that hide each row, by row id. */
+  readonly keys: ReadonlyMap<string, readonly string[]>;
+  /** Ids of every hidden series and hidden row. */
+  readonly hidden: readonly string[];
+}
+
+const toggleInfo = new WeakMap<CompiledChart, LegendToggleInfo>();
+
+/** Remember which keys hide each of a compiled scene's legend rows (read by toggleHiddenSeries). */
+export function recordLegendToggles(
+  scene: CompiledChart, rows: readonly LegendRowDraft[], series: readonly SeriesInfo[],
+): void {
+  const hidden = new Set<string>();
+  for (const s of series) if (s.hidden) hidden.add(s.id);
+  for (const row of rows) if (row.hidden) hidden.add(row.id);
+  toggleInfo.set(scene, {
+    keys: new Map(rows.map((row) => [row.id, row.keys ?? [row.id, row.name]])),
+    hidden: Array.from(hidden),
+  });
+}
+
+/**
+ * The `hiddenSeries` list after a click on legend row `rowId`. Hiding adds the
+ * row id. Showing removes every key that hides the row: its id and name, the
+ * ids and names of the marks it groups, and for a pie slice its label and the
+ * pie's own id and name. Either way, every other hidden series stays hidden by
+ * its id, so the result can replace `spec.hiddenSeries` and the keys a mount
+ * started with (names or ids) without showing anything else.
+ */
+export function toggleHiddenSeries(scene: CompiledChart, hidden: Iterable<string>, rowId: string): string[] {
+  const info = toggleInfo.get(scene);
+  const next = new Set(hidden);
+  for (const id of info?.hidden ?? scene.legend.filter((row) => row.hidden).map((row) => row.id)) next.add(id);
+  const row = scene.legend.find((entry) => entry.id === rowId);
+  if (row ? row.hidden : next.has(rowId)) {
+    for (const key of info?.keys.get(rowId) ?? [rowId, row?.name ?? rowId]) next.delete(key);
+  } else {
+    next.add(rowId);
+  }
+  return Array.from(next);
 }
 
 /** v1 legend entries: every row, hidden ones included. */

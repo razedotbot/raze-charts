@@ -21,7 +21,10 @@ export type SceneValueFormatter = (value: unknown) => string;
 export interface SceneFormatters {
   readonly x: SceneValueFormatter;
   readonly y: SceneValueFormatter;
-  /** Heatmap colour-bar values; defaults to `y`. */
+  /**
+   * Heatmap colour-bar values. A heatmap's `y` formats its category axis, so
+   * renderers fall back to a plain number format, not `y`, when this is absent.
+   */
   readonly color?: SceneValueFormatter;
 }
 
@@ -111,7 +114,7 @@ export interface SceneLegendLayout {
 export interface SceneHoverSample extends HoverSample {
   readonly seriesId: string;
   readonly markIndex: number;
-  /** Source row index within the mark's data. */
+  /** Source row index within the mark's data; -1 when unknown (plugin samples report no row). */
   readonly index: number;
   readonly datum: unknown;
   /** Data-space x (a category for band scales). */

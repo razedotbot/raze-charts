@@ -110,8 +110,10 @@ a polar chart.
 
 Every mark is a series with a stable id (its `id` option, else `mark-<index>`).
 Legend clicks and `hiddenSeries` use that id, and a hidden series stays in the
-legend, dimmed, so it can be shown again. `scales.y.tickFormat` formats
-tooltips, value chips and rule labels as well as ticks.
+legend, dimmed, so it can be shown again. Series that share a name get numbered
+legend rows (`Revenue (2)`) unless they also share a colour, which groups them
+into one row. `scales.y.tickFormat` formats tooltips, value chips and rule
+labels as well as ticks.
 
 Dense line and area geometry is reduced by a pixel-aware extrema envelope by
 default. Tune it with `performance.maxRenderedPoints`, opt out with

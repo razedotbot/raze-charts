@@ -12,12 +12,12 @@ import { applyOverlayTheme, createHoverHandler, createMountDom, hideOverlay as h
 import { nextRenderSequence, safeId, svgFromCompiled } from "./svg";
 import type { MountChartOptions, MountHandle, MountInteraction, MountRuntime, MountState } from "./types";
 
-/** Accessible text for the Canvas renderer: description, series, and up to 50 tooltips. */
+/** Accessible text for the Canvas renderer: description, every series (hidden ones marked), and up to 50 tooltips. */
 function canvasSummary(compiled: CompiledChart): string[] {
   return [
     compiled.ariaDescription,
     compiled.legend.length
-      ? `Series: ${compiled.legend.map((item) => item.name).join(", ")}.`
+      ? `Series: ${compiled.legend.map((item) => (item.hidden ? `${item.name} (hidden)` : item.name)).join(", ")}.`
       : "",
     ...Array.from(new Set(compiled.nodes.map((node) => node.tip).filter((tip): tip is string => !!tip))).slice(0, 50),
   ].filter(Boolean);
@@ -34,6 +34,7 @@ export function mountChart(
     scene: null,
     viewport: opts?.viewport ?? null,
     hidden: new Set(opts?.hiddenSeries ?? []),
+    hiddenOwned: opts?.hiddenSeries !== undefined,
     fullXExtent: null,
     lastInputWidth: Number.NaN,
     lastInputHeight: Number.NaN,
@@ -87,14 +88,15 @@ export function mountChart(
     if (state.options.width == null) w = Math.max(1, stage.clientWidth || w);
     if (state.options.height == null) h = Math.max(1, stage.clientHeight || h);
     const current = state.definition;
-    const hidden = state.hidden.size ? Array.from(state.hidden) : state.options.hiddenSeries;
+    // Once options or a legend click own the hidden set, it replaces spec.hiddenSeries (even when empty).
+    const hidden = state.hiddenOwned || state.hidden.size ? Array.from(state.hidden) : undefined;
     const viewport = state.viewport ?? state.options.viewport;
-    const overlayed = Boolean(viewport) || Boolean(hidden?.length);
+    const overlayed = Boolean(viewport) || hidden !== undefined;
     const compiled = overlayed
       ? compileChart(defineChart((size) => ({
           ...current.spec(size),
           ...(viewport ? { viewport } : {}),
-          ...(hidden?.length ? { hiddenSeries: hidden } : {}),
+          ...(hidden ? { hiddenSeries: hidden } : {}),
         })), { width: w, height: h })
       : compileChart(current, { width: w, height: h });
     if (compiled.polar || compiled.heatmap) {
@@ -182,6 +184,7 @@ export function mountChart(
       const previousScene = state.scene;
       const previousViewport = state.viewport;
       const previousHiddenSeries = state.hidden;
+      const previousHiddenOwned = state.hiddenOwned;
       const previousFullXExtent = state.fullXExtent;
       const definitionChanged = next !== state.definition;
       state.definition = next;
@@ -191,7 +194,10 @@ export function mountChart(
         if (Object.prototype.hasOwnProperty.call(nextOptions, "viewport")) {
           state.viewport = nextOptions.viewport ?? null;
         }
-        if (nextOptions.hiddenSeries) state.hidden = new Set(nextOptions.hiddenSeries);
+        if (nextOptions.hiddenSeries) {
+          state.hidden = new Set(nextOptions.hiddenSeries);
+          state.hiddenOwned = true;
+        }
       }
       try {
         paint();
@@ -201,6 +207,7 @@ export function mountChart(
         state.scene = previousScene;
         state.viewport = previousViewport;
         state.hidden = previousHiddenSeries;
+        state.hiddenOwned = previousHiddenOwned;
         state.fullXExtent = previousFullXExtent;
         throw error;
       }

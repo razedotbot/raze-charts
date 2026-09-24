@@ -149,6 +149,8 @@ function paintRowCanvas(ctx: CanvasRenderingContext2D, layout: SceneLegendLayout
 export function paintLegendCanvas(ctx: CanvasRenderingContext2D, c: CompiledChart): void {
   const layout = sceneLegendLayout(c);
   if (layout.placement === "hidden") return;
+  // Swatches set line caps and dashes; the grid painted next must not inherit them.
+  ctx.save();
   for (const row of layout.rows) paintRowCanvas(ctx, layout, row, c);
   const more = layout.more;
   if (more) {
@@ -159,4 +161,5 @@ export function paintLegendCanvas(ctx: CanvasRenderingContext2D, c: CompiledChar
     const x = layout.placement === "right" ? more.box.x + SIDE_LEGEND.textX : more.box.x;
     ctx.fillText(more.label, x, more.box.y + more.box.h / 2);
   }
+  ctx.restore();
 }
