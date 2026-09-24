@@ -85,7 +85,7 @@ export class TouchGestures {
     const startSpan = this.pinch.startTo - this.pinch.startFrom;
     const newSpan = Math.max(
       h.plotW / MAX_BAR_SPACING,
-      Math.min(h.plotW / MIN_BAR_SPACING, startSpan * scale),
+      Math.min(Math.max(h.plotW / MIN_BAR_SPACING, startSpan), startSpan * scale),
     );
     const from = this.pinch.anchorIndex - this.pinch.anchorFrac * newSpan;
     h.context.visibleRange = { from, to: from + newSpan };

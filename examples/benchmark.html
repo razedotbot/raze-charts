@@ -33,21 +33,34 @@
         rasterFlush: false,
         /** Milliseconds spent in forced canvas readbacks (rasterisation). */
         raster: 0,
+        /**
+         * First failed readback since the last reset. A failed flush would
+         * silently drop raster cost from every sample, so the harness fails
+         * the sample instead (see sampleOnce).
+         */
+        flushError: null,
         reset() {
           this.work = 0;
           this.frames = 0;
           this.raster = 0;
+          this.flushError = null;
         },
       };
 
       function flushCanvases() {
         // A 1x1 readback forces Chromium to rasterise every recorded 2D draw
         // call synchronously, so raster cost lands inside the measured frame
-        // instead of an unmeasured compositor step.
+        // instead of an unmeasured compositor step. Every layer canvas is
+        // flushed: the main scene and the overlay above it.
         for (const canvas of document.querySelectorAll(".raze-chart-root canvas")) {
           if (!canvas.width || !canvas.height) continue;
-          const ctx = canvas.getContext("2d");
-          ctx?.getImageData(0, 0, 1, 1);
+          try {
+            const ctx = canvas.getContext("2d");
+            if (!ctx) throw new Error("getContext('2d') returned null");
+            ctx.getImageData(0, 0, 1, 1);
+          } catch (error) {
+            probe.flushError ??= (canvas.className || "canvas") + ": " + (error instanceof Error ? error.message : String(error));
+          }
         }
       }
 
@@ -180,6 +193,36 @@
       return canvas;
     }
 
+    /**
+     * Counts layer paints by spying on one canvas's own 2D context (never the
+     * prototype, so other canvases and scenarios pay nothing). The engine
+     * starts every layer paint with setTransform; any other draw call on the
+     * layer also counts as work on it.
+     */
+    function spyLayer(selector) {
+      const canvas = wrap.querySelector(selector);
+      if (!canvas) throw new Error(`[benchmark] no layer canvas matches ${selector}`);
+      const ctx = canvas.getContext("2d");
+      const counts = { paints: 0, calls: 0 };
+      const names = ["setTransform", "clearRect", "fillRect", "fillText", "fill", "stroke", "drawImage", "putImageData"];
+      for (const name of names) {
+        const original = ctx[name];
+        ctx[name] = function spied(...args) {
+          counts.calls += 1;
+          if (name === "setTransform") counts.paints += 1;
+          return original.apply(this, args);
+        };
+      }
+      return {
+        counts,
+        reset() { counts.paints = 0; counts.calls = 0; },
+        restore() { for (const name of names) delete ctx[name]; },
+      };
+    }
+
+    /** Layer spies installed by the crosshair scenarios (null otherwise). */
+    let layerSpies = null;
+
     function timeOf(index) {
       return state.firstSec + index * RESOLUTION_SEC;
     }
@@ -278,6 +321,13 @@
         async prepare(opts) {
           await applyRange(viewRange(opts.view));
           dispatchPointer("pointermove", plotPoint(0.3, 0.35));
+          await settle();
+          // Layered canvas contract: a crosshair move repaints only the
+          // overlay. The spies report per-sample main and overlay paints.
+          layerSpies = {
+            main: spyLayer("canvas.raze-chart-layer-main"),
+            overlay: spyLayer("canvas.raze-chart-canvas"),
+          };
         },
         run() {
           // Sweep across the plot so every sample hovers a different bar.
@@ -285,6 +335,9 @@
           dispatchPointer("pointermove", plotPoint(0.1 + phase * 0.7, 0.25 + phase * 0.3));
         },
         async teardown() {
+          layerSpies?.main.restore();
+          layerSpies?.overlay.restore();
+          layerSpies = null;
           dispatchPointer("pointerleave", plotPoint(0.3, 0.35), { bubbles: false });
           await applyRange(viewRange("default"));
         },
@@ -328,16 +381,29 @@
     async function sampleOnce(run) {
       await settle();
       probe.reset();
+      layerSpies?.main.reset();
+      layerSpies?.overlay.reset();
       const start = performance.now();
       await run();
       const handler = performance.now() - start;
       await settle();
-      return {
+      if (probe.flushError) {
+        throw new Error(`[benchmark] the raster readback failed (${probe.flushError}); the sample would miss its raster cost`);
+      }
+      const sample = {
         ms: handler + probe.work + probe.raster,
         scriptMs: handler + probe.work,
+        /** JS inside animation frames only: the paint, without the input handler. */
+        frameMs: probe.work,
         rasterMs: probe.raster,
         frames: probe.frames,
       };
+      if (layerSpies) {
+        sample.mainPaints = layerSpies.main.counts.paints;
+        sample.mainCalls = layerSpies.main.counts.calls;
+        sample.overlayPaints = layerSpies.overlay.counts.paints;
+      }
+      return sample;
     }
 
     const bench = {
@@ -413,10 +479,26 @@
         await settle();
       },
 
-      /** Adds the six reference studies used by the study scenarios. */
+      /**
+       * Adds the six reference studies used by the study scenarios. Every
+       * createStudy must resolve to an id: a study that fails to build would
+       * let the study scenarios measure a lighter chart than they claim.
+       */
       async addStudies() {
-        for (const name of STUDIES) await state.chart.createStudy(name, false, false);
+        const failures = [];
+        for (const name of STUDIES) {
+          try {
+            const id = await state.chart.createStudy(name, false, false);
+            if (id === null || id === undefined || id === "") failures.push(`${name}: no study id returned`);
+          } catch (error) {
+            failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
         await settle();
+        if (failures.length) {
+          throw new Error(`[benchmark] createStudy failed for ${failures.length} of ${STUDIES.length} studies: ${failures.join("; ")}`);
+        }
+        return { studies: STUDIES.length };
       },
 
       /**

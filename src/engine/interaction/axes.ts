@@ -51,7 +51,7 @@ export const timeAxisHandler: InteractionHandler = {
       move(x) {
         const factor = Math.min(20, Math.max(0.05, 1 - (x - startX) / (h.plotW * 0.5)));
         const minSpan = h.plotW / MAX_BAR_SPACING;
-        const maxSpan = h.plotW / MIN_BAR_SPACING;
+        const maxSpan = Math.max(h.plotW / MIN_BAR_SPACING, startTo - startFrom);
         const newSpan = Math.min(maxSpan, Math.max(minSpan, (startTo - startFrom) * factor));
         ctx.visibleRange = { from: startTo - newSpan, to: startTo };
         void h.data.maybeLoadMoreHistory();

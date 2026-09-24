@@ -1015,7 +1015,13 @@ test.describe("content security", () => {
     // Objects tree and the chart context menu.
     await sidebar.getByRole("button", { name: "Objects tree" }).click();
     await expect(page.locator('[role="menu"],[role="dialog"]').first()).toBeVisible();
+    // Escape reaches the menu only once it has taken focus.
+    await expect(page.getByRole("menu", { name: "Objects tree" }).getByRole("menuitemcheckbox").first()).toBeFocused();
     await page.keyboard.press("Escape");
+    // The chart menu opens only with an onContextMenu callback; without one
+    // this step raced the closing objects tree.
+    await expect(page.locator('[role="menu"],[role="dialog"]')).toHaveCount(0);
+    await page.evaluate(() => (window as any).__razeChart.onContextMenu(() => [{ position: "top", text: "Probe", click: () => {} }]));
     const canvas = page.locator("canvas").first();
     const box = (await canvas.boundingBox())!;
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });

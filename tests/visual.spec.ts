@@ -40,7 +40,7 @@ test.describe("widget visual freeze", () => {
 
   test("crosshair", async ({ page }) => {
     await openCase(page, "dark");
-    const canvas = page.locator(".raze-chart-root canvas");
+    const canvas = page.locator(".raze-chart-root canvas.raze-chart-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("canvas not laid out");
     await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.4);

@@ -84,6 +84,8 @@ export type {
 
 // ── Engine ──────────────────────────────────────────────────────────────────
 export { ChartEngine } from "./engine/ChartEngine";
+export type { EngineResize } from "./engine/ChartEngine";
+export type { LayerPaintStats } from "./engine/layers";
 export { ChartRenderer } from "./engine/ChartRenderer";
 export type { GestureHost } from "./engine/gestures";
 export type { SubPaneGeom } from "./engine/layout";

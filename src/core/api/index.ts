@@ -14,6 +14,7 @@ import { studiesApi } from "./studies";
 import { symbolApi } from "./symbol";
 import { timezoneApi } from "./timezone";
 import { tradingApi } from "./trading";
+import { viewApi } from "./view";
 
 export const API_MODULES = [
   symbolApi,
@@ -25,6 +26,7 @@ export const API_MODULES = [
   dataApi,
   actionsApi,
   timezoneApi,
+  viewApi,
 ] as const;
 
 type UnionToIntersection<U> =

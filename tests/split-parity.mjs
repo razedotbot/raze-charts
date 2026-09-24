@@ -545,6 +545,8 @@ const CHART_API_METHODS = [
   "setTimezone",
   "onTimezoneChanged",
   "getTimezoneApi",
+  "fitContent",
+  "resetView",
 ];
 assert(
   sameList(Object.getOwnPropertyNames(widget.prototype), WIDGET_METHODS),

@@ -13,12 +13,12 @@ const prefix = process.argv[3] || "drag";
 const b = await chromium.launch();
 const p = await b.newPage({ viewport: { width: 1100, height: 640 } });
 await p.goto(url, { waitUntil: "domcontentloaded" });
-await p.waitForSelector(".raze-chart-root canvas", { timeout: 30000 });
+await p.waitForSelector(".raze-chart-root canvas.raze-chart-canvas", { timeout: 30000 });
 await p.waitForTimeout(2500);
 await p.screenshot({ path: `${prefix}_before.png` });
 // Price axis sits in the right ~66px. Canvas spans full width; chart area below toolbar.
 // Drag down in the price-axis strip to zoom OUT (wider price range).
-const box = await p.locator(".raze-chart-root canvas").boundingBox();
+const box = await p.locator(".raze-chart-root canvas.raze-chart-canvas").boundingBox();
 const axisX = box.x + box.width - 33;     // middle of the 66px price axis
 const midY  = box.y + box.height * 0.45;
 await p.mouse.move(axisX, midY);

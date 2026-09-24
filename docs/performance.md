@@ -411,6 +411,7 @@ and accessibility suites (`npx playwright test`) never run it.
 | `frame-all` | Same with the whole history visible (the ALL range) |
 | `crosshair-move` | Mouse move sweeping the crosshair across the default view |
 | `crosshair-move-all` | Mouse move sweeping the crosshair with the whole history visible |
+| `overlay-frame`, `overlay-frame-all` | Animation-frame JS of those crosshair moves alone; any main-layer paint fails the run |
 | `pan` | One pointer-drag step while panning the default view |
 | `wheel-zoom` | Alternating wheel zoom out and in at the default view |
 | `frame-studies` | Default-view repaint with the six studies |
@@ -433,17 +434,17 @@ workloads were running at the same time, and repeated runs varied by about
 | `frame-zoomed-out` | 2.72 ms | 3.04 ms | 3.09 ms | 3.16 ms | 20 / 20 / 20 / 20 ms |
 | `frame-all` | 4.89 ms | 29.50 ms | 238 ms | 1387 ms | 30 / 180 / 1500 / 8500 ms |
 | `crosshair-move` | 3.15 ms | 3.11 ms | 2.66 ms | 2.71 ms | 20 / 20 / 20 / 20 ms |
-| `crosshair-move-all` | 5.32 ms | 28.39 ms | 247 ms | 1359 ms | 40 / 180 / 1500 / 8500 ms |
+| `crosshair-move-all` | 5.32 ms | 28.39 ms | 247 ms | 1359 ms | 20 / 20 / 20 / 20 ms (see the layered canvas section) |
 | `pan` | 3.02 ms | 3.18 ms | 2.72 ms | 2.61 ms | 20 / 20 / 20 / 20 ms |
 | `wheel-zoom` | 2.73 ms | 2.93 ms | 2.34 ms | 2.50 ms | 20 / 20 / 20 / 20 ms |
 | `frame-studies` | 4.54 ms | 4.64 ms | 4.00 ms | 3.93 ms | 30 / 30 / 30 / 30 ms |
 | `tick-replace` | 4.55 ms | 6.56 ms | 23.99 ms | 167 ms | 30 / 40 / 150 / 1100 ms |
 | `tick-append` | 4.31 ms | 6.20 ms | 23.36 ms | 180 ms | 30 / 40 / 150 / 1100 ms |
-| `heap` | 0.4 MB | 1.4 MB | 10.6 MB | 51.8 MB | 16 / 16 / 30 / 110 MB |
-| `heap-studies` | 1.0 MB | 4.2 MB | 35.5 MB | 174.3 MB | 16 / 16 / 80 / 400 MB |
+| `heap` | 0.4 MB | 1.4 MB | 10.6 MB | 51.8 MB | 2 / 3 / 30 / 110 MB |
+| `heap-studies` | 1.0 MB | 4.2 MB | 35.5 MB | 174.3 MB | 3 / 9 / 80 / 400 MB |
 
 Portable budgets are the larger of 10 ms and 6x the reference median, or of
-16 MB and 2x the reference for heap. They are rounded up to coarse steps. They
+2 MB and 2x the reference for heap. They are rounded up to coarse steps. They
 catch algorithmic regressions on slow shared runners and are not a frame-rate
 promise. The baseline also carries aspirational `target` values that
 `--check --strict` enforces: a default-zoom frame of at most 2 ms, a
@@ -457,8 +458,8 @@ What the numbers show today:
   crosshair, pan and wheel frames cost 2-3 ms from 1k to 500k bars.
 - Paint cost grows linearly with the number of visible bars. With the whole
   history in view, every repaint walks all bars: 238 ms at 100k and about
-  1.4 s at 500k. Every crosshair move does the same, because the crosshair
-  still repaints the entire scene.
+  1.4 s at 500k. Crosshair moves no longer do: since the layered canvas they
+  repaint only the overlay (see below).
 - A live tick with six studies is O(n). The incremental paths cover only EMA,
   SMA and RSI, and VWAP, Bollinger Bands and MACD recompute the full series.
   That costs 24 ms at 100k and about 170 ms at 500k, against the 2 ms target.
@@ -473,3 +474,50 @@ from a separate harness that uses the same page geometry and scenarios. When a
 change moves these numbers on purpose, run `--record`. Put the before and
 after tables in the pull request. Edit a budget only as an explained API
 decision.
+
+### Layered canvas (W1B-07)
+
+Each chart paints a main scene canvas and an interactive overlay canvas above
+it. Crosshair, legend values, hover, draft and countdown repaint only the
+overlay, so a crosshair move no longer walks the visible bars. The benchmark
+proves it: the crosshair scenarios spy on both layers and fail the run when a
+move paints the main layer or paints the overlay more than once per frame.
+Same machine as the reference above, raster included, medians (the "after"
+rows include the cached number formatters described below):
+
+| Scenario | 1k | 10k | 100k | 500k |
+| --- | ---: | ---: | ---: | ---: |
+| `crosshair-move` before | 2.25 ms | 2.56 ms | 2.21 ms | 2.01 ms |
+| `crosshair-move` after | 0.87 ms | 0.82 ms | 0.86 ms | 0.94 ms |
+| `crosshair-move-all` before | 4.54 ms | 29.26 ms | 277 ms | 1372 ms |
+| `crosshair-move-all` after | 0.88 ms | 0.55 ms | 0.77 ms | 0.89 ms |
+| `overlay-frame` (frame JS only) | 0.30 ms | 0.27 ms | 0.29 ms | 0.33 ms |
+| `overlay-frame-all` (frame JS only) | 0.31 ms | 0.21 ms | 0.28 ms | 0.31 ms |
+
+The overlay frame no longer depends on the visible span or the history
+length, and stays under its 0.5 ms `target` at every size. Half of it used
+to be `formatPrice` building a new `Intl.NumberFormat` (through
+`toLocaleString`) for every legend and crosshair value, about 20 µs each;
+`formatPrice` now reuses cached instances with byte-identical output, which
+took the overlay frame from 0.45-0.61 ms to 0.21-0.33 ms. What remains is
+mostly text drawing. The absolute 0.5 ms stays a `--strict` target because
+runners differ, but every run now checks, per size, that `overlay-frame-all`
+stays within 2x `overlay-frame` + 0.25 ms (span independence) and that
+`overlay-frame` stays within 2x its value at the smallest size + 0.25 ms
+(history independence). Budget changes, recorded in
+`widget-baseline.json`: `crosshair-move-all` drops to 20 ms at every size,
+because a move that scales with the visible span again is a regression; the
+new `overlay-frame` scenarios carry a 4 ms portable budget and a 0.5 ms
+target; and the heap floor drops from 16 MB to 2 MB with 1 MB rounding for
+small heaps, because the old floor let the 1k and 10k sizes grow tenfold
+unnoticed. The harness also fails when a study cannot be created, when the
+library logs a `[raze-charts]` warning, when any sample paints no frame, and
+when a raster readback fails.
+
+An opaque pane background gives the scene layer an `{ alpha: false }`
+context, so the compositor never blends it with the page. Trade-off: Chromium
+draws text on an opaque canvas with LCD subpixel anti-aliasing, and no context
+option or launch flag turns that off, so scene text (axis labels) is subpixel
+while overlay text (crosshair pills, legend) stays greyscale. Screenshots
+repaint both layers into an alpha canvas (`ChartRenderer.snapshot()`), so
+exported PNGs carry greyscale text rather than colour fringes.
