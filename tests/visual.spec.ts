@@ -3,7 +3,7 @@ import { test, expect, type Page } from "@playwright/test";
 const CASES = ["dark", "light", "rsi", "drawings", "trading", "compact"] as const;
 
 async function openCase(page: Page, name: string): Promise<void> {
-  await page.goto(`http://127.0.0.1:8799/examples/visual.html?case=${name}`, {
+  await page.goto(`/examples/visual.html?case=${name}`, {
     waitUntil: "domcontentloaded",
   });
   await page.waitForFunction(() => (window as unknown as { __razeReady?: boolean }).__razeReady === true, {
@@ -15,7 +15,7 @@ async function openCase(page: Page, name: string): Promise<void> {
 }
 
 async function openNativeDashboard(page: Page): Promise<void> {
-  await page.goto("http://127.0.0.1:8799/examples/dashboard.html", {
+  await page.goto("/examples/dashboard.html", {
     waitUntil: "domcontentloaded",
   });
   await page.waitForFunction(

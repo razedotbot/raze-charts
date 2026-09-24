@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// PW_PORT lets parallel checkouts run browser suites without sharing a server.
+const port = Number(process.env.PW_PORT || 8799);
+const baseURL = `http://127.0.0.1:${port}`;
+
 export default defineConfig({
   testDir: "tests",
   fullyParallel: false,
@@ -10,6 +14,7 @@ export default defineConfig({
   snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
   use: {
     ...devices["Desktop Chrome"],
+    baseURL,
     deviceScaleFactor: 1,
     viewport: { width: 1100, height: 620 },
     locale: "en-US",
@@ -20,7 +25,8 @@ export default defineConfig({
   },
   webServer: {
     command: "node tests/static-server.mjs",
-    url: "http://127.0.0.1:8799/examples/visual.html",
+    url: `${baseURL}/examples/visual.html`,
+    env: { PORT: String(port) },
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

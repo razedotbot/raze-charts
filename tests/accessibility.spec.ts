@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function openWidget(page: Page): Promise<void> {
-  await page.goto("http://127.0.0.1:8799/examples/visual.html?case=dark", {
+  await page.goto("/examples/visual.html?case=dark", {
     waitUntil: "domcontentloaded",
   });
   await page.waitForFunction(
@@ -183,7 +183,7 @@ test.describe("widget accessibility", () => {
 
 test.describe("native dashboard range presets", () => {
   test("revenue range presets zoom the chart", async ({ page }) => {
-    await page.goto("http://127.0.0.1:8799/examples/dashboard.html", {
+    await page.goto("/examples/dashboard.html", {
       waitUntil: "domcontentloaded",
     });
     await page.waitForFunction(
