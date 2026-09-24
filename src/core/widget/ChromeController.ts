@@ -1,9 +1,13 @@
-// Widget chrome: the root/body/chart-area shell with its CSS custom
+// Widget chrome: the root/body/chart-area shell with its size and CSS custom
 // properties, the header (interval, symbol search, timeframes, custom
 // buttons), the left sidebar, scale bar, loading states, indicator and
-// object-tree popups, compact mode, fullscreen, go-to-date and the countdown tick.
+// object-tree popups, compact mode, fullscreen, the go-to-date popover and the
+// countdown tick.
 
 import type { CreateButtonOptions } from "../../types/charting_library";
+import { TimeIndex } from "../../data/TimeIndex";
+import { t } from "../../i18n";
+import { openGoToDatePopover } from "../../ui/GoToDatePopover";
 import { IndicatorsMenu, resolveIndicatorPresets } from "../../ui/IndicatorsMenu";
 import { IntervalSelector } from "../../ui/IntervalSelector";
 import { DEFAULT_SIDEBAR_ITEMS, LeftSidebar, type ChartStyleId } from "../../ui/LeftSidebar";
@@ -13,10 +17,14 @@ import { ensureBaseStyles } from "../../ui/popup";
 import { ScaleBar } from "../../ui/ScaleBar";
 import { SymbolSearch } from "../../ui/SymbolSearch";
 import { TimeframeBar } from "../../ui/TimeframeBar";
+import type { PopoverHandle } from "../../ui/kit/Popover";
 import { Toolbar } from "../../ui/Toolbar";
+import { parseResolution, resolutionToMs } from "../../util/resolution";
+import { resolveTimezone } from "../context";
 import { isLightColor } from "../theme";
 import { resolveTimeframe, type TimeframePreset } from "../timeframe";
 import type { WidgetController, WidgetHost } from "./host";
+import { applyRootSize, reportOptionProblems, resolveRootSize } from "./options";
 
 declare module "./host" {
   interface WidgetControllerMap {
@@ -45,6 +53,7 @@ export class ChromeController implements WidgetController {
   loading: LoadingScreen | null = null;
   private compactRO: ResizeObserver | null = null;
   private countdownTimer = 0;
+  private goToDatePopover: PopoverHandle | null = null;
   private readonly loadingOwner = {};
   private readonly onDataAvailable = (): void => {
     if (this.host.context.bars.length) this.finishLoading();
@@ -54,10 +63,9 @@ export class ChromeController implements WidgetController {
     const { context, options } = host;
     const theme = context.theme;
     ensureBaseStyles();
+    reportOptionProblems(options);
     this.root = div([
       "position:relative",
-      "width:100%",
-      "height:100%",
       "display:flex",
       "flex-direction:column",
       "overflow:hidden",
@@ -65,6 +73,7 @@ export class ChromeController implements WidgetController {
       "-webkit-user-select:none",
     ].join(";"));
     this.root.className = "raze-chart-root";
+    applyRootSize(this.root, resolveRootSize(options));
     this.root.style.background = theme.paneBackground;
     this.root.style.fontFamily = context.fontFamily;
     const toolbarBackground = options.toolbar_bg ?? theme.paneBackground;
@@ -113,11 +122,9 @@ export class ChromeController implements WidgetController {
           onScreenshot: () => host.renderer.takeScreenshot(),
           onFullscreen: () => this.toggleFullscreen(),
           onChartType: (style: ChartStyleId) => {
-            context.chartStyle = style;
+            context.setChartType(style, "sidebar");
+            context.setScaleMode({ autoScale: true }, "chart-type");
             this.leftSidebar?.setChartStyle(style);
-            context.autoScalePrice = true;
-            context.priceRange = null;
-            context.requestPaint();
           },
         },
         options.raze?.sidebar ?? DEFAULT_SIDEBAR_ITEMS,
@@ -127,6 +134,7 @@ export class ChromeController implements WidgetController {
     }
     this.chartArea = div("position:relative;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden;user-select:none;-webkit-user-select:none;");
     this.bodyRow.appendChild(this.chartArea);
+    this.root.addEventListener("keydown", this.onRootKeyDown);
   }
 
   attach(): void {
@@ -193,7 +201,7 @@ export class ChromeController implements WidgetController {
       ));
       toolbar.searchSlot.appendChild(this.symbolSearch.el);
     }
-    if (toolbar && context.features.has("time_frames_toolbar")) {
+    if (toolbar && context.features.has("timeframes_toolbar")) {
       this.timeframeBar = new TimeframeBar(
         context,
         toolbar.rangeSlot,
@@ -204,12 +212,16 @@ export class ChromeController implements WidgetController {
             lifecycle.reportError(`apply timeframe ${preset}`, error);
           });
         },
-        () => this.goToDate(),
+        () => this.toggleGoToDate(),
       );
+      const dateButton = this.goToDateAnchor();
+      dateButton?.setAttribute("aria-haspopup", "dialog");
+      dateButton?.setAttribute("aria-expanded", "false");
+      dateButton?.setAttribute("aria-keyshortcuts", "Alt+G");
     }
     if (context.features.has("countdown")) {
       this.countdownTimer = window.setInterval(() => {
-        if (!lifecycle.destroyed) context.requestPaint();
+        if (!lifecycle.destroyed) context.requestOverlayPaint();
       }, 1000);
     }
   }
@@ -268,44 +280,104 @@ export class ChromeController implements WidgetController {
   private async applyPreset(preset: TimeframePreset): Promise<void> {
     const { context, data } = this.host;
     const lastBar = context.bars[context.bars.length - 1];
-    const now = Math.floor((lastBar?.time ?? Date.now()) / 1000);
+    const now = Math.floor((lastBar?.time ?? context.now()) / 1000);
     const resolved = resolveTimeframe({ value: preset, type: "period-back" }, now);
     if (!resolved) return;
     if (resolved.all) {
       const n = context.bars.length;
       if (n) {
-        context.visibleRange = { from: 0, to: n - 1 };
-        context.autoScalePrice = true;
-        context.viewportChanged.fire(data.visibleUnixRange());
-        context.requestPaint();
+        context.setViewport({ from: 0, to: n - 1 }, "preset");
+        context.setScaleMode({ autoScale: true }, "preset");
       }
       return;
     }
     await data.revealTimeRange(resolved.from, resolved.to);
   }
 
-  private goToDate(): void {
-    const { context, data, engine, lifecycle } = this.host;
-    const raw = window.prompt("Go to date (YYYY-MM-DD or unix seconds)", "");
-    if (!raw?.trim()) return;
-    let sec = Number(raw);
-    if (!Number.isFinite(sec)) {
-      const ms = Date.parse(raw.trim());
-      if (!Number.isFinite(ms)) {
-        engine.announce("Enter a valid date or Unix timestamp.");
-        return;
-      }
-      sec = Math.floor(ms / 1000);
+  // ── Go to date ──────────────────────────────────────────────────────────
+
+  /** Alt+G opens go-to-date (TradingView's shortcut) while focus is in the chart. */
+  private readonly onRootKeyDown = (event: KeyboardEvent): void => {
+    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat || event.defaultPrevented) return;
+    if (event.code !== "KeyG" && event.key.toLowerCase() !== "g") return;
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    if (!this.goToDateAnchor()) return;
+    event.preventDefault();
+    this.toggleGoToDate();
+  };
+
+  /** The header's Date control (the last button of the range bar), or null without one. */
+  private goToDateAnchor(): HTMLElement | null {
+    const buttons = this.timeframeBar?.el.querySelectorAll("button");
+    return buttons?.length ? buttons[buttons.length - 1]! : null;
+  }
+
+  /** Open the go-to-date popover, or close it when it is already open. */
+  private toggleGoToDate(): void {
+    const open = this.goToDatePopover;
+    if (open && !open.closed) {
+      open.close({ reason: "api" });
+      return;
     }
-    const span = Math.max(1, context.visibleRange.to - context.visibleRange.from);
-    const resMs = Math.max(1, (context.bars[1]?.time ?? 0) - (context.bars[0]?.time ?? 0));
-    const halfSec = Math.floor((span * resMs) / 2000);
-    void data.revealTimeRange(sec - halfSec, sec + halfSec).catch((error: unknown) => {
-      if (!lifecycle.destroyed) lifecycle.reportError("go to date", error);
+    const anchor = this.goToDateAnchor();
+    if (!anchor || this.host.lifecycle.destroyed) return;
+    const { context } = this.host;
+    const bars = context.bars;
+    const { from, to } = context.visibleRange;
+    const centre = bars.length
+      ? bars[Math.max(0, Math.min(bars.length - 1, Math.round((from + to) / 2)))]!.time
+      : context.now();
+    this.goToDatePopover = openGoToDatePopover({
+      anchor,
+      timeZone: resolveTimezone(context.timezone, context.symbolInfo),
+      includeTime: isIntraday(String(context.resolution)),
+      initial: centre,
+      max: Math.max(context.now(), bars[bars.length - 1]?.time ?? 0),
+      themeRoot: this.root,
+      colorScheme: isLightColor(context.theme.paneBackground) ? "light" : "dark",
+      fontFamily: context.fontFamily,
+      onSubmit: (timeMs, label) => this.goToDate(timeMs, label),
+      onClose: () => {
+        this.goToDatePopover = null;
+      },
     });
   }
 
+  /**
+   * Centre the bar nearest `timeMs` (clamped to the latest bar) at the current
+   * zoom level, paging older history in first when needed.
+   */
+  private async goToDate(timeMs: number, label: string): Promise<void> {
+    const { context, data, engine, lifecycle } = this.host;
+    if (lifecycle.destroyed) return;
+    const resMs = resolutionToMs(String(context.resolution));
+    const latest = context.bars[context.bars.length - 1]?.time;
+    const target = latest === undefined ? timeMs : Math.min(timeMs, latest);
+    const span = Math.max(2, context.visibleRange.to - context.visibleRange.from);
+    const halfSec = Math.max(1, Math.round((span * resMs) / 2000));
+    const centreSec = Math.floor(target / 1000);
+    try {
+      await data.revealTimeRange(centreSec - halfSec, centreSec + halfSec);
+    } catch (error) {
+      if (!lifecycle.destroyed) lifecycle.reportError("go to date", error);
+      throw error;
+    }
+    if (lifecycle.destroyed) return;
+    const bars = context.bars;
+    const index = bars.length ? new TimeIndex(bars, resMs).indexAt(target) : null;
+    if (index !== null) {
+      const bar = Math.max(0, Math.min(bars.length - 1, Math.round(index)));
+      context.setViewport({ from: bar - span / 2, to: bar + span / 2 }, "timeframe");
+      context.setScaleMode({ autoScale: true }, "preset");
+    }
+    engine.announce(t("goToDate.announce", "Showing {date}.", { date: label }));
+  }
+
   destroy(): void {
+    this.goToDatePopover?.close({ restoreFocus: false, reason: "api" });
+    this.goToDatePopover = null;
+    this.root.removeEventListener("keydown", this.onRootKeyDown);
     this.compactRO?.disconnect();
     this.compactRO = null;
     if (this.countdownTimer) {
@@ -324,4 +396,9 @@ export class ChromeController implements WidgetController {
     this.loading?.destroy();
     this.root.remove();
   }
+}
+
+function isIntraday(resolution: string): boolean {
+  const kind = parseResolution(resolution).kind;
+  return kind === "seconds" || kind === "minutes" || kind === "hours";
 }

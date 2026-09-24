@@ -70,7 +70,7 @@ interface ChartingLibraryWidgetOptions
   studies_overrides?: ChartOverrides | undefined
   symbol: string
   theme?: ThemeName | undefined
-  timeframe?: string | undefined | { value: string; type: 'period-back' | 'time-range'; }
+  timeframe?: WidgetTimeframe | undefined
   timezone?: string | undefined
   toolbar_bg?: string | undefined
   width?: number | undefined
@@ -223,6 +223,13 @@ interface IndicatorPreset
   label?: string | undefined
   length?: number | undefined
   name: string
+interface LayoutSyncOptions
+  crosshair?: boolean | undefined
+  interval?: boolean | undefined
+  time?: boolean | undefined
+interface LegacyTimeFrameRange
+  type: 'time-range'
+  value: string
 interface LibrarySymbolInfo
   [key: string]: unknown
   daily_multipliers?: string[] | undefined
@@ -285,6 +292,7 @@ interface RazeChartsOptions
   layout?: '1' | '2x1' | '2x2' | undefined
   layout_child?: boolean | undefined
   layout_symbols?: string[] | undefined
+  layout_sync?: LayoutSyncOptions | undefined
   magnet?: boolean | undefined
   sidebar?: SidebarItem[] | undefined
   volume_mode?: VolumeMode | undefined
@@ -339,6 +347,14 @@ interface StudySeries
 type StudySeriesStyle = 'band' | 'histogram' | 'line'
 type SubscribeBarsCallback = (bar: Bar) => void
 type ThemeName = 'dark' | 'light'
+interface TimeFramePeriodBack
+  type: 'period-back'
+  value: string
+interface TimeFrameTimeRange
+  from: number
+  to: number
+  type: 'time-range'
+type TimeFrameValue = TimeFramePeriodBack | TimeFrameTimeRange
 interface TimescaleMark
   [key: string]: unknown
   color: string
@@ -389,6 +405,7 @@ type TradingLineStatus = 'cancelled' | 'filled' | 'working'
 type TradingLineStyle = 0 | 1 | 2
 type TradingSide = 'buy' | 'sell'
 type VolumeMode = 'hidden' | 'overlay' | 'pane'
+type WidgetTimeframe = LegacyTimeFrameRange | TimeFrameValue | string | { from: number; to: number; }
 const version: string
 class widget implements IChartingLibraryWidget
   new (options: ChartingLibraryWidgetOptions): widget

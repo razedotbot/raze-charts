@@ -295,7 +295,7 @@ interface ChartingLibraryWidgetOptions
   studies_overrides?: ChartOverrides | undefined
   symbol: string
   theme?: ThemeName | undefined
-  timeframe?: string | undefined | { value: string; type: 'period-back' | 'time-range'; }
+  timeframe?: WidgetTimeframe | undefined
   timezone?: string | undefined
   toolbar_bg?: string | undefined
   width?: number | undefined
@@ -612,6 +612,10 @@ class IntervalSelector
   refresh(): void
   setActive(res: string): void
 const LEFT_SIDEBAR_W: 42
+interface LayoutSyncOptions
+  crosshair?: boolean | undefined
+  interval?: boolean | undefined
+  time?: boolean | undefined
 class LeftSidebar
   new (context: ChartContext, cbs: LeftSidebarCallbacks, items?: SidebarItem[] | undefined, chartTypes?: ChartStyleName[] | undefined): LeftSidebar
   destroy(): void
@@ -626,6 +630,9 @@ interface LeftSidebarCallbacks
   onIndicatorsClick(anchor: HTMLElement): void
   onScreenshot(): void
   onTool(tool: SidebarToolId): void
+interface LegacyTimeFrameRange
+  type: 'time-range'
+  value: string
 interface LibrarySymbolInfo
   [key: string]: unknown
   daily_multipliers?: string[] | undefined
@@ -754,6 +761,7 @@ interface RazeChartsOptions
   layout?: '1' | '2x1' | '2x2' | undefined
   layout_child?: boolean | undefined
   layout_symbols?: string[] | undefined
+  layout_sync?: LayoutSyncOptions | undefined
   magnet?: boolean | undefined
   sidebar?: SidebarItem[] | undefined
   volume_mode?: VolumeMode | undefined
@@ -995,6 +1003,14 @@ interface ThemeColors
   wickDown: string
   wickUp: string
 type ThemeName = 'dark' | 'light'
+interface TimeFramePeriodBack
+  type: 'period-back'
+  value: string
+interface TimeFrameTimeRange
+  from: number
+  to: number
+  type: 'time-range'
+type TimeFrameValue = TimeFramePeriodBack | TimeFrameTimeRange
 class TimeIndex
   new (points: readonly TimePoint[], expectedStepMs?: number | undefined): TimeIndex
   indexAt(timeMs: number): null | number
@@ -1113,6 +1129,7 @@ class Widget implements IChartingLibraryWidget
   setSymbol(symbol: string, interval: ResolutionString, callback?: (() => void) | undefined): void
   subscribe(event: string, callback: (...args: never[]) => void): void
   unsubscribe(event: string, callback: (...args: never[]) => void): void
+type WidgetTimeframe = LegacyTimeFrameRange | TimeFrameValue | string | { from: number; to: number; }
 function bollinger(closes: number[], length: number, multiplier?: number | undefined): { mid: (null | number)[]; upper: (null | number)[]; lower: (null | number)[]; }
 function buildTheme(opts: ChartingLibraryWidgetOptions): ThemeColors
 function closeContextMenu(): void
@@ -1139,7 +1156,7 @@ function popupRow(content: string, onClick: (e: MouseEvent) => void, options?: u
 function resolutionLabel(res: string): string
 function resolutionToMs(res: string): number
 function resolveIndicatorPresets(raze: RazeChartsOptions | undefined, registry: StudyRegistry): ResolvedIndicatorPreset[]
-function resolveTimeframe(timeframe: string | undefined | { value: string; type: 'period-back' | 'time-range'; }, nowSec?: number | undefined): ResolvedTimeframe | null
+function resolveTimeframe(timeframe: WidgetTimeframe | null | undefined, nowSec?: number | undefined): ResolvedTimeframe | null
 function rsi(closes: number[], length: number): (null | number)[]
 function showContextMenu(x: number, y: number, items: ContextMenuItem[], fontFamily: string, themeRoot?: HTMLElement | undefined): void
 function sma(closes: number[], length: number): (null | number)[]

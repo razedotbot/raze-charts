@@ -203,7 +203,13 @@ export class DataManager {
       // flag, so checking the bar count here would request that page forever.
       this.hasMoreHistory = !history.noData;
       this.initVisibleRange();
-      await this.applyConfiguredTimeframe(generation);
+      // The bars are committed: a timeframe that cannot be applied (a failed
+      // history page) keeps the default view instead of failing the load.
+      try {
+        await this.applyConfiguredTimeframe(generation);
+      } catch (error) {
+        if (this.isCurrent(generation)) this.reportError("configured timeframe", error);
+      }
       if (!this.isCurrent(generation)) return false;
       this.startLiveSubscription(generation, info, target.resolution);
       this.context.dataChanged.fire();

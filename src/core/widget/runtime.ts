@@ -11,13 +11,14 @@ import { StudyStore } from "../../studies/StudyStore";
 import { createPriceFormatter } from "../../util/format";
 import { Delegate } from "../../util/delegate";
 import { CommandStack } from "../CommandStack";
-import { buildFeatureSet, createChartContext, type ChartContext } from "../context";
+import { createChartContext, type ChartContext } from "../context";
 import { ShapeStore } from "../ShapeStore";
 import { buildTheme } from "../theme";
 import { TradingStore } from "../TradingStore";
 import { WIDGET_CONTROLLERS } from "./controllers";
 import type { ChildWidget, WidgetController, WidgetControllerMap, WidgetHost } from "./host";
 import { LifecycleController } from "./LifecycleController";
+import { buildWidgetFeatureSet } from "./options";
 
 const DEFAULT_FONT = "'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
@@ -33,7 +34,7 @@ export function createWidgetContext(options: ChartingLibraryWidgetOptions): Char
     symbolInfo: null,
     formatPrice: createPriceFormatter(options, null),
     theme: buildTheme(options),
-    features: buildFeatureSet(options),
+    features: buildWidgetFeatureSet(options),
     bars: [],
     marks: [],
     timescaleMarks: [],

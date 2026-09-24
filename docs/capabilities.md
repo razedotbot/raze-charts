@@ -46,7 +46,8 @@ registry created there is standalone; pass definitions to a widget through
 | Async marks | **Yes** | Callback-based asynchronous `getMarks` results are applied only to the active target. |
 | Timescale marks | **Yes** | `getTimescaleMarks` is requested with history and painted on the time axis. |
 | Gapped market sessions | **Yes** | `TimeIndex` maps actual timestamps onto adjacent logical bar indices; `session_breaks` draws optional gap lines. |
-| Timeframe / go-to-date | **Yes** | Honours `options.timeframe`; header presets and go-to-date call `setVisibleRange`, which pages history when needed. |
+| Timeframe / go-to-date | **Yes** | `options.timeframe` accepts a period (`"3M"`, `"YTD"`, `"ALL"`), `{ from, to }` in unix seconds, `{ type: "period-back", value }` or `{ type: "time-range", from, to }`; an unusable value warns and keeps the default view instead of failing the load. The range bar is the `timeframes_toolbar` featureset (`time_frames_toolbar` is a deprecated alias that warns with `debug: true`). Go-to-date (the Date button or Alt+G) opens a themed popover with date and, on intraday charts, time inputs in the display timezone; it pages history, centres the chosen bar at the current zoom and works in sandboxed iframes (no `window.prompt`). |
+| Widget size | **Yes** | `autosize: true` fills and tracks the container; `width`/`height` (CSS px) size the chart exactly when `autosize` is not `true`, with TradingView's 800 x 500 for `autosize: false` without dimensions; `fullscreen: true` fills the browser viewport. Invalid dimensions warn. |
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
 | Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. |
@@ -58,7 +59,7 @@ registry created there is standalone; pass definitions to a widget through
 | Order and position lines | **Yes** | TradingView-style fluent adapters, styling, quantity/P&L labels, move/modify/cancel callbacks, mouse/touch drag, and one-tick keyboard adjustment. |
 | Stop-loss / take-profit brackets | **Yes** | Linked entry/SL/TP lines, risk/reward shading and ratio, auto-scale participation, group callbacks and cancellation. |
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
-| Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
+| Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs interval, time range and crosshair across panes (each switchable through `raze.layout_sync`, all on by default). An interval change on any pane, from the header or `setResolution`, applies to every pane and fires each pane's `onIntervalChanged`. Symbol sync is not offered. |
 | Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
 | Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |
 | Encapsulated runtime surface | **Yes** | `widget` and `activeChart()` objects expose only the documented `IChartingLibraryWidget` / `IChartWidgetApi` methods. Internal state is `#private` or module-private and cannot be reached or mutated at runtime. |

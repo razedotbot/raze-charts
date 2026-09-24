@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts - widget chrome harness</title>
+  <style>
+    html, body { margin: 0; background: #111; }
+    /* An unsized block container: the widget's own size options decide its box. */
+    #wrap { display: block; }
+    #wrap.fill { position: absolute; inset: 0; }
+  </style>
+</head>
+<body>
+  <!--
+    Browser harness for tests/widget-chrome.spec.ts. Query parameters:
+      options  JSON merged into the widget options (width, height, autosize,
+               fullscreen, timeframe, disabled_features, raze, ...)
+      fill     "1" gives the container the whole viewport
+  -->
+  <div id="wrap"></div>
+  <script type="module">
+    import { widget } from "../dist/charting_library.esm.js";
+    import { makeMockDatafeed, VISUAL_NOW } from "./mock-datafeed.mjs";
+
+    const params = new URLSearchParams(location.search);
+    const wrap = document.getElementById("wrap");
+    if (params.get("fill") === "1") wrap.classList.add("fill");
+    const extra = JSON.parse(params.get("options") || "{}");
+    const errors = [];
+    const originalError = console.error;
+    console.error = (...args) => {
+      errors.push(args.map(String).join(" "));
+      originalError(...args);
+    };
+    window.__razeErrors = errors;
+
+    const w = new widget({
+      symbol: "MOCK",
+      datafeed: makeMockDatafeed({ bars: 2000, startPrice: 6400, now: VISUAL_NOW, live: false }),
+      interval: "1",
+      container: wrap,
+      locale: "en",
+      theme: "dark",
+      timezone: "Etc/UTC",
+      disabled_features: ["header_symbol_search", "countdown"],
+      ...extra,
+    });
+    w.onChartReady(() => {
+      window.__razeChart = w;
+      window.__razeReady = true;
+    });
+  </script>
+</body>
+</html>

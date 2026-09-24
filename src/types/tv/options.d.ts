@@ -74,6 +74,51 @@ export interface CustomFormatters {
   [key: string]: unknown;
 }
 
+// ── Timeframe ───────────────────────────────────────────────────────────────
+/** A period counted back from the latest bar, such as `"3M"`, `"5D"`, `"YTD"` or `"ALL"`. */
+export interface TimeFramePeriodBack {
+  type: "period-back";
+  value: string;
+}
+/** An absolute window in unix seconds. */
+export interface TimeFrameTimeRange {
+  type: "time-range";
+  from: number;
+  to: number;
+}
+/** TradingView `TimeFrameValue`. */
+export type TimeFrameValue = TimeFramePeriodBack | TimeFrameTimeRange;
+/**
+ * The earlier Raze range shape, `{ type: "time-range", value: "from,to" }`.
+ * @deprecated Use `{ from, to }` or `{ type: "time-range", from, to }`.
+ */
+export interface LegacyTimeFrameRange {
+  type: "time-range";
+  value: string;
+}
+/**
+ * Initial visible range: a period string (`"3M"`), a comma-separated range
+ * (`"1700000000,1700086400"`), `{ from, to }` in unix seconds (TradingView's
+ * `VisibleTimeRange`) or a `TimeFrameValue`. An unusable value is ignored
+ * with a console warning; it never fails the initial load.
+ */
+export type WidgetTimeframe = string | { from: number; to: number } | TimeFrameValue | LegacyTimeFrameRange;
+
+// ── Multi-chart layout sync ─────────────────────────────────────────────────
+/** What a `raze.layout` multi-chart grid keeps in step across its panes. */
+export interface LayoutSyncOptions {
+  /**
+   * An interval change on any pane (header or `setResolution`) applies to
+   * every pane, each firing its own `onIntervalChanged`. Default `true`, like
+   * TradingView's layout interval sync.
+   */
+  interval?: boolean;
+  /** Scrolling or zooming one pane moves the others to the same time window. Default `true`. */
+  time?: boolean;
+  /** The crosshair is mirrored to the other panes. Default `true`. */
+  crosshair?: boolean;
+}
+
 // ── Options ─────────────────────────────────────────────────────────────────
 export interface RazeChartsOptions {
   /**
@@ -106,6 +151,8 @@ export interface RazeChartsOptions {
   format_price?: (value: number, pricescale: number) => string;
   layout?: "1" | "2x1" | "2x2";
   layout_symbols?: string[];
+  /** Which state the `layout` panes share. Defaults to interval, time and crosshair sync. */
+  layout_sync?: LayoutSyncOptions;
   layout_child?: boolean;
   volume_mode?: VolumeMode;
   magnet?: boolean;
@@ -121,16 +168,26 @@ export interface ChartingLibraryWidgetOptions {
   disabled_features?: string[];
   enabled_features?: string[];
   theme?: ThemeName;
+  /**
+   * `true` makes the chart fill its container and follow its size, ignoring
+   * `width`/`height`. `false` uses `width` x `height` pixels (TradingView's
+   * 800 x 500 when omitted). When unset, a given `width`/`height` is used and
+   * any missing dimension fills the container.
+   */
   autosize?: boolean;
+  /** `true` sizes the chart to the browser viewport (`position: fixed`), overriding the other size options. */
   fullscreen?: boolean;
   timezone?: Timezone | "exchange";
   custom_font_family?: string;
   loading_screen?: LoadingScreenOptions;
   overrides?: ChartOverrides;
   studies_overrides?: ChartOverrides;
-  timeframe?: string | { value: string; type: "period-back" | "time-range" };
+  timeframe?: WidgetTimeframe;
+  /** Log developer diagnostics, such as deprecated featureset names, to the console. */
   debug?: boolean;
+  /** Chart width in CSS pixels when `autosize` is not `true`. */
   width?: number;
+  /** Chart height in CSS pixels when `autosize` is not `true`. */
   height?: number;
   toolbar_bg?: string;
   /** TV-compatible favorites; `intervals` lead the inline header interval row. */
