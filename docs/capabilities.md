@@ -37,6 +37,10 @@ registry created there is standalone; pass definitions to a widget through
 | Capability | Status | Notes |
 | --- | --- | --- |
 | Candlestick, line, area, Heikin Ashi, bars, hollow candles, baseline, columns | **Yes** | Selected through the financial chart UI/options. |
+| Crisp series at any device pixel ratio | **Yes** | Grid, separators, candles, OHLC bars, volume, columns, line/area, last-price and trading lines paint in device pixels: hairlines are `max(1, floor(dpr))` pixels with no half-intensity smear at 125/150/175 % scaling, and every wick is centred in its body. |
+| OHLC bar thickness | **Yes** | `overrides["mainSeriesProperties.barStyle.thinBars"]` (default `true`) keeps stems and ticks one hairline wide; `false` thickens them with the zoom. A non-boolean value warns and falls back to `true`. |
+| Series clipped to the price pane | **Yes** | Candles, bars and every other main-series style clip to the price pane, so trimmed or manually scaled wicks never cross the volume pane or sub-panes. A wick that autoscale trims ends in a small arrowhead at the pane edge. |
+| Zero and negative prices in the series painters | **Yes** | Candles, bars, line, area, baseline, columns and the last-price pill plot any finite price, including lows and closes at or below zero; a log scale skips prices it cannot place. Non-finite OHLC values are treated as whitespace. |
 | Volume | **Yes** | Overlay (default), dedicated pane, or hidden via `raze.volume_mode`. |
 | Initial history and lazy left pagination | **Yes** | Uses the TradingView-shaped `getBars` contract. |
 | Promise-first native data source | **Yes** | `defineDataSource` + `createDatafeed` adapt promises and optional realtime cleanup to the callback protocol. |
