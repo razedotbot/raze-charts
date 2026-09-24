@@ -51,6 +51,10 @@ export interface ChartApiDeps {
   setVisibleRange(range: { from: number; to: number }): Promise<void>;
   createCompare(symbol: string): Promise<EntityId>;
   executeActionById(actionId: string): void;
+  /** Fit every loaded bar in view with price autoscale. */
+  fitContent(): void;
+  /** Reset to the default bar spacing anchored to the latest bar, with price autoscale. */
+  resetView(): void;
 }
 
 // Declaration merging gives the class the methods installed below. The
@@ -94,6 +98,8 @@ export interface ChartApi {
   refreshMarks(): void;
   clearMarks(): void;
   resetData(): void;
+  fitContent(): void;
+  resetView(): void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging

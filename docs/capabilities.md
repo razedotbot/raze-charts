@@ -47,6 +47,9 @@ registry created there is standalone; pass definitions to a widget through
 | Timescale marks | **Yes** | `getTimescaleMarks` is requested with history and painted on the time axis. |
 | Gapped market sessions | **Yes** | `TimeIndex` maps actual timestamps onto adjacent logical bar indices; `session_breaks` draws optional gap lines. |
 | Timeframe / go-to-date | **Yes** | Honours `options.timeframe`; header presets and go-to-date call `setVisibleRange`, which pages history when needed. |
+| Fit and reset view | **Yes** | `F`, a double-click in the plot, the sidebar Fit button and `chart.fitContent()` fit every loaded bar with price autoscale; `chart.resetView()` returns to the default spacing anchored to the latest bar. Each fires one visible-range change, so `raze.layout` panes stay synced. |
+| Default bar spacing | **Yes** | The initial and reset view show 6 CSS px per bar at any width (phone to desktop); a resize keeps the spacing and the right edge. |
+| Layered rendering | **Yes** | A scene canvas and an overlay canvas per chart: crosshair, legend values, hover, draft and countdown repaint without redrawing the scene; a resize repaints synchronously (no blank frame); an opaque pane background uses an `{ alpha: false }` context, a translucent one still composites over the page. |
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
 | Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. |

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts - render loop harness</title>
+  <!--
+    Browser harness for tests/render-loop.spec.ts: the layered canvases, the
+    synchronous resize paint, default bar spacing, fit and layout sync.
+    Query parameters:
+      bars=N          bars served by the mock feed (default 400)
+      layout=2x1      a two-pane synced layout
+      bg=COLOR        paneProperties.background override (e.g. rgba(0,0,0,0))
+      pagebg=COLOR    page background behind the widget
+      width=PX        fixed container width (default: the viewport)
+  -->
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; }
+    #wrap { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="wrap"></div>
+  <script>
+    // Set before the library evaluates so the first frame already records its state.
+    window.__RAZE_DEBUG = true;
+  </script>
+  <script type="module">
+    import { widget } from "../dist/charting_library.esm.js";
+    import { makeMockDatafeed, VISUAL_NOW } from "./mock-datafeed.mjs";
+
+    const params = new URLSearchParams(location.search);
+    const wrap = document.getElementById("wrap");
+    const pageBackground = params.get("pagebg");
+    if (pageBackground) document.body.style.background = pageBackground;
+    const width = Number(params.get("width"));
+    if (width > 0) {
+      wrap.style.right = "auto";
+      wrap.style.width = `${width}px`;
+    }
+    const background = params.get("bg");
+
+    const w = new widget({
+      symbol: "MOCK",
+      datafeed: makeMockDatafeed({ bars: Number(params.get("bars")) || 400, startPrice: 6400, now: VISUAL_NOW, live: false }),
+      interval: "1",
+      container: wrap,
+      library_path: "/",
+      locale: "en",
+      theme: "dark",
+      autosize: true,
+      timezone: "Etc/UTC",
+      custom_font_family: "Arial, Helvetica, sans-serif",
+      disabled_features: ["header_symbol_search", "popup_hints", "countdown"],
+      overrides: background ? { "paneProperties.background": background } : {},
+      raze: {
+        compact_breakpoint: 0,
+        layout: params.get("layout") || undefined,
+      },
+    });
+
+    w.onChartReady(() => {
+      window.__razeChart = w;
+      window.__razeReady = true;
+    });
+  </script>
+</body>
+</html>

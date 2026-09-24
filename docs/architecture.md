@@ -92,7 +92,10 @@ The financial widget owns the host DOM and wires five responsibilities:
    runtime.
 3. `ShapeStore` and `StudyStore` own annotations and active indicators.
 4. `ChartEngine`, gestures, layout, and paint modules turn state into a
-   device-pixel-ratio-aware Canvas frame.
+   device-pixel-ratio-aware Canvas frame of two layers: the scene canvas,
+   repainted on data and viewport changes, and the interactive overlay
+   canvas above it (crosshair, legend values, hover, draft, countdown),
+   repainted on pointer and timer events alone.
 5. Toolbar, sidebar, interval selector, scale bar, menus, and loading state are
    optional chrome around the plot.
 

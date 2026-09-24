@@ -101,6 +101,7 @@ export const SCALE_CHANGE_REASONS = Object.freeze([
   "axis-reset",
   "keyboard",
   "fit",
+  "reset",
   "preset",
   "chart-type",
   "compare",
@@ -181,8 +182,15 @@ export interface SetViewportOptions {
   notify?: boolean;
 }
 
-/** Bars shown by the initial view and by "reset view" until a width-aware provider is installed. */
+/** Bars shown by the initial view and by "reset view" while the plot width is unknown. */
 export const DEFAULT_VISIBLE_BARS = 120;
+
+/**
+ * Target bar spacing (CSS px per bar) of the initial and reset view, as in
+ * TradingView and lightweight-charts. The render loop's defaultVisibleBars()
+ * provider turns it into a bar count for the current plot width.
+ */
+export const DEFAULT_BAR_SPACING = 6;
 
 const CHART_STYLE_SET: Record<ChartStyle, true> = {
   candles: true,
@@ -321,14 +329,15 @@ export interface ChartContextSeams {
   readonly setServerTimeOffset: (offsetMs: number) => void;
 
   /**
-   * Request a repaint of the overlay layer only (crosshair, hover, countdown,
-   * draft). Installed by ChartEngine; until the engine splits layers (W1B-07)
-   * it repaints the whole frame. Defaults to requestPaint().
+   * Request a repaint of the overlay layer only (crosshair, legend values,
+   * hover, countdown, draft). Installed by ChartEngine, which keeps the main
+   * scene bitmap untouched. Defaults to requestPaint() without an engine.
    */
   requestOverlayPaint(): void;
   /**
-   * Bars shown by the initial and reset view. A width-aware provider is
-   * installed by the render loop (W1B-07); defaults to DEFAULT_VISIBLE_BARS.
+   * Bars shown by the initial and reset view. The renderer installs a
+   * width-aware provider that keeps DEFAULT_BAR_SPACING px per bar; without
+   * one (or while the plot width is unknown) it is DEFAULT_VISIBLE_BARS.
    */
   defaultVisibleBars(): number;
   /**
@@ -572,6 +581,14 @@ function assertScalePatch(patch: ScaleModePatch): void {
   }
   if (patch.priceRange) {
     assertInterval("setScaleMode", patch.priceRange.min, patch.priceRange.max);
+    if (patch.priceRange.min === patch.priceRange.max) {
+      // A zero-height window maps every price to one pixel row and divides by
+      // zero in the price-to-pixel mapping.
+      throw new RangeError(
+        `[raze-charts] setScaleMode() priceRange is empty (min === max === ${patch.priceRange.min}); `
+        + "pass a window with max > min, or { autoScale: true } to fit the visible bars",
+      );
+    }
     if (patch.autoScale) {
       throw new TypeError("[raze-charts] setScaleMode() cannot pin a priceRange with autoScale: true; autoscale replaces the manual range");
     }

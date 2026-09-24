@@ -20,7 +20,18 @@ import {
   summarize,
 } from "../../scripts/widget-benchmark-lib.mjs";
 
-type Sample = { ms: number; scriptMs?: number; rasterMs: number; frames: number };
+type Sample = {
+  ms: number;
+  scriptMs?: number;
+  /** JS inside animation frames only (no input handler). */
+  frameMs?: number;
+  rasterMs: number;
+  frames: number;
+  /** Crosshair scenarios: paints of the main (scene) layer during the sample. */
+  mainPaints?: number;
+  /** Crosshair scenarios: paints of the overlay layer during the sample. */
+  overlayPaints?: number;
+};
 type Summary = ReturnType<typeof summarize>;
 type MeasureOptions = {
   view?: "default" | "zoomed-out" | "all";
@@ -36,7 +47,7 @@ interface BenchApi {
   setRasterFlush(enabled: boolean): void;
   load(): Promise<Sample>;
   unload(): Promise<void>;
-  addStudies(): Promise<void>;
+  addStudies(): Promise<{ studies: number }>;
   measure(name: string, opts?: MeasureOptions): Promise<Sample[]>;
 }
 
@@ -65,12 +76,22 @@ function loadRuns(size: number): number {
 
 type BenchWindow = Window & { __razeBench: BenchApi; __razeBenchReady?: boolean };
 
-/** Opens the benchmark page and returns a live list of page errors. */
+/**
+ * Opens the benchmark page and returns a live list of page errors. Library
+ * warnings ("[raze-charts] ...") count as errors too: a warning means the
+ * widget fell back or ignored something, so the run no longer measures the
+ * configuration it claims to.
+ */
 async function openBench(page: Page): Promise<string[]> {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    const type = message.type();
+    const text = message.text();
+    if (type === "error") errors.push(text);
+    else if ((type === "warning" || type === "log" || type === "info") && text.includes("[raze-charts]")) {
+      errors.push(`${type}: ${text}`);
+    }
   });
   await page.goto("/examples/benchmark.html", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(
@@ -96,7 +117,7 @@ async function measure(
   size: number,
   scenario: string,
   opts: MeasureOptions = {},
-): Promise<Summary> {
+): Promise<{ summary: Summary; samples: Sample[] }> {
   // Slow scenarios stop at the time budget (never below five samples).
   const timeBudgetMs = size >= 500_000 ? 2_500 : 1_500;
   const samples = await page.evaluate(
@@ -104,13 +125,33 @@ async function measure(
     { name: scenario, options: { timeBudgetMs, ...opts } },
   );
   expect(samples.length, `${id} at ${size} bars produced samples`).toBeGreaterThanOrEqual(5);
-  expect(
-    samples.some((sample) => sample.frames > 0),
-    `${id} at ${size} bars must paint at least one frame; a zero-frame scenario measures nothing`,
-  ).toBe(true);
+  // Every sample must paint: a step that changes nothing on screen measures
+  // only its input handler and would drag the median towards zero.
+  const idle = samples.filter((sample) => sample.frames === 0).length;
+  expect(idle, `${id} at ${size} bars: ${idle} of ${samples.length} samples painted no frame`).toBe(0);
   const summary = summarize(samples);
   record(id, size, summary);
-  return summary;
+  return { summary, samples };
+}
+
+/**
+ * Crosshair moves repaint only the overlay layer (AD-04): no sample may paint
+ * the main scene, and the overlay paints at most once per frame. Records the
+ * overlay frame cost (animation-frame JS only) under `overlayId`.
+ */
+function checkOverlayOnly(overlayId: string, size: number, samples: Sample[]): void {
+  for (const sample of samples) {
+    expect(sample.mainPaints, `${overlayId} at ${size} bars: a crosshair move repainted the main layer`).toBe(0);
+    expect(sample.overlayPaints ?? 0, `${overlayId} at ${size} bars: the overlay painted more than once per frame`)
+      .toBeLessThanOrEqual(sample.frames);
+    expect(sample.overlayPaints ?? 0, `${overlayId} at ${size} bars: the crosshair move did not repaint the overlay`)
+      .toBeGreaterThan(0);
+  }
+  record(overlayId, size, summarize(samples.map((sample) => ({
+    ms: sample.frameMs ?? 0,
+    rasterMs: sample.rasterMs,
+    frames: sample.frames,
+  }))));
 }
 
 test.describe.configure({ mode: "serial" });
@@ -149,12 +190,15 @@ for (const size of sizes) {
     await measure(page, "frame-default", size, "frame", { view: "default" });
     await measure(page, "frame-zoomed-out", size, "frame", { view: "zoomed-out" });
     await measure(page, "frame-all", size, "frame", { view: "all" });
-    await measure(page, "crosshair-move", size, "crosshair-move", { view: "default" });
-    await measure(page, "crosshair-move-all", size, "crosshair-move", { view: "all" });
+    const crosshair = await measure(page, "crosshair-move", size, "crosshair-move", { view: "default" });
+    checkOverlayOnly("overlay-frame", size, crosshair.samples);
+    const crosshairAll = await measure(page, "crosshair-move-all", size, "crosshair-move", { view: "all" });
+    checkOverlayOnly("overlay-frame-all", size, crosshairAll.samples);
     await measure(page, "pan", size, "pan", { view: "default" });
     await measure(page, "wheel-zoom", size, "wheel-zoom", { view: "default" });
 
-    await page.evaluate(() => (window as unknown as BenchWindow).__razeBench.addStudies());
+    const added = await page.evaluate(() => (window as unknown as BenchWindow).__razeBench.addStudies());
+    expect(added.studies, "every reference study was created").toBe(6);
     record("heap-studies", size, summarize([await heapMB(cdp) - heapBefore]));
     await measure(page, "frame-studies", size, "frame", { view: "default" });
     await measure(page, "tick-replace", size, "tick-replace", { view: "default" });

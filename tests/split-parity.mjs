@@ -541,6 +541,8 @@ const CHART_API_METHODS = [
   "symbol",
   "executeActionById",
   "createCompare",
+  "fitContent",
+  "resetView",
 ];
 assert(
   sameList(Object.getOwnPropertyNames(widget.prototype), WIDGET_METHODS),

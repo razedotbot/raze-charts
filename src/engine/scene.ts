@@ -1,5 +1,6 @@
-// Finance scene: named marks in the frozen paint order. Each mark reuses the
-// existing Canvas paint functions so pixels stay identical.
+// Finance scene: named marks in a frozen paint order, split across the two
+// canvas layers (see layers.ts). Each mark reuses the existing Canvas paint
+// functions, so a layer paints exactly the pixels the single-canvas frame did.
 
 import { drawPriceSeries } from "./paint/candles";
 import { drawVolume } from "./paint/volume";
@@ -14,6 +15,8 @@ import { drawLegend } from "./paint/legend";
 import { drawSessionBreaks } from "./paint/session";
 import { drawAxisChrome, drawCompare, drawTimeNavigator, drawTimescaleMarks } from "./paint/chrome";
 import { drawTrading } from "./paint/trading";
+import { drawAxisTags } from "./paint/axisTags";
+import type { FinanceLayerId } from "./layers";
 import type { FinanceView } from "./paint/view";
 
 export type FinanceMarkKind =
@@ -27,31 +30,56 @@ export type FinanceMarkKind =
   | "priceAxis"
   | "subPanes"
   | "timeAxis"
+  | "axisChrome"
   | "lastPrice"
   | "trading"
+  | "axisTags"
   | "crosshair"
   | "legend"
   | "markTooltip"
   | "separators";
 
-export const FINANCE_PAINT_ORDER: readonly FinanceMarkKind[] = [
-  "grid",
-  "volume",
-  "series",
-  "overlayStudies",
-  "shapes",
-  "draft",
-  "barMarks",
-  "priceAxis",
-  "subPanes",
-  "timeAxis",
-  "lastPrice",
-  "trading",
-  "crosshair",
-  "legend",
-  "markTooltip",
-  "separators",
-];
+/**
+ * Marks per layer, in paint order. The main layer ends with the axis-tag pass
+ * so queued pills sit above both axes; the overlay repeats the pass for tags
+ * its own painters queue (for example the crosshair's).
+ */
+export const FINANCE_LAYER_ORDER: Readonly<Record<FinanceLayerId, readonly FinanceMarkKind[]>> = Object.freeze({
+  main: Object.freeze<FinanceMarkKind[]>([
+    "grid",
+    "volume",
+    "series",
+    "overlayStudies",
+    "shapes",
+    "barMarks",
+    "priceAxis",
+    "subPanes",
+    "timeAxis",
+    "lastPrice",
+    "trading",
+    "axisTags",
+    "separators",
+  ]),
+  overlay: Object.freeze<FinanceMarkKind[]>([
+    "draft",
+    "axisChrome",
+    "crosshair",
+    "axisTags",
+    "legend",
+    "markTooltip",
+  ]),
+});
+
+/** Every mark in single-canvas order: the main layer, then the overlay above it. */
+export const FINANCE_PAINT_ORDER: readonly FinanceMarkKind[] = Object.freeze([
+  ...FINANCE_LAYER_ORDER.main,
+  ...FINANCE_LAYER_ORDER.overlay.filter((kind) => kind !== "axisTags"),
+]);
+
+/** The layer a mark paints on (the axis-tag pass runs on both). */
+export function financeMarkLayer(kind: FinanceMarkKind): FinanceLayerId {
+  return FINANCE_LAYER_ORDER.main.includes(kind) ? "main" : "overlay";
+}
 
 export function paintFinanceMark(
   kind: FinanceMarkKind,
@@ -93,14 +121,19 @@ export function paintFinanceMark(
     case "timeAxis":
       drawTimeAxis(ctx, v, timeTicks);
       drawTimescaleMarks(ctx, v);
-      drawAxisChrome(ctx, v);
       drawTimeNavigator(ctx, v);
+      break;
+    case "axisChrome":
+      drawAxisChrome(ctx, v);
       break;
     case "lastPrice":
       drawLastPrice(ctx, v);
       break;
     case "trading":
       drawTrading(ctx, v);
+      break;
+    case "axisTags":
+      drawAxisTags(ctx, v);
       break;
     case "crosshair":
       drawCrosshair(ctx, v);
@@ -117,13 +150,29 @@ export function paintFinanceMark(
   }
 }
 
+/** Paint one layer's marks into `ctx`. */
+export function paintFinanceLayer(
+  layer: FinanceLayerId,
+  ctx: CanvasRenderingContext2D,
+  v: FinanceView,
+  priceTicks: number[],
+  timeTicks: { index: number; time: number }[],
+): void {
+  for (const kind of FINANCE_LAYER_ORDER[layer]) {
+    paintFinanceMark(kind, ctx, v, priceTicks, timeTicks);
+  }
+}
+
+/**
+ * Paint the whole scene into one context (screenshots, exports, single-canvas
+ * hosts): the main layer, then the overlay with its own axis-tag queue.
+ */
 export function paintFinanceScene(
   ctx: CanvasRenderingContext2D,
   v: FinanceView,
   priceTicks: number[],
   timeTicks: { index: number; time: number }[],
 ): void {
-  for (const kind of FINANCE_PAINT_ORDER) {
-    paintFinanceMark(kind, ctx, v, priceTicks, timeTicks);
-  }
+  paintFinanceLayer("main", ctx, v, priceTicks, timeTicks);
+  paintFinanceLayer("overlay", ctx, { ...v, axisTags: [] }, priceTicks, timeTicks);
 }

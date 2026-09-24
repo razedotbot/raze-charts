@@ -45,6 +45,17 @@ export interface IChartWidgetApi {
   refreshMarks(): void;
   clearMarks(): void;
   resetData(): void;
+  /**
+   * Raze extension: fit every loaded bar in view and re-enable price autoscale
+   * (the F key, double-click and the sidebar Fit button). Fires one
+   * visible-range change when the range moves.
+   */
+  fitContent(): void;
+  /**
+   * Raze extension: reset to the default view, 6 px per bar anchored to the
+   * latest bar, with price autoscale (TradingView's "Reset chart view").
+   */
+  resetView(): void;
   setSymbol(symbol: string, callback?: () => void): void;
   symbol(): string;
   executeActionById?(actionId: "undo" | "redo" | "magnet" | string): void;

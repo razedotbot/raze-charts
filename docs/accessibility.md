@@ -56,7 +56,7 @@ When the Canvas has focus:
 | Left / Right Arrow | Pan the visible range |
 | Up / Down Arrow | Move a selected editable trading line by one minimum tick (Shift = 10 ticks) |
 | `+` / `-` | Zoom in / out |
-| `F` | Fit all loaded data |
+| `F` | Fit all loaded data (every loaded bar in view, price autoscale on); double-click in the plot does the same |
 | Escape | Cancel the active drawing and clear selection |
 | Delete / Backspace | Remove the selected drawing or cancel the selected trading order |
 | Ctrl/Cmd+Z | Undo the last drawing or study command |

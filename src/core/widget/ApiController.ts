@@ -46,6 +46,8 @@ export function createApiDeps(host: WidgetHost): ChartApiDeps {
     setVisibleRange: (range) => host.data.revealTimeRange(range.from, range.to),
     createCompare: (symbol) => host.controllers.compare.create(symbol),
     executeActionById: (actionId) => host.controllers.actions.executeActionById(actionId),
+    fitContent: () => { host.renderer.fitContent(); },
+    resetView: () => { host.renderer.resetView(); },
   };
 }
 

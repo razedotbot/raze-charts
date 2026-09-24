@@ -281,7 +281,9 @@ export class DataManager {
     // Preserve empty slots on the left for sparse/new feeds. Fitting only the
     // bars returned by the feed spreads a handful of candles across the whole
     // canvas instead of keeping consecutive candles visually grouped.
-    const visibleCount = INITIAL_VISIBLE_BARS;
+    // Width-aware count from the render loop (6 px per bar), when installed.
+    const provided = this.context.defaultVisibleBars?.() ?? INITIAL_VISIBLE_BARS;
+    const visibleCount = Number.isFinite(provided) && provided >= 1 ? Math.round(provided) : INITIAL_VISIBLE_BARS;
     const rightPad = Math.min(8, Math.max(1, Math.round(visibleCount * 0.06)));
     this.context.visibleRange = {
       from: n - visibleCount,

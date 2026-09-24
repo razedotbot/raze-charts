@@ -56,6 +56,7 @@ class ChartApi implements IChartWidgetApi
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
   executeActionById(actionId: string): void
+  fitContent(): void
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
@@ -65,6 +66,7 @@ class ChartApi implements IChartWidgetApi
   removeAllTradingLines(): void
   removeEntity(entityId: EntityId): void
   resetData(): void
+  resetView(): void
   resolution(): ResolutionString
   setResolution(resolution: ResolutionString, callback?: (() => void) | undefined): void
   setSymbol(symbol: string, callback?: (() => void) | undefined): void
@@ -79,6 +81,7 @@ interface ChartApiDeps
   createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
   createTradingLine(options: TradingLineOptions, kind: 'order' | 'position'): ITradingLineAdapter
   executeActionById(actionId: string): void
+  fitContent(): void
   getShapeById(id: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   refreshMarks(): void
@@ -86,6 +89,7 @@ interface ChartApiDeps
   removeAllTradingLines(): void
   removeEntity(id: EntityId): void
   resetData(): void
+  resetView(): void
   setResolution(res: ResolutionString, cb?: (() => void) | undefined): void
   setSymbol(symbol: string, cb?: (() => void) | undefined): void
   setVisibleRange(range: { from: number; to: number; }): Promise<void>
@@ -124,7 +128,7 @@ interface ChartContext extends ChartContextState, ChartContextSeams
   selectedShapeId: null | string
   selectedTradingLineId: null | string
   readonly setChartType: (style: ChartStyleName, reason: 'api' | 'context-menu' | 'header' | 'initial' | 'load' | 'override' | 'sidebar') => boolean
-  readonly setScaleMode: (patch: ScaleModePatch, reason: 'api' | 'axis-drag' | 'axis-reset' | 'cancel' | 'chart-type' | 'compare' | 'context-menu' | 'fit' | 'initial' | 'keyboard' | 'load' | 'preset' | 'scale-bar') => boolean
+  readonly setScaleMode: (patch: ScaleModePatch, reason: 'api' | 'axis-drag' | 'axis-reset' | 'cancel' | 'chart-type' | 'compare' | 'context-menu' | 'fit' | 'initial' | 'keyboard' | 'load' | 'preset' | 'reset' | 'scale-bar') => boolean
   readonly setServerTimeOffset: (offsetMs: number) => void
   readonly setTimezone: (zone: TimezoneSetting) => boolean
   readonly setViewport: (range: IndexRange, reason: 'api' | 'cancel' | 'fit' | 'initial' | 'keyboard' | 'load' | 'pan' | 'pinch' | 'preset' | 'realtime' | 'rebase' | 'reset' | 'resize' | 'sync' | 'timeframe' | 'zoom', options?: SetViewportOptions | undefined) => boolean
@@ -152,7 +156,7 @@ interface ChartContextSeams
   readonly scaleChanged: Delegate<[ScaleChange]>
   readonly scaleState: () => ScaleState
   readonly setChartType: (style: ChartStyleName, reason: 'api' | 'context-menu' | 'header' | 'initial' | 'load' | 'override' | 'sidebar') => boolean
-  readonly setScaleMode: (patch: ScaleModePatch, reason: 'api' | 'axis-drag' | 'axis-reset' | 'cancel' | 'chart-type' | 'compare' | 'context-menu' | 'fit' | 'initial' | 'keyboard' | 'load' | 'preset' | 'scale-bar') => boolean
+  readonly setScaleMode: (patch: ScaleModePatch, reason: 'api' | 'axis-drag' | 'axis-reset' | 'cancel' | 'chart-type' | 'compare' | 'context-menu' | 'fit' | 'initial' | 'keyboard' | 'load' | 'preset' | 'reset' | 'scale-bar') => boolean
   readonly setServerTimeOffset: (offsetMs: number) => void
   readonly setTimezone: (zone: TimezoneSetting) => boolean
   readonly setViewport: (range: IndexRange, reason: 'api' | 'cancel' | 'fit' | 'initial' | 'keyboard' | 'load' | 'pan' | 'pinch' | 'preset' | 'realtime' | 'rebase' | 'reset' | 'resize' | 'sync' | 'timeframe' | 'zoom', options?: SetViewportOptions | undefined) => boolean
@@ -199,14 +203,21 @@ class ChartEngine
   readonly accessibilityLabel: string
   announce(message: string): void
   readonly canvas: HTMLCanvasElement
+  composite(): HTMLCanvasElement
   cssHeight: number
   cssWidth: number
   destroy(): void
   dpr: number
+  readonly mainCanvas: HTMLCanvasElement
+  mainInvalidationCheck: (() => boolean) | null
+  readonly mainLayerOpaque: boolean
   markDirty(): void
   markOverlayDirty(): void
+  onResize: ((size: EngineResize) => void) | null
   readonly overlayHost: HTMLDivElement
+  overlayPaintHook: ((ctx: CanvasRenderingContext2D) => void) | null
   paintHook: ((ctx: CanvasRenderingContext2D) => void) | null
+  readonly paintStats: LayerPaintStats
   syncAccessibility(): void
 interface ChartLayoutSnapshot
   chartStyle: ChartStyleName
@@ -234,7 +245,7 @@ class ChartRenderer implements GestureHost
   draft: DraftShape | null
   readonly engine: ChartEngine
   financeView(): FinanceView
-  fitContent(): void
+  fitContent(): boolean
   hoverMark: Mark | null
   hoverShapeId: null | string
   hoverTimescaleMark: TimescaleMark | null
@@ -252,6 +263,7 @@ class ChartRenderer implements GestureHost
   priceMax: number
   priceMin: number
   requestPaint(): void
+  resetView(): boolean
   readonly selectedShapeId: null | string
   setToolDoneHandler(fn: (tool: SidebarToolId) => void): void
   shapeScreen: ShapeHit[]
@@ -395,6 +407,13 @@ interface DraftShape
   tool: SidebarToolId
 type DrawingEventType = 'click' | 'create' | 'hide' | 'move' | 'points_changed' | 'properties_changed' | 'remove' | 'show'
 type DrawingTool = 'cursor' | 'extended_line' | 'fib_retracement' | 'horizontal_line' | 'measure' | 'ray' | 'rectangle' | 'text' | 'trend_line' | 'vertical_line'
+interface EngineResize
+  readonly dpr: number
+  readonly height: number
+  readonly previousDpr: number
+  readonly previousHeight: number
+  readonly previousWidth: number
+  readonly width: number
 type EntityId = string & { [Symbol.species]?: 'EntityId' | undefined; }
 interface Exchange
   desc: string
@@ -503,6 +522,7 @@ interface IChartWidgetApi
   createPositionLine(options?: TradingLineOptions | undefined): Promise<ITradingLineAdapter>
   createShape<TOverrides extends object>(point: ShapePoint, options: CreateShapeOptions<TOverrides>): Promise<EntityId>
   createStudy(name: string, forceOverlay?: boolean | undefined, lock?: boolean | undefined, inputs?: Record<string, unknown> | undefined): Promise<EntityId>
+  fitContent(): void
   getShapeById(entityId: EntityId): ILineDataSourceApi
   getTradingLineById(id: string): ITradingLineAdapter | null
   getVisibleRange(): { from: number; to: number; }
@@ -512,6 +532,7 @@ interface IChartWidgetApi
   removeAllTradingLines(): void
   removeEntity(entityId: EntityId): void
   resetData(): void
+  resetView(): void
   resolution(): ResolutionString
   setResolution(resolution: ResolutionString, callback?: (() => void) | undefined): void
   setSymbol(symbol: string, callback?: (() => void) | undefined): void
@@ -612,6 +633,11 @@ class IntervalSelector
   refresh(): void
   setActive(res: string): void
 const LEFT_SIDEBAR_W: 42
+interface LayerPaintStats
+  frames: number
+  main: number
+  overlay: number
+  resize: number
 class LeftSidebar
   new (context: ChartContext, cbs: LeftSidebarCallbacks, items?: SidebarItem[] | undefined, chartTypes?: ChartStyleName[] | undefined): LeftSidebar
   destroy(): void
@@ -793,9 +819,9 @@ class ScaleBar
   sync(): void
 interface ScaleChange
   readonly previous: ScaleState
-  readonly reason: 'api' | 'axis-drag' | 'axis-reset' | 'cancel' | 'chart-type' | 'compare' | 'context-menu' | 'fit' | 'initial' | 'keyboard' | 'load' | 'preset' | 'scale-bar'
+  readonly reason: 'api' | 'axis-drag' | 'axis-reset' | 'cancel' | 'chart-type' | 'compare' | 'context-menu' | 'fit' | 'initial' | 'keyboard' | 'load' | 'preset' | 'reset' | 'scale-bar'
   readonly state: ScaleState
-type ScaleChangeReason = 'api' | 'axis-drag' | 'axis-reset' | 'cancel' | 'chart-type' | 'compare' | 'context-menu' | 'fit' | 'initial' | 'keyboard' | 'load' | 'preset' | 'scale-bar'
+type ScaleChangeReason = 'api' | 'axis-drag' | 'axis-reset' | 'cancel' | 'chart-type' | 'compare' | 'context-menu' | 'fit' | 'initial' | 'keyboard' | 'load' | 'preset' | 'reset' | 'scale-bar'
 interface ScaleModePatch
   autoScale?: boolean | undefined
   mode?: PriceScaleMode | undefined
@@ -1169,7 +1195,7 @@ type DrawingHit = { readonly kind: 'anchor'; readonly index: number; readonly cu
 interface PriceRange
   max: number
   min: number
-const SCALE_CHANGE_REASONS: readonly ['initial', 'scale-bar', 'axis-drag', 'axis-reset', 'keyboard', 'fit', 'preset', 'chart-type', 'compare', 'load', 'api', 'cancel', 'context-menu']
+const SCALE_CHANGE_REASONS: readonly ['initial', 'scale-bar', 'axis-drag', 'axis-reset', 'keyboard', 'fit', 'reset', 'preset', 'chart-type', 'compare', 'load', 'api', 'cancel', 'context-menu']
 interface StyleOptions
   nonce?: string | undefined
 const VIEWPORT_CHANGE_REASONS: readonly ['initial', 'pan', 'zoom', 'pinch', 'keyboard', 'fit', 'reset', 'preset', 'timeframe', 'api', 'load', 'sync', 'realtime', 'rebase', 'resize', 'cancel']
