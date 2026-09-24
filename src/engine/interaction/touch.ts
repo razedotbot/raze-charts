@@ -1,17 +1,15 @@
 // Multi-touch gestures: two-finger pinch zoom anchored at the midpoint, and
 // the long-press that turns a touch into a crosshair probe.
 
-import { MAX_BAR_SPACING, MIN_BAR_SPACING } from "../layout";
-import { indexForX } from "../plotScale";
-import { emitViewport } from "./coords";
+import { applyRange } from "./limits";
 import type { GestureHost } from "./types";
+import { zoomAround } from "./viewport";
 
 interface PinchState {
   startSpanPx: number;
-  startFrom: number;
-  startTo: number;
-  anchorIndex: number;
-  anchorFrac: number;
+  start: { from: number; to: number };
+  /** Plot fraction under the finger midpoint. */
+  anchor: number;
 }
 
 const LONG_PRESS_MS = 300;
@@ -63,42 +61,26 @@ export class TouchGestures {
     const pts = Array.from(this.pointers.values());
     const a = pts[0]!;
     const b = pts[1]!;
-    const { from, to } = h.context.visibleRange;
-    const span = to - from;
-    const anchorIndex = indexForX(h.plotScale(), (a.x + b.x) / 2);
     this.pinch = {
       startSpanPx: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)),
-      startFrom: from,
-      startTo: to,
-      anchorIndex,
-      anchorFrac: span > 0 ? (anchorIndex - from) / span : 0.5,
+      start: { ...h.context.visibleRange },
+      anchor: ((a.x + b.x) / 2 - h.plotL) / h.plotW,
     };
   }
 
   /** Apply a pinch move; false when no pinch is active. */
   updatePinch(): boolean {
     if (!this.pinch || this.pointers.size < 2) return false;
-    const h = this.host;
     const pts = Array.from(this.pointers.values());
     const spanPx = Math.max(10, Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y));
-    const scale = this.pinch.startSpanPx / spanPx;
-    const startSpan = this.pinch.startTo - this.pinch.startFrom;
-    const newSpan = Math.max(
-      h.plotW / MAX_BAR_SPACING,
-      Math.min(Math.max(h.plotW / MIN_BAR_SPACING, startSpan), startSpan * scale),
-    );
-    const from = this.pinch.anchorIndex - this.pinch.anchorFrac * newSpan;
-    h.context.visibleRange = { from, to: from + newSpan };
-    void h.data.maybeLoadMoreHistory();
-    emitViewport(h);
+    zoomAround(this.host, this.pinch.anchor, this.pinch.startSpanPx / spanPx, "pinch", this.pinch.start);
     return true;
   }
 
   /** Restore the range the pinch started from. */
   cancelPinch(): void {
     if (!this.pinch) return;
-    this.host.context.visibleRange = { from: this.pinch.startFrom, to: this.pinch.startTo };
-    emitViewport(this.host);
+    applyRange(this.host, this.pinch.start, "cancel");
     this.pinch = null;
   }
 

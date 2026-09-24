@@ -1,29 +1,33 @@
 // Pointer / pinch / keyboard coordinator for the finance widget. It owns the
-// canvas listeners and the active drag, and routes each gesture to the
-// interaction handlers registered in ./interaction/handlers.ts (run by
-// priority). Pan, zoom, axis, drawing and trading behaviour live in
-// ./interaction/*.
+// canvas listeners and routes each gesture to the interaction handlers
+// registered in ./interaction/handlers.ts (run by priority). The active drag
+// lives in ./interaction/session.ts; pan, zoom, axis, drawing and trading
+// behaviour live in ./interaction/*.
 
 import { pointerXY, timePriceAt, zoneAt } from "./interaction/coords";
+import { cancelTextEditing } from "./interaction/drawing";
 import { hitTestAt } from "./interaction/hitTest";
 import { leaveHover, trackCrosshair, updateHover } from "./interaction/hover";
 import { KeyboardFocus } from "./interaction/keyboard";
 import { firstHandled } from "./interaction/registry";
+import { DragTracker } from "./interaction/session";
+import { hideCanvasTooltip } from "./interaction/tooltip";
 import { TouchGestures } from "./interaction/touch";
-import type { DragSession, GestureHost, PointerInput } from "./interaction/types";
+import type { GestureHost, PointerInput } from "./interaction/types";
 
 export type { GestureHost } from "./interaction/types";
 
 type Binding = [EventTarget, string, (e: never) => void, AddEventListenerOptions?];
 
 export class GestureController {
-  private drag: DragSession | null = null;
+  private readonly drag: DragTracker;
   private readonly touch: TouchGestures;
   private readonly focus: KeyboardFocus;
   private readonly bindings: Binding[];
 
   constructor(private readonly host: GestureHost) {
-    this.touch = new TouchGestures(host, () => { this.drag = null; });
+    this.drag = new DragTracker(host);
+    this.touch = new TouchGestures(host, () => this.drag.drop());
     this.focus = new KeyboardFocus(host);
     const canvas = host.canvas;
     const input = (e: MouseEvent): PointerInput => this.input(e, pointerXY(host, e));
@@ -33,7 +37,7 @@ export class GestureController {
       [window, "pointerup", (e: PointerEvent) => this.onPointerUp(e)],
       [canvas, "pointercancel", () => this.onPointerCancel()],
       [canvas, "pointerleave", (e: PointerEvent) => {
-        if (e.pointerType === "mouse") leaveHover(host, !!this.drag);
+        if (e.pointerType === "mouse") leaveHover(host, this.drag.busy);
       }],
       [canvas, "wheel", (e: WheelEvent) => {
         const i = input(e);
@@ -61,6 +65,9 @@ export class GestureController {
 
   destroy(): void {
     this.touch.clearLongPress();
+    this.drag.cancel();
+    hideCanvasTooltip(this.host);
+    cancelTextEditing(this.host);
     for (const [target, type, fn] of this.bindings) target.removeEventListener(type, fn as EventListener);
     this.focus.onBlur();
   }
@@ -79,7 +86,7 @@ export class GestureController {
 
   private onPointerMove(e: PointerEvent): void {
     const h = this.host;
-    if (this.drag || this.touch.pinch) e.preventDefault();
+    if (this.drag.busy || this.touch.pinch) e.preventDefault();
     const { x, y } = pointerXY(h, e);
     const tracked = this.touch.track(e.pointerId, x, y);
     if (this.touch.updatePinch()) return h.requestPaint();
@@ -91,7 +98,7 @@ export class GestureController {
     const input = this.input(e, { x, y });
     const mouse = e.pointerType === "mouse";
     if (mouse) trackCrosshair(h, input);
-    if (this.drag) this.drag.move(x, y);
+    if (this.drag.busy) this.drag.move(x, y);
     else if (mouse) updateHover(h, input);
     h.requestPaint();
   }
@@ -102,6 +109,7 @@ export class GestureController {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const point = pointerXY(h, e);
     this.focus.focusFromPointer();
+    hideCanvasTooltip(h);
     this.touch.pointers.set(e.pointerId, point);
     try { h.canvas.setPointerCapture?.(e.pointerId); } catch { /* detached/test env */ }
     window.getSelection?.()?.removeAllRanges();
@@ -109,14 +117,14 @@ export class GestureController {
       // A second contact turns the interaction into a pinch. Roll back any
       // partially applied one-pointer drag first so shapes/orders and their
       // host callbacks cannot be left between lifecycle phases.
-      this.cancelDrag();
+      this.drag.cancel();
       return this.touch.startPinch();
     }
     const input = this.input(e, point);
     hitTestAt(h, input.x, input.y, input.zone, e.pointerType === "mouse" ? 1 : 2);
     this.touch.press(input.x, input.y, e.pointerType);
     const result = firstHandled((handler) => handler.pointerDown?.(h, input));
-    if (typeof result === "object") this.drag = result;
+    if (typeof result === "object") this.drag.start(result);
   }
 
   private onPointerUp(e: PointerEvent): void {
@@ -125,23 +133,17 @@ export class GestureController {
     this.touch.clearLongPress();
     if (this.touch.pinch && pointers.size < 2) {
       this.touch.pinch = null;
-      this.drag = null;
+      this.drag.drop();
     }
     if (pointers.size === 0) {
-      this.drag?.commit?.();
-      this.drag = null;
+      this.drag.end();
       this.touch.crosshair = false;
     }
   }
 
   private onPointerCancel(): void {
     this.touch.reset();
-    this.cancelDrag();
+    this.drag.cancel();
     this.host.requestPaint();
-  }
-
-  private cancelDrag(): void {
-    this.drag?.cancel?.();
-    this.drag = null;
   }
 }

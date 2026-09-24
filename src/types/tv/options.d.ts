@@ -152,6 +152,26 @@ export interface RazeChartsOptions {
    * 1000, and an inverted high/low is swapped. Default false.
    */
   coerce_bars?: boolean;
+  /**
+   * Snap drawing anchors placed or dragged on the chart to bar centres
+   * (default true), so they sit on a candle instead of between two. Set false
+   * for free placement. `magnet` additionally snaps the price to the bar's OHLC.
+   */
+  snap_drawings_to_bars?: boolean;
+}
+
+/**
+ * Interactive time-scale limits for pan, zoom, pinch and keyboard navigation.
+ * `min_bar_spacing` matches TradingView's `time_scale`; the edge pins follow
+ * lightweight-charts' fixLeftEdge / fixRightEdge. Invalid values warn once.
+ */
+export interface TimeScaleOptions {
+  /** Narrowest bar spacing (CSS px) zooming out may reach. Default 1.5, at most 64. */
+  min_bar_spacing?: number;
+  /** Keep the first bar at the left edge: no empty space before the data. */
+  fix_left_edge?: boolean;
+  /** Keep the last bar at the right edge: no empty space after the data. */
+  fix_right_edge?: boolean;
 }
 
 export interface ChartingLibraryWidgetOptions {
@@ -188,6 +208,8 @@ export interface ChartingLibraryWidgetOptions {
    * `dateFormatter` and `timeFormatter` shape the time-axis and crosshair labels.
    */
   custom_formatters?: CustomFormatters;
+  /** Pan and zoom limits. Without it, panning keeps at least 3 bars in view. */
+  time_scale?: TimeScaleOptions;
   /** Raze-charts chrome configuration (ignored by the real TradingView library). */
   raze?: RazeChartsOptions;
   [key: string]: unknown;

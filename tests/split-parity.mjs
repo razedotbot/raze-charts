@@ -93,7 +93,7 @@ try {
         export { orderHandlers, HANDLERS } from "./src/engine/interaction/registry";
         export { INTERACTION_HANDLERS } from "./src/engine/interaction/handlers";
         export { GestureController } from "./src/engine/gestures";
-        export { buildFeatureSet } from "./src/core/context";
+        export { buildFeatureSet, createChartContext } from "./src/core/context";
         export { buildTheme } from "./src/core/theme";
         export { Delegate } from "./src/util/delegate";
       `,
@@ -125,6 +125,7 @@ const {
   apiScope,
   buildFeatureSet,
   buildTheme,
+  createChartContext,
   installApiModules,
   orderHandlers,
   studySpecFromArgs,
@@ -134,7 +135,7 @@ const {
 // ── Controller registry ─────────────────────────────────────────────────────
 assert(
   WIDGET_CONTROLLERS.map((definition) => definition.id).join(",")
-    === "chrome,layout,api,events,actions,compare,persistence,contextMenu",
+    === "chrome,layout,api,events,actions,compare,persistence,contextMenu,drawingEvents",
   "built-in widget controllers are registered in dependency order",
 );
 
@@ -369,8 +370,9 @@ const makeHost = () => {
   const canvas = document.createElement("canvas");
   document.body.appendChild(canvas);
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0 });
-  const context = {
+  const context = createChartContext({
     bars: [],
+    requestPaint: () => {},
     resolution: "1",
     magnet: false,
     drawingTool: "cursor",
@@ -383,7 +385,7 @@ const makeHost = () => {
     theme: { scaleText: "#fff" },
     viewportChanged: { fire: (range) => events.push(["viewport", range]) },
     crosshairMoved: { fire: (ev) => events.push(["crosshair", ev.active]) },
-  };
+  });
   const host = {
     canvas,
     context,

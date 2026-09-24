@@ -1,16 +1,29 @@
 // Viewport navigation: drag to pan, wheel to zoom around the pointer,
-// double-click to reset scaling, and F / + / - / arrow keys.
+// double-click to reset scaling, and F / + / - / arrow keys. Every write goes
+// through ./limits.ts, so pan bounds and zoom limits are the same for each.
 
-import { MAX_BAR_SPACING, MIN_BAR_SPACING } from "../layout";
-import { barSpacing, indexForX } from "../plotScale";
-import { emitViewport } from "./coords";
+import type { IndexRange } from "../../core/context";
+import { t } from "../../i18n";
+import { barSpacing } from "../plotScale";
+import { applyRange, zoomSpan } from "./limits";
 import type { GestureHost, InteractionHandler } from "./types";
+import { wheelZoomFactor } from "./wheel";
 
-function setRange(h: GestureHost, from: number, to: number, loadHistory: boolean): void {
-  h.context.visibleRange = { from, to };
-  if (loadHistory) void h.data.maybeLoadMoreHistory();
-  emitViewport(h);
+/**
+ * Zoom by `factor` (> 1 zooms out) keeping the bar under plot fraction `fx`
+ * (0 = left edge, 1 = right edge) at the same screen position.
+ */
+export function zoomAround(h: GestureHost, fx: number, factor: number, reason: "zoom" | "keyboard" | "pinch", start?: IndexRange): void {
+  const { from, to } = start ?? h.context.visibleRange;
+  const span = to - from;
+  if (!(span > 0)) return;
+  const next = zoomSpan(h, span, factor);
+  const left = from + fx * (span - next);
+  applyRange(h, { from: left, to: left + next }, reason, start);
 }
+
+const unchanged = (h: GestureHost, from: number, to: number): boolean =>
+  h.context.visibleRange.from === from && h.context.visibleRange.to === to;
 
 /** Lowest-priority fallback: a press that nothing else claimed clears the selection and pans. */
 export const viewportHandler: InteractionHandler = {
@@ -21,14 +34,14 @@ export const viewportHandler: InteractionHandler = {
     ctx.selectedShapeId = null;
     ctx.selectedTradingLineId = null;
     if (x > h.plotL + h.plotW || y > h.plotT + h.plotH) return true;
-    const { from: startFrom, to: startTo } = ctx.visibleRange;
+    const start = { ...ctx.visibleRange };
     return {
       kind: "pan",
       move(moveX) {
         const dxBars = (moveX - x) / barSpacing(h.plotScale());
-        setRange(h, startFrom - dxBars, startTo - dxBars, true);
+        applyRange(h, { from: start.from - dxBars, to: start.to - dxBars }, "pan", start);
       },
-      cancel: () => setRange(h, startFrom, startTo, false),
+      cancel: () => applyRange(h, start, "cancel"),
     };
   },
   wheel(h, { x }, e) {
@@ -37,19 +50,11 @@ export const viewportHandler: InteractionHandler = {
     // consume and magnify the chart.
     if (e.deltaY === 0) return;
     e.preventDefault();
-    const { from, to } = h.context.visibleRange;
-    const span = to - from;
-    const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
-    const newSpan = Math.max(h.plotW / MAX_BAR_SPACING, Math.min(Math.max(h.plotW / MIN_BAR_SPACING, span), span * factor));
-    const pivot = indexForX(h.plotScale(), x);
-    const leftFrac = (pivot - from) / span;
-    setRange(h, pivot - leftFrac * newSpan, pivot + (1 - leftFrac) * newSpan, true);
-    h.requestPaint();
+    zoomAround(h, (x - h.plotL) / h.plotW, wheelZoomFactor(e, h.plotH), "zoom");
     return true;
   },
   dblClick(h, { zone }) {
-    h.context.priceRange = null;
-    h.context.autoScalePrice = true;
+    h.context.setScaleMode({ autoScale: true }, "axis-reset");
     if (!zone.inPriceAxis) h.fitContent();
     else h.requestPaint();
     return true;
@@ -60,19 +65,19 @@ export const viewportHandler: InteractionHandler = {
     let message: string;
     if (e.key === "f" || e.key === "F") {
       h.fitContent();
-      h.engine.announce("Chart fitted to all data.");
-      e.preventDefault();
-      return true;
-    } else if (e.key === "+" || e.key === "=") {
-      setRange(h, to - Math.max(h.plotW / MAX_BAR_SPACING, span / 1.15), to, false);
-      message = "Zoomed in.";
-    } else if (e.key === "-" || e.key === "_") {
-      setRange(h, to - Math.min(Math.max(h.plotW / MIN_BAR_SPACING, span), span * 1.15), to, true);
-      message = "Zoomed out.";
+      message = "Chart fitted to all data.";
+    } else if (e.key === "+" || e.key === "=" || e.key === "-" || e.key === "_") {
+      const zoomIn = e.key === "+" || e.key === "=";
+      zoomAround(h, 1, zoomIn ? 1 / 1.15 : 1.15, "keyboard");
+      message = unchanged(h, from, to)
+        ? t("chart.announce.zoomLimit", "Zoom limit reached.")
+        : zoomIn ? "Zoomed in." : "Zoomed out.";
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      const shift = span * 0.08 * (e.key === "ArrowLeft" ? -1 : 1);
-      setRange(h, from + shift, to + shift, true);
-      message = e.key === "ArrowLeft" ? "Panned left." : "Panned right.";
+      const left = e.key === "ArrowLeft";
+      const shift = span * 0.08 * (left ? -1 : 1);
+      applyRange(h, { from: from + shift, to: to + shift }, "keyboard");
+      message = !unchanged(h, from, to) ? left ? "Panned left." : "Panned right."
+        : left ? t("chart.announce.dataStart", "Start of the data.") : t("chart.announce.dataEnd", "End of the data.");
     } else {
       return;
     }

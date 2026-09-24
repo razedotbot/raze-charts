@@ -78,11 +78,11 @@ When the Canvas has focus:
 
 | Key | Action |
 | --- | --- |
-| Left / Right Arrow | Pan the visible range |
+| Left / Right Arrow | Pan the visible range (announces the start or end of the data at the pan bound) |
 | Up / Down Arrow | Move a selected editable trading line by one minimum tick (Shift = 10 ticks) |
-| `+` / `-` | Zoom in / out |
-| `F` | Fit all loaded data (every loaded bar in view, price autoscale on); double-click in the plot does the same |
-| Escape | Cancel the active drawing and clear selection |
+| `+` / `-` | Zoom in / out (announces when the zoom limit is reached) |
+| `F` | Fit all loaded data (every loaded bar in view, price autoscale on); double-click in empty plot does the same |
+| Escape | Cancel an in-progress drag (drawing, trading line, pan or axis), restoring the previous state; otherwise (including a press that has not moved yet) cancel the active drawing and clear selection |
 | Delete / Backspace | Remove the selected drawing or cancel the selected trading order |
 | Ctrl/Cmd+Z | Undo the last drawing or study command |
 | Ctrl/Cmd+Shift+Z or Ctrl+Y | Redo |
@@ -90,6 +90,14 @@ When the Canvas has focus:
 Keyboard actions announce concise state changes without moving focus. Pointer
 down moves focus to the Canvas without a visible ring. Keyboard focus (Tab or
 a subsequent key press) receives a visible ring.
+
+Text drawings are typed into a labelled inline editor ("Drawing text") placed
+at the anchor: Enter commits, Shift+Enter adds a line, Escape cancels, and
+moving focus away commits. Keys typed there never reach chart shortcuts, and
+focus returns to the Canvas afterwards. Double-clicking a text drawing
+re-opens the editor. Timescale-mark and trading-line tooltips render as
+`role="tooltip"` elements referenced from the Canvas's `aria-describedby`
+while visible, instead of `title` attributes.
 
 ## Built-in chrome
 
