@@ -37,10 +37,10 @@ import {
   type ViewportChange,
   type ViewportChangeReason,
 } from "../core/context";
-import { resolveTimeframe } from "../core/timeframe";
+import { resolveTimeframe, type ResolvedTimeframe } from "../core/timeframe";
 import { canonicalResolutions, normalizeResolution, resolutionToMs, RESOLUTION_FORMS } from "../util/resolution";
 import { TimeIndex } from "./TimeIndex";
-import { describeBarIssue, SECONDS_THRESHOLD, validateBars } from "./validateBars";
+import { describeBarIssue, isWellFormedBar, SECONDS_THRESHOLD, validateBars } from "./validateBars";
 
 let guidCounter = 0;
 const nextGuid = (): string => `raze_${++guidCounter}_${Math.floor(performance.now())}`;
@@ -83,7 +83,7 @@ interface HistoryResult {
 const errorMessage = (reason: unknown): string => {
   if (reason instanceof Error) return reason.message;
   if (typeof reason === "string" && reason.trim()) return reason;
-  return "unknown datafeed error";
+  return reason == null ? "the datafeed gave no reason" : "unknown datafeed error";
 };
 
 /** `disabled_features: ["mark_on_bars"]` is the Raze opt-out for bar marks. */
@@ -156,6 +156,13 @@ export class DataManager {
       this.readyResolve = resolve;
       try {
         this.context.datafeed.onReady((cfg: DatafeedConfiguration) => {
+          if (this.readySettled) {
+            // A second configuration would start a second server-time timer.
+            if (!this.destroyed) {
+              this.warnOnce("on-ready", "[raze-charts] datafeed onReady() called its callback more than once; later calls are ignored.");
+            }
+            return;
+          }
           if (!this.destroyed) {
             this.config = this.sanitiseConfiguration(cfg ?? {});
             this.checkCapabilities();
@@ -295,7 +302,11 @@ export class DataManager {
 
   private startServerTimeSync(): void {
     // checkCapabilities() reports a flag without a method and vice versa.
-    if (this.config?.supports_time !== true || typeof this.context.datafeed.getServerTime !== "function") return;
+    if (
+      this.serverTimeTimer !== null
+      || this.config?.supports_time !== true
+      || typeof this.context.datafeed.getServerTime !== "function"
+    ) return;
     this.serverTimeReady = this.syncServerTime();
     this.serverTimeTimer = setInterval(() => {
       void this.syncServerTime();
@@ -449,10 +460,22 @@ export class DataManager {
       this.hasMoreHistory = !history.noData || history.nextTime !== null;
       this.historyCursor = history.bars.length ? null : history.nextTime;
       this.initVisibleRange();
-      await this.applyConfiguredTimeframe(generation);
+      // The opening window is chosen (and placed) before anything awaits, so
+      // no frame paints the default view first; see openOn().
+      const configured = this.configuredTimeframe();
+      const chosen = previousResolution === target.resolution
+        ? null
+        : this.announceInterval(target.resolution, configured);
       if (!this.isCurrent(generation)) return false;
-      if (previousResolution !== target.resolution) {
-        await this.announceInterval(generation, target.resolution);
+      const window = chosen ?? configured;
+      if (window) {
+        try {
+          await this.openOn(window, generation);
+        } catch (error) {
+          // A listener's window is optional: the interval itself switched.
+          if (!chosen) throw error;
+          if (this.isCurrent(generation)) this.reportError("apply onIntervalChanged timeframe", error);
+        }
         if (!this.isCurrent(generation)) return false;
       }
       this.startLiveSubscription(generation, info, target.resolution);
@@ -494,11 +517,12 @@ export class DataManager {
       }
 
       let settled = false;
-      const finish = (value: LibrarySymbolInfo | null, error?: unknown): void => {
+      // `failed` (not the reason) marks a failure: onError() may pass nothing.
+      const finish = (value: LibrarySymbolInfo | null, failed = false, error?: unknown): void => {
         if (settled) return;
         settled = true;
         this.pendingCancellations.delete(cancel);
-        if (error !== undefined && this.isCurrent(generation)) {
+        if (failed && this.isCurrent(generation)) {
           reject(new Error(
             `[raze-charts] resolveSymbol failed for "${symbol}": ${errorMessage(error)}`,
           ));
@@ -513,10 +537,10 @@ export class DataManager {
         this.context.datafeed.resolveSymbol(
           symbol,
           (info) => finish(info),
-          (reason) => finish(null, reason),
+          (reason) => finish(null, true, reason),
         );
       } catch (error) {
-        finish(null, error);
+        finish(null, true, error);
       }
     });
   }
@@ -693,11 +717,13 @@ export class DataManager {
       }
 
       let settled = false;
-      const finish = (value: HistoryResult | null, error?: unknown): void => {
+      // `failed` (not the reason) marks a failure: onError() may pass nothing,
+      // and treating that as a cancellation would skip the backoff.
+      const finish = (value: HistoryResult | null, failed = false, error?: unknown): void => {
         if (settled) return;
         settled = true;
         this.pendingCancellations.delete(cancel);
-        if (error !== undefined && this.isCurrent(generation)) {
+        if (failed && this.isCurrent(generation)) {
           reject(new Error(
             `[raze-charts] getBars failed for "${info.name}" at ${resolution}: ${errorMessage(error)}`,
           ));
@@ -722,10 +748,10 @@ export class DataManager {
               nextTime: nextTimeSeconds(meta?.nextTime),
             });
           },
-          (reason) => finish(null, reason),
+          (reason) => finish(null, true, reason),
         );
       } catch (error) {
-        finish(null, error);
+        finish(null, true, error);
       }
     });
   }
@@ -806,7 +832,8 @@ export class DataManager {
   }
 
   private onLiveBar(input: Bar): void {
-    const bar = this.validate([input], "subscribeBars")[0];
+    // A well-formed tick (the common case) is checked without allocating.
+    const bar = isWellFormedBar(input) ? input : this.validate([input], "subscribeBars")[0];
     if (!bar) return;
     const bars = this.context.bars;
     const last = bars[bars.length - 1];
@@ -854,13 +881,13 @@ export class DataManager {
       }
 
       let settled = false;
-      const finish = (value: Mark[] | null, error?: unknown): void => {
+      const finish = (value: Mark[] | null, failed = false, error?: unknown): void => {
         if (settled) return;
         settled = true;
         this.pendingCancellations.delete(cancel);
         if (this.marksCancellation === cancel) this.marksCancellation = null;
         if (
-          error !== undefined &&
+          failed &&
           this.isCurrent(generation) &&
           requestId === this.marksRequestId
         ) {
@@ -886,7 +913,7 @@ export class DataManager {
           resolution,
         );
       } catch (error) {
-        finish(null, error);
+        finish(null, true, error);
       }
     });
   }
@@ -927,7 +954,9 @@ export class DataManager {
           (items: TimescaleMark[]) => finish(Array.isArray(items) ? items : []),
           resolution,
         );
-      } catch {
+      } catch (error) {
+        // Bar marks still load; the failure is reported instead of swallowed.
+        if (this.isCurrent(generation)) this.reportError("getTimescaleMarks", error);
         finish([]);
       }
     });
@@ -1097,19 +1126,22 @@ export class DataManager {
   }
 
   /**
-   * Fire `intervalChanged(resolution, { timeframe })` after the new interval's
-   * data is committed and before its first paint. `timeframe` is the range
-   * the chart will show; a listener may replace it (or edit `from`/`to`) to
-   * choose another range, which is applied here.
+   * Fire `intervalChanged(resolution, { timeframe })` once the new interval's
+   * bars are committed, before anything awaits or paints. `timeframe` is the
+   * range the chart is about to open on (`configured`, or the default view);
+   * a listener may replace it (or edit `from`/`to`) to choose another.
+   * Returns the listener's window, or null to keep the opening one.
    */
-  private async announceInterval(generation: number, resolution: ResolutionString): Promise<void> {
-    const range = this.visibleUnixRange();
+  private announceInterval(resolution: ResolutionString, configured: ResolvedTimeframe | null): ResolvedTimeframe | null {
+    const bars = this.context.bars;
+    const range = configured?.all && bars.length
+      ? { from: Math.floor(bars[0]!.time / 1000), to: Math.floor(bars[bars.length - 1]!.time / 1000) }
+      : configured ?? this.visibleUnixRange();
     const initial: TimeFrameTimeRange = { type: "time-range", from: range.from, to: range.to };
     const params: IntervalChangedParameters = { timeframe: initial };
     this.context.intervalChanged.fire(resolution, params);
-    if (!this.isCurrent(generation)) return;
     const chosen = params.timeframe as TimeFrameValue | undefined;
-    if (chosen === initial && initial.from === range.from && initial.to === range.to) return;
+    if (chosen === initial && initial.from === range.from && initial.to === range.to) return null;
 
     const window = this.resolveTimeFrameValue(chosen);
     if (!window) {
@@ -1118,18 +1150,39 @@ export class DataManager {
         `[raze-charts] ignored onIntervalChanged timeframe ${JSON.stringify(chosen)}; `
           + 'use { type: "time-range", from, to } or { type: "period-back", value }.',
       );
+    }
+    return window;
+  }
+
+  /**
+   * Open on a Unix-second window (the configured timeframe, or one an
+   * onIntervalChanged listener chose). A window that starts before the loaded
+   * bars is placed over them at once, silently, so frames painted while older
+   * pages load already show it; the reveal then settles it and announces the
+   * final range once.
+   */
+  private async openOn(window: ResolvedTimeframe, generation: number): Promise<void> {
+    if (window.all) {
+      this.showAllBars("timeframe");
       return;
     }
+    const first = this.context.bars[0];
+    const placed = this.hasMoreHistory
+      && first !== undefined
+      && Math.floor(first.time / 1000) > window.from
+      && this.placeUnixRange(window.from, window.to, "timeframe", false);
+    let moved = false;
     try {
-      if (window.all) this.showAllBars("timeframe");
-      else await this.revealTimeRange(window.from, window.to, "timeframe");
-    } catch (error) {
-      // The interval itself switched; a failed reveal keeps the default view.
-      if (this.isCurrent(generation)) this.reportError("apply onIntervalChanged timeframe", error);
+      moved = await this.revealWindow(window.from, window.to, "timeframe");
+    } finally {
+      // The silent placement was final (or its pages failed): announce it now.
+      if (placed && !moved && this.isCurrent(generation)) {
+        this.context.viewportChanged.fire(this.visibleUnixRange());
+      }
     }
   }
 
-  private resolveTimeFrameValue(value: unknown): { from: number; to: number; all?: boolean } | null {
+  private resolveTimeFrameValue(value: unknown): ResolvedTimeframe | null {
     if (!value || typeof value !== "object") return null;
     const tf = value as { type?: unknown; from?: unknown; to?: unknown; value?: unknown };
     if (tf.type === "time-range" && typeof tf.from === "number" && typeof tf.to === "number") {
@@ -1170,24 +1223,27 @@ export class DataManager {
    * "api"; layout sync passes "sync", presets "preset").
    */
   applyIndexRangeFromUnix(fromSec: number, toSec: number, reason: ViewportChangeReason = "api"): void {
-    this.assertValidUnixRange(fromSec, toSec);
-    const bars = this.context.bars;
-    if (!bars.length) return;
-    const fromMs = fromSec * 1000;
-    const toMs = toSec * 1000;
-    const timeIndex = new TimeIndex(bars, resolutionToMs(this.context.resolution));
-    const from = timeIndex.indexAt(fromMs);
-    const to = timeIndex.indexAt(toMs);
-    if (from === null || to === null) return;
-    this.applyRange({ from, to: Math.max(from + 1, to) }, reason);
+    this.placeUnixRange(fromSec, toSec, reason);
   }
 
-  private applyRange(range: IndexRange, reason: ViewportChangeReason): void {
+  /** applyIndexRangeFromUnix(); true when the visible range changed. */
+  private placeUnixRange(fromSec: number, toSec: number, reason: ViewportChangeReason, notify = true): boolean {
+    this.assertValidUnixRange(fromSec, toSec);
+    const bars = this.context.bars;
+    if (!bars.length) return false;
+    const timeIndex = new TimeIndex(bars, resolutionToMs(this.context.resolution));
+    const from = timeIndex.indexAt(fromSec * 1000);
+    const to = timeIndex.indexAt(toSec * 1000);
+    if (from === null || to === null) return false;
+    return this.applyRange({ from, to: Math.max(from + 1, to) }, reason, notify);
+  }
+
+  private applyRange(range: IndexRange, reason: ViewportChangeReason, notify = true): boolean {
     this.context.setScaleMode({ autoScale: true }, reason === "timeframe" || reason === "preset" ? "preset" : "api");
     // revealTimeRange() already paged as far as the window needs.
     this.revealing = true;
     try {
-      this.context.setViewport(range, reason);
+      return this.context.setViewport(range, reason, { notify });
     } finally {
       this.revealing = false;
     }
@@ -1207,18 +1263,15 @@ export class DataManager {
     }
   }
 
+  /** `options.timeframe` resolved against the (server-corrected) clock. */
+  private configuredTimeframe(): ResolvedTimeframe | null {
+    return resolveTimeframe(this.context.options.timeframe, Math.floor(this.context.now() / 1000));
+  }
+
   async applyConfiguredTimeframe(generation = this.generation): Promise<void> {
     if (!this.isCurrent(generation)) return;
-    const resolved = resolveTimeframe(
-      this.context.options.timeframe,
-      Math.floor(this.context.now() / 1000),
-    );
-    if (!resolved) return;
-    if (resolved.all) {
-      this.showAllBars("timeframe");
-      return;
-    }
-    await this.revealTimeRange(resolved.from, resolved.to, "timeframe");
+    const resolved = this.configuredTimeframe();
+    if (resolved) await this.openOn(resolved, generation);
   }
 
   /**
@@ -1230,13 +1283,15 @@ export class DataManager {
     toSec: number,
     reason: ViewportChangeReason = "api",
   ): Promise<void> {
-    if (this.destroyed) return;
+    await this.revealWindow(fromSec, toSec, reason);
+  }
+
+  /** revealTimeRange(); true when its final placement changed the visible range. */
+  private async revealWindow(fromSec: number, toSec: number, reason: ViewportChangeReason): Promise<boolean> {
+    if (this.destroyed) return false;
     this.assertValidUnixRange(fromSec, toSec);
     const info = this.context.symbolInfo;
-    if (!info) {
-      this.applyIndexRangeFromUnix(fromSec, toSec, reason);
-      return;
-    }
+    if (!info) return this.placeUnixRange(fromSec, toSec, reason);
     const generation = this.generation;
     let safety = 0;
     while (
@@ -1259,7 +1314,7 @@ export class DataManager {
         },
         generation,
       );
-      if (!history || !this.isCurrent(generation)) return;
+      if (!history || !this.isCurrent(generation)) return false;
       if (!history.bars.length) {
         if (history.nextTime !== null && history.nextTime > fromSec) {
           this.historyCursor = history.nextTime;
@@ -1279,7 +1334,7 @@ export class DataManager {
         break;
       }
     }
-    if (this.isCurrent(generation)) this.applyIndexRangeFromUnix(fromSec, toSec, reason);
+    return this.isCurrent(generation) && this.placeUnixRange(fromSec, toSec, reason);
   }
 
   async loadCompare(symbol: string): Promise<Bar[]> {

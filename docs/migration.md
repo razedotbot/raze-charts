@@ -68,13 +68,18 @@ exports are the stable resolver contract.
   `RangeError` instead of loading one-minute bars. The exported
   `parseResolution`, `resolutionToMs`, `resolutionLabel` and `floorToBar`
   helpers throw the same error instead of returning one minute; test untrusted
-  strings with `isValidResolution()`.
+  strings with `isValidResolution()`. Saved layouts whose interval is invalid
+  (for example `"4h"`, which used to load as one minute) now make `load()`
+  reject with the same `RangeError`; rewrite them with `normalizeResolution()`
+  or check them with `isValidResolution()` before loading.
 - Return bars in ascending order. The manager canonicalizes and de-duplicates,
   but a sorted feed avoids unnecessary work.
 - Treat the subscription GUID as opaque and stop producing work after
   `unsubscribeBars`.
 - Call the error callback with useful context; active failures are surfaced and
-  already committed data remains visible.
+  already committed data remains visible. A call without a reason is still a
+  failure (logged, and backed off during pagination), never a cancellation.
+- Call the `onReady` callback once; later calls are ignored with a warning.
 - Set `supports_marks` / `supports_timescale_marks` in the `onReady`
   configuration to have `getMarks` / `getTimescaleMarks` called; bar marks
   then render by default (the Raze-only `enabled_features: ["mark_on_bars"]`

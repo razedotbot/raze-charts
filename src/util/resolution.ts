@@ -163,16 +163,21 @@ export interface FloorToBarOptions {
  * midnight, `nD` to epoch-aligned n-day buckets, `1W` to Monday 00:00 (see
  * `weekStart`), and `1M`, `3M` and `12M` to calendar months, quarters and
  * years. Every boundary is computed in `options.timezone` (UTC by default).
+ * Where DST repeats a wall hour, day, week and month bars start at its first
+ * occurrence and a sub-day bar starting in it gets one bar per occurrence.
  */
 export function floorToBar(timeMs: number, res: string, options: FloorToBarOptions = {}): number {
   const { parsed } = parse(res);
   const zone = options.timezone ?? null;
   const [unit, step] = calendarStep(parsed);
   const start = floorToCalendar(timeMs, unit, step, zone, options.weekStart);
-  if (zone === null || !Number.isFinite(start)) return start;
+  // Day, week and month bars start at their first local midnight, even where
+  // midnight itself repeats (Atlantic/Azores falls back 01:00 -> 00:00).
+  const subDay = parsed.kind === "seconds" || parsed.kind === "minutes" || parsed.kind === "hours";
+  if (zone === null || !subDay || !Number.isFinite(start)) return start;
   // In a repeated wall hour (DST fall-back) the calendar floor resolves the
-  // wall start to its first occurrence; a bar that opened at the second
-  // occurrence starts one offset change later and still contains `timeMs`.
+  // wall start to its first occurrence; a sub-day bar that opened at the
+  // second occurrence starts one offset change later and still contains `timeMs`.
   const tz = getTimeZone(zone);
   const later = tz.fromWall(tz.toWall(start), "later");
   return later > start && later <= timeMs ? later : start;

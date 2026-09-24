@@ -45,7 +45,7 @@ export interface ValidatedBars {
   /** Bars that can be drawn, in delivery order. Untouched bars keep their identity. */
   bars: Bar[];
   /** One entry per problem class found, in first-seen order. */
-  issues: BarIssue[];
+  issues: readonly BarIssue[];
 }
 
 /** Times below this many milliseconds (1973-03-03) are assumed to be seconds. */
@@ -79,37 +79,50 @@ class IssueLog {
   }
 }
 
+const NO_ISSUES: readonly BarIssue[] = Object.freeze([]);
+
+/**
+ * True for a bar that needs no validation work: finite millisecond `time`,
+ * finite OHLC with `low <= high`, and a finite or absent `volume`. Checking a
+ * live tick with this first allocates nothing.
+ */
+export function isWellFormedBar(raw: unknown): raw is Bar {
+  if (raw === null || typeof raw !== "object") return false;
+  const { time, open, high, low, close, volume } = raw as Record<string, unknown>;
+  return finite(time) && finite(open) && finite(high) && finite(low) && finite(close)
+    && (volume === undefined || volume === null || finite(volume))
+    && !(time >= 0 && time < SECONDS_THRESHOLD)
+    && low <= high;
+}
+
 /**
  * Validate a batch of bars. Drops bars that cannot be drawn and reports every
- * problem class once with its count, field and first index.
+ * problem class once with its count, field and first index. The issue log is
+ * only created once a problem is found.
  */
 export function validateBars(batch: readonly unknown[], coerce = false): ValidatedBars {
   const out: Bar[] = [];
-  const log = new IssueLog();
+  let log: IssueLog | null = null;
   for (let i = 0; i < batch.length; i++) {
-    const bar = validateBar(batch[i], i, coerce, log);
+    const raw = batch[i];
+    if (isWellFormedBar(raw)) {
+      out.push(raw);
+      continue;
+    }
+    const bar = repairBar(raw, i, coerce, (log ??= new IssueLog()));
     if (bar) out.push(bar);
   }
-  return { bars: out, issues: log.list };
+  return { bars: out, issues: log ? log.list : NO_ISSUES };
 }
 
-function validateBar(raw: unknown, index: number, coerce: boolean, log: IssueLog): Bar | null {
+/** Slow path for a bar that failed isWellFormedBar(). */
+function repairBar(raw: unknown, index: number, coerce: boolean, log: IssueLog): Bar | null {
   if (raw === null || typeof raw !== "object") {
     log.add("shape", index, "bar", raw);
     return null;
   }
   const source = raw as Record<string, unknown>;
-  // Fast path: a well-formed bar is returned as-is without allocating.
-  const { time, open, high, low, close, volume } = source;
-  if (
-    finite(time) && finite(open) && finite(high) && finite(low) && finite(close)
-    && (volume === undefined || volume === null || finite(volume))
-    && !(time >= 0 && time < SECONDS_THRESHOLD)
-    && low <= high
-  ) {
-    return raw as Bar;
-  }
-
+  const volume = source.volume;
   let patch: Partial<Record<NumericField | "volume", number | undefined>> | null = null;
   const values = {} as Record<NumericField, number>;
 

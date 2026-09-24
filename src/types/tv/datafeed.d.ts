@@ -208,9 +208,11 @@ export interface TimeFramePeriodBack {
 export type TimeFrameValue = TimeFrameTimeRange | TimeFramePeriodBack;
 /**
  * Second argument of `onIntervalChanged` listeners. `timeframe` holds the
- * range the new interval will show; assign another `TimeFrameValue` (or edit
- * `from`/`to`) inside the listener to choose the range applied before the
- * new interval's first paint.
+ * range the new interval will open on (the `timeframe` widget option, or the
+ * default view); assign another `TimeFrameValue` (or edit `from`/`to`) inside
+ * the listener to choose the range applied before the new interval's first
+ * paint. A range older than the loaded history is shown at once and fills in
+ * as its pages load.
  */
 export interface IntervalChangedParameters {
   timeframe: TimeFrameValue;

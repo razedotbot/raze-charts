@@ -247,6 +247,28 @@ async function boot(feedSetup, contextOptions) {
     floorToBar(Date.UTC(2024, 9, 27, 12), "1D", { timezone: "Europe/London" }) === Date.UTC(2024, 9, 26, 23),
     "1D floors to BST midnight on the day London falls back",
   );
+  // Atlantic/Azores falls back at midnight on 2024-10-27 (01:00 UTC+0 -> 00:00 UTC-1),
+  // so local 00:00-01:00 happens twice. Calendar bars start at the first one.
+  const azores = { timezone: "Atlantic/Azores" };
+  const azoresDay = Date.UTC(2024, 9, 27);
+  for (const hour of [0.5, 1.5, 3]) {
+    const t = azoresDay + hour * 3_600_000;
+    if (floorToBar(t, "1D", azores) !== azoresDay || floorToBar(t, "1W", { ...azores, weekStart: 0 }) !== azoresDay) {
+      throw new Error(`Azores ${new Date(t).toISOString()} floored to ${new Date(floorToBar(t, "1D", azores)).toISOString()}`);
+    }
+  }
+  assert(true, "1D and 1W keep one bar per local day where midnight repeats (Azores fall-back)");
+  // 2023-10-29 (epoch day 19659 = 3 x 6553) starts a 3D bar and repeats its midnight too.
+  const azores2023 = Date.UTC(2023, 9, 29);
+  assert(
+    floorToBar(azores2023 + 0.5 * 3_600_000, "3D", azores) === azores2023 && floorToBar(azores2023 + 1.5 * 3_600_000, "3D", azores) === azores2023,
+    "multi-day bars do not split at a repeated midnight",
+  );
+  assert(
+    floorToBar(azoresDay + 0.5 * 3_600_000, "60", azores) === azoresDay
+      && floorToBar(azoresDay + 1.5 * 3_600_000, "60", azores) === azoresDay + 3_600_000,
+    "hourly bars still give the repeated midnight hour its own bar",
+  );
 }
 
 // ── nextTime gaps ───────────────────────────────────────────────────────────
@@ -365,6 +387,50 @@ async function boot(feedSetup, contextOptions) {
   });
   manager.destroy();
 }
+{
+  // onError() with no reason is still a failure, not a cancellation.
+  let now = BASE;
+  const { feed, calls } = makeFeed({
+    history(_params, index, onResult, onError) {
+      if (index === 0) queueMicrotask(() => onResult(series(3)));
+      else queueMicrotask(() => onError());
+    },
+  });
+  const manager = new DataManager(makeContext(feed, { clock: () => now }));
+  await manager.resolveAndLoad();
+  const errors = await capture("error", async () => {
+    for (let elapsed = 0; elapsed < 10_000; elapsed += 16) {
+      now += 16;
+      await manager.maybeLoadMoreHistory();
+    }
+  });
+  const attempts = calls.getBars.length - 1;
+  assert(attempts >= 3 && attempts <= 5, `a feed calling onError() without a reason backs off too (got ${attempts} calls in 10 s)`);
+  assert(
+    errors.length === attempts && errors.every((line) => line.includes("retrying") && line.includes("the datafeed gave no reason")),
+    "each reasonless failure logs one error per backoff window, saying no reason was given",
+  );
+  manager.destroy();
+}
+{
+  let rejected = null;
+  const { manager } = await boot({ history: (_p, _i, _onResult, onError) => queueMicrotask(() => onError()) })
+    .catch((error) => {
+      rejected = error;
+      return { manager: null };
+    });
+  assert(
+    manager === null && rejected?.message.includes("getBars failed") && rejected.message.includes("the datafeed gave no reason"),
+    "an initial load failing through onError() without a reason rejects instead of ending in a silent empty state",
+  );
+  const { feed } = makeFeed({ history: (_p, _i, onResult) => queueMicrotask(() => onResult(series(3))) });
+  feed.resolveSymbol = (_name, _onResolve, onError) => queueMicrotask(() => onError());
+  let symbolError = null;
+  const symbolManager = new DataManager(makeContext(feed));
+  await symbolManager.resolveAndLoad().catch((error) => { symbolError = error; });
+  symbolManager.destroy();
+  assert(symbolError?.message.includes("resolveSymbol failed"), "resolveSymbol's onError() without a reason rejects too");
+}
 
 // ── Bar validation and coercion ─────────────────────────────────────────────
 async function loadFixture(bars, options = {}) {
@@ -451,6 +517,9 @@ async function loadFixture(bars, options = {}) {
       && warnings[1].includes("older than the last bar"),
     "live problems warn once per class",
   );
+  const wellFormed = bar(BASE + 3 * MIN, 7);
+  tick.calls.ticks.at(-1)(wellFormed);
+  assert(tick.context.bars.at(-1) === wellFormed, "a well-formed live bar is appended as delivered, without a copy");
   tick.manager.destroy();
 }
 
@@ -508,6 +577,40 @@ async function loadFixture(bars, options = {}) {
   });
   assert(warnings.length === 1 && warnings[0].includes("supports_time"), "an unused getServerTime is reported once");
 }
+{
+  // A feed calling onReady's callback twice must not start a second re-sync timer.
+  const intervals = [];
+  const cleared = [];
+  const realSetInterval = globalThis.setInterval;
+  const realClearInterval = globalThis.clearInterval;
+  globalThis.setInterval = () => {
+    intervals.push(intervals.length + 1);
+    return intervals.length;
+  };
+  globalThis.clearInterval = (id) => { cleared.push(id); };
+  try {
+    const { feed, calls } = makeFeed({
+      config: { supports_time: true },
+      serverTime: (callback) => callback(Math.floor(BASE / 1000)),
+      history: (_p, _i, onResult) => queueMicrotask(() => onResult(series(3))),
+    });
+    feed.onReady = (callback) => queueMicrotask(() => {
+      callback({ supports_time: true });
+      callback({ supports_time: true });
+    });
+    const warnings = await capture("warn", async () => {
+      const manager = new DataManager(makeContext(feed, { clock: () => BASE }));
+      await manager.resolveAndLoad();
+      assert(intervals.length === 1 && calls.getServerTime === 1, "a second onReady callback starts no second server-time timer");
+      manager.destroy();
+    });
+    assert(cleared.length === 1 && cleared[0] === 1, "destroy clears the only server-time timer");
+    assert(warnings.length === 1 && warnings[0].includes("onReady() called its callback more than once"), "the repeated onReady callback is reported once");
+  } finally {
+    globalThis.setInterval = realSetInterval;
+    globalThis.clearInterval = realClearInterval;
+  }
+}
 
 // ── supports_marks / supports_timescale_marks ───────────────────────────────
 {
@@ -540,6 +643,20 @@ async function loadFixture(bars, options = {}) {
   );
   assert(optedOut.calls.getMarks === 0, 'disabled_features "mark_on_bars" opts out of bar marks');
   optedOut.manager.destroy();
+
+  let throwing;
+  const errors = await capture("error", async () => {
+    const booted = await boot({ config: { supports_marks: true, supports_timescale_marks: true }, marks: [mark], timescaleMarks: [], history });
+    booted.feed.getTimescaleMarks = () => { throw new Error("timescale down"); };
+    booted.manager.refreshMarks();
+    await settle();
+    throwing = booted;
+  });
+  assert(
+    errors.length === 1 && errors[0].includes("getTimescaleMarks failed") && throwing.context.marks.length === 1,
+    "a throwing getTimescaleMarks is reported once and bar marks still load",
+  );
+  throwing.manager.destroy();
 }
 
 // ── Interval payload ────────────────────────────────────────────────────────
@@ -581,6 +698,65 @@ async function loadFixture(bars, options = {}) {
   await manager.changeResolution("1");
   const periodRange = manager.visibleUnixRange();
   assert(periodRange.to - periodRange.from <= 86_400 && periodRange.to >= Math.floor(BASE / 1000) - 60, "a period-back assignment is applied");
+  manager.destroy();
+}
+{
+  // A chosen window older than the loaded bars: it is placed before the page
+  // it needs is requested, so frames painted while that page loads show it.
+  const bars5 = series(400, BASE, 5 * MIN);
+  const older5 = series(400, bars5[0].time - 5 * MIN, 5 * MIN);
+  let deliver = null;
+  let rangeAtRequest = null;
+  const booted = await boot({
+    history(_params, index, onResult) {
+      if (index === 0) queueMicrotask(() => onResult(series(300)));
+      else if (index === 1) queueMicrotask(() => onResult(bars5));
+      else {
+        rangeAtRequest = { ...booted.context.visibleRange };
+        deliver = () => onResult(older5);
+      }
+    },
+  });
+  const { context, manager } = booted;
+  const announced = [];
+  context.viewportChanged.subscribe(null, (range) => announced.push(range));
+  const targetFrom = Math.floor(older5[100].time / 1000);
+  const targetTo = Math.floor(bars5[50].time / 1000);
+  context.intervalChanged.subscribe(null, (_resolution, params) => {
+    params.timeframe = { type: "time-range", from: targetFrom, to: targetTo };
+  });
+  const changing = manager.changeResolution("5");
+  await waitFor(() => deliver !== null, "the page the chosen window needs");
+  assert(
+    rangeAtRequest.from < 0 && rangeAtRequest.to === 50 && context.visibleRange.to === 50,
+    "the chosen window is shown over the loaded bars before its older page is requested (no default-view frame)",
+  );
+  assert(announced.length === 0, "the early placement is silent");
+  deliver();
+  await changing;
+  const shown = manager.visibleUnixRange();
+  assert(shown.from === targetFrom && shown.to === targetTo, "the window settles on the chosen range once the page loads");
+  assert(
+    announced.length === 1 && announced[0].from === targetFrom && announced[0].to === targetTo,
+    "the settled range is announced once through viewportChanged",
+  );
+  manager.destroy();
+}
+{
+  // With options.timeframe, the payload is the configured window the chart opens on.
+  const nowSec = Math.floor(BASE / 1000);
+  const { context, manager } = await boot({
+    history: (_p, _i, onResult) => queueMicrotask(() => onResult(series(3000, BASE, 5 * MIN))),
+  }, { clock: () => BASE, options: { timeframe: "1D" } });
+  let payload = null;
+  context.intervalChanged.subscribe(null, (_resolution, params) => { payload = JSON.parse(JSON.stringify(params)); });
+  await manager.changeResolution("5");
+  assert(
+    payload?.timeframe?.type === "time-range" && payload.timeframe.from === nowSec - 86_400 && payload.timeframe.to === nowSec,
+    "onIntervalChanged reports the configured timeframe as the opening window",
+  );
+  const shown = manager.visibleUnixRange();
+  assert(shown.from === nowSec - 86_400 && shown.to === nowSec, "an unchanged payload opens on the configured timeframe");
   manager.destroy();
 }
 
@@ -742,6 +918,9 @@ async function loadFixture(bars, options = {}) {
 
   await new Promise((resolve) => chart.setResolution("D", resolve));
   assert(chart.resolution() === "1D" && marksOn.calls.getBars.at(-1).resolution === "1D", "setResolution('D') normalises to 1D for the chart and the feed");
+  let loadError = null;
+  await instance.load({ ...instance.save(), interval: "4h" }).catch((error) => { loadError = error; });
+  assert(loadError instanceof RangeError && chart.resolution() === "1D", "a saved layout with an invalid interval makes load() reject with the RangeError");
   instance.remove();
 
   const optOut = widgetFeed({ supports_marks: true });
@@ -758,6 +937,18 @@ async function loadFixture(bars, options = {}) {
   flush();
   assert(optOut.calls.getMarks === 0 && arcs === 0, 'disabled_features "mark_on_bars" hides marks without requesting them');
   quiet.remove();
+
+  const failing = makeFeed({ history: (_p, _i, _onResult, onError) => queueMicrotask(() => onError()) });
+  const failingHost = mount();
+  const loadErrors = await capture("error", async (messages) => {
+    const broken = new widget({ ...baseOptions, container: failingHost, datafeed: failing.feed });
+    await waitFor(() => messages.length > 0, "the load failure report");
+    broken.remove();
+  });
+  assert(
+    loadErrors.length === 1 && loadErrors[0].includes("failed to load symbol") && loadErrors[0].includes("the datafeed gave no reason"),
+    "a widget whose first getBars calls onError() without a reason logs the load failure",
+  );
 
   // favorites.intervals feed the header's interval row: they are canonicalised
   // before it is built, and an invalid entry cannot abort the header build.
