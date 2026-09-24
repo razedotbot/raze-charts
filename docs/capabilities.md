@@ -50,8 +50,8 @@ registry created there is standalone; pass definitions to a widget through
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
 | Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. |
-| Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` and `lock` are stored on the instance. |
-| Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. |
+| Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` paints a pane study on the price pane with its own scale (`range`, or its visible values; unlabeled, like TradingView's "No scale"); `lock` is stored on the instance. |
+| Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. The main plot always keeps max(120px, 40% of the height above the time axis); extra panes shrink evenly to 24px, then collapse to titled strips, and never pass the time axis. |
 | Drawing tools | **Yes** | Horizontal/vertical line, trend, ray, extended line, measure (ephemeral), Fibonacci, rectangle, and text. |
 | Magnet / stay-in-mode / objects tree | **Yes** | OHLC magnet, stay-in-drawing-mode, and an objects tree over shapes and studies. |
 | Shape editing | **Yes** | Create, drag, read/update points, remove, and remove all shapes. |
