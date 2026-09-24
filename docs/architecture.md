@@ -95,7 +95,12 @@ The financial widget owns the host DOM and wires five responsibilities:
    device-pixel-ratio-aware Canvas frame of two layers: the scene canvas,
    repainted on data and viewport changes, and the interactive overlay
    canvas above it (crosshair, legend values, hover, draft, countdown),
-   repainted on pointer and timer events alone.
+   repainted on pointer and timer events alone. Axis-aligned geometry (grid,
+   separators, candles, bars, volume, series lines, price lines) goes through
+   `engine/paint/pixel.ts`, which switches the context to device pixels, rounds
+   every edge there and sizes hairlines as `max(1, floor(dpr))` pixels, so
+   lines stay full-intensity at fractional DPRs. Candle bodies take the wick's
+   parity so the wick is always the body's centre column.
 5. Toolbar, sidebar, interval selector, scale bar, menus, and loading state are
    optional chrome around the plot.
 

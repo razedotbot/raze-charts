@@ -3,19 +3,26 @@
 
 import type { StoredTradingLine } from "../../core/TradingStore";
 import { formatAxisPrice, yForPrice } from "../plotScale";
+import { dashedHLine, fillDeviceRect, snapRect, strokeRectInside, withBitmapSpace } from "./pixel";
 import type { FinanceView } from "./view";
 
+/** Fill a CSS box whose edges land on whole device pixels (pixel.ts). */
 function fillBox(
   ctx: CanvasRenderingContext2D,
+  v: FinanceView,
   x: number,
   y: number,
   w: number,
   h: number,
   fill: string,
 ): void {
-  ctx.fillStyle = fill;
-  ctx.fillRect(Math.round(x), Math.round(y), Math.ceil(w), Math.ceil(h));
+  withBitmapSpace(ctx, v.dpr, (s) => {
+    ctx.fillStyle = fill;
+    fillDeviceRect(s, snapRect(s, x, y, w, h));
+  });
 }
+
+const LINE_DASH: Readonly<Record<number, readonly number[]>> = { 1: [2, 3], 2: [6, 4] };
 
 function riskRewardZones(ctx: CanvasRenderingContext2D, v: FinanceView): void {
   const groups = new Map<string, StoredTradingLine[]>();
@@ -37,12 +44,12 @@ function riskRewardZones(ctx: CanvasRenderingContext2D, v: FinanceView): void {
     if (stop) {
       const stopY = yForPrice(v, stop.price);
       ctx.globalAlpha = 0.08;
-      fillBox(ctx, x, Math.min(entryY, stopY), w, Math.abs(stopY - entryY), "#ef5350");
+      fillBox(ctx, v, x, Math.min(entryY, stopY), w, Math.abs(stopY - entryY), "#ef5350");
     }
     if (target) {
       const targetY = yForPrice(v, target.price);
       ctx.globalAlpha = 0.08;
-      fillBox(ctx, x, Math.min(entryY, targetY), w, Math.abs(targetY - entryY), "#26a69a");
+      fillBox(ctx, v, x, Math.min(entryY, targetY), w, Math.abs(targetY - entryY), "#26a69a");
     }
     if (stop && target) {
       const risk = Math.abs(entry.price - stop.price);
@@ -52,7 +59,7 @@ function riskRewardZones(ctx: CanvasRenderingContext2D, v: FinanceView): void {
         ctx.globalAlpha = 0.85;
         ctx.font = `600 10px ${v.fontFamily}`;
         const tw = ctx.measureText(label).width;
-        fillBox(ctx, x + w - tw - 13, entryY - 9, tw + 9, 18, v.context.theme.paneBackground);
+        fillBox(ctx, v, x + w - tw - 13, entryY - 9, tw + 9, 18, v.context.theme.paneBackground);
         ctx.fillStyle = v.context.theme.scaleText;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
@@ -93,18 +100,15 @@ export function drawTrading(ctx: CanvasRenderingContext2D, v: FinanceView): void
     const bodyX = v.plotL + 8;
     const bodyH = 20;
     ctx.save();
-    ctx.strokeStyle = line.lineColor;
-    ctx.lineWidth = selected ? line.lineWidth + 1.5 : line.lineWidth;
-    ctx.setLineDash(line.lineStyle === 2 ? [6, 4] : line.lineStyle === 1 ? [2, 3] : []);
-    ctx.beginPath();
-    ctx.moveTo(v.plotL, Math.round(y) + 0.5);
-    ctx.lineTo(axisX, Math.round(y) + 0.5);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    const lineWidth = Number.isFinite(line.lineWidth) && line.lineWidth > 0 ? line.lineWidth : 1;
+    withBitmapSpace(ctx, v.dpr, (s) => {
+      ctx.fillStyle = line.lineColor;
+      dashedHLine(s, y, v.plotL, axisX, selected ? lineWidth + 1.5 : lineWidth, LINE_DASH[line.lineStyle] ?? []);
+    });
 
     ctx.font = `600 10px ${v.fontFamily}`;
     const bodyW = Math.min(v.plotW - 60, ctx.measureText(bodyText).width + 14);
-    fillBox(ctx, bodyX, y - bodyH / 2, bodyW, bodyH, line.bodyBackgroundColor);
+    fillBox(ctx, v, bodyX, y - bodyH / 2, bodyW, bodyH, line.bodyBackgroundColor);
     ctx.fillStyle = line.bodyTextColor;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
@@ -118,17 +122,18 @@ export function drawTrading(ctx: CanvasRenderingContext2D, v: FinanceView): void
     let cancelX = bodyX + bodyW + 3;
     if (line.quantity) {
       const quantityW = ctx.measureText(line.quantity).width + 12;
-      fillBox(ctx, cancelX, y - bodyH / 2, quantityW, bodyH, line.quantityBackgroundColor);
-      ctx.strokeStyle = line.lineColor;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(Math.round(cancelX) + 0.5, Math.round(y - bodyH / 2) + 0.5, Math.ceil(quantityW) - 1, bodyH - 1);
+      fillBox(ctx, v, cancelX, y - bodyH / 2, quantityW, bodyH, line.quantityBackgroundColor);
+      withBitmapSpace(ctx, v.dpr, (s) => {
+        ctx.fillStyle = line.lineColor;
+        strokeRectInside(s, cancelX, y - bodyH / 2, quantityW, bodyH);
+      });
       ctx.fillStyle = line.quantityTextColor;
       ctx.textAlign = "center";
       ctx.fillText(line.quantity, cancelX + quantityW / 2, y);
       cancelX += quantityW + 3;
     }
     if (line.status === "working") {
-      fillBox(ctx, cancelX, y - bodyH / 2, bodyH, bodyH, line.cancelButtonBackgroundColor);
+      fillBox(ctx, v, cancelX, y - bodyH / 2, bodyH, bodyH, line.cancelButtonBackgroundColor);
       ctx.strokeStyle = line.cancelButtonIconColor;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -142,7 +147,7 @@ export function drawTrading(ctx: CanvasRenderingContext2D, v: FinanceView): void
     v.tradingScreen.push({ line, y, x1: v.plotL, x2: axisX, hit: "body" });
 
     const axisW = Math.max(1, v.cssWidth - axisX);
-    fillBox(ctx, axisX, y - 10, axisW, 20, line.lineColor);
+    fillBox(ctx, v, axisX, y - 10, axisW, 20, line.lineColor);
     ctx.fillStyle = "#ffffff";
     ctx.font = `600 10px ${v.fontFamily}`;
     ctx.textAlign = "center";

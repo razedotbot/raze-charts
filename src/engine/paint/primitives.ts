@@ -1,5 +1,6 @@
 import { TIME_AXIS_H } from "../layout";
 import { isLightColor } from "../../core/theme";
+import { alignToDevice, contextPixelRatio } from "./pixel";
 import type { FinanceView } from "./view";
 
 /** Build a rounded-rect path (caller fills/strokes). */
@@ -40,9 +41,13 @@ export function drawAxisTag(
 ): void {
   const x0 = v.plotL + v.plotW;
   const h = 16;
-  const top = Math.max(clampTop, Math.min(clampBot - h, y - h / 2));
+  // Straight pill edges land on whole device pixels (crisp at fractional DPR).
+  const ratio = contextPixelRatio(ctx, v.dpr);
+  const top = alignToDevice(Math.max(clampTop, Math.min(clampBot - h, y - h / 2)), ratio.v);
+  const left = alignToDevice(x0 + 3, ratio.h);
+  const right = alignToDevice(x0 + v.priceAxisW - 2, ratio.h);
   ctx.fillStyle = bg;
-  roundRect(ctx, x0 + 3, top, v.priceAxisW - 5, h, 3);
+  roundRect(ctx, left, top, right - left, h, 3);
   ctx.fill();
   ctx.font = `${bold ? "600 " : ""}11px ${v.fontFamily}`;
   ctx.fillStyle = fg;

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Raze Charts - pixel snapping harness</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; }
+    /* A fixed-size host keeps CSS x DPR integral for 1.25, 1.5, 1.75 and 2. */
+    #wrap { position: absolute; top: 0; left: 0; width: 800px; height: 480px; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="wrap"></div>
+  <script type="module">
+    // Used by tests/pixel-snapping.spec.ts. Opaque, channel-separated colours
+    // make any anti-aliased (partial-intensity) pixel detectable exactly.
+    import { widget } from "../../dist/charting_library.esm.js";
+
+    const params = new URLSearchParams(location.search);
+    const testCase = params.get("case") || "grid";
+    const RES_MS = 60_000;
+    const NOW = Date.UTC(2024, 0, 15, 12, 0, 0);
+    const COUNT = 240;
+
+    function makeBars() {
+      const out = [];
+      let seed = 42;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+      let price = 100;
+      const end = Math.floor(NOW / RES_MS) * RES_MS;
+      for (let i = COUNT - 1; i >= 0; i--) {
+        const open = price;
+        const close = price + (rnd() - 0.5) * 3;
+        const high = Math.max(open, close) + rnd() * 1.5;
+        const low = Math.min(open, close) - rnd() * 1.5;
+        out.push({ time: end - i * RES_MS, open, high, low, close, volume: 1000 + Math.floor(rnd() * 9000) });
+        price = close;
+      }
+      if (testCase === "spike") {
+        // Autoscale trims this wick; it must not bleed into the volume pane.
+        const spike = out[COUNT - 12];
+        spike.low = Math.min(spike.open, spike.close) * 0.4;
+        spike.high = Math.max(spike.open, spike.close) * 1.6;
+      }
+      return out;
+    }
+    const bars = makeBars();
+
+    const datafeed = {
+      onReady: (cb) => setTimeout(() => cb({ supported_resolutions: ["1"] }), 0),
+      searchSymbols: (_a, _b, _c, cb) => cb([]),
+      resolveSymbol: (symbol, onResolve) => setTimeout(() => onResolve({
+        name: symbol, ticker: symbol, description: symbol, type: "crypto", session: "24x7",
+        timezone: "Etc/UTC", exchange: "Pixel", listed_exchange: "Pixel", format: "price",
+        minmov: 1, pricescale: 100, has_intraday: true, supported_resolutions: ["1"],
+        intraday_multipliers: ["1"], volume_precision: 0, data_status: "endofday",
+      }), 0),
+      getBars: (_info, _res, period, onResult) => {
+        const slice = period.firstDataRequest ? bars : [];
+        setTimeout(() => onResult(slice, { noData: slice.length === 0 }), 0);
+      },
+      subscribeBars: () => {},
+      unsubscribeBars: () => {},
+    };
+
+    const w = new widget({
+      symbol: "PIXEL",
+      datafeed,
+      interval: "1",
+      container: document.getElementById("wrap"),
+      library_path: "/",
+      locale: "en",
+      theme: "dark",
+      autosize: true,
+      timezone: "Etc/UTC",
+      custom_font_family: "Arial, Helvetica, sans-serif",
+      disabled_features: [
+        "header_widget", "left_toolbar", "legend_widget", "countdown",
+        "timezone_display", "time_frames_toolbar", "popup_hints",
+      ],
+      overrides: {
+        "paneProperties.background": "#000000",
+        "paneProperties.horzGridProperties.color": "#00ff00",
+        "paneProperties.vertGridProperties.color": "#0000ff",
+        "scalesProperties.backgroundColor": "#101010",
+        "scalesProperties.lineColor": "#ffff00",
+        "scalesProperties.textColor": "#808080",
+        "mainSeriesProperties.candleStyle.upColor": "#ff0000",
+        "mainSeriesProperties.candleStyle.downColor": "#ff00ff",
+        "mainSeriesProperties.candleStyle.borderUpColor": "#ff0000",
+        "mainSeriesProperties.candleStyle.borderDownColor": "#ff00ff",
+        "mainSeriesProperties.candleStyle.wickUpColor": "#ff0000",
+        "mainSeriesProperties.candleStyle.wickDownColor": "#ff00ff",
+        "mainSeriesProperties.volumeStyle.upColor": "#00ffff",
+        "mainSeriesProperties.volumeStyle.downColor": "#00ffff",
+      },
+      raze: { volume_mode: testCase === "spike" ? "pane" : "hidden" },
+    });
+
+    w.onChartReady(() => {
+      // Two frames so the price-axis width converges before anyone reads pixels.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        window.__pixelReady = true;
+      }));
+    });
+    window.__pixelWidget = w;
+  </script>
+</body>
+</html>
