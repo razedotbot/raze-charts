@@ -35,7 +35,7 @@ export interface ChartLayoutSnapshot {
     color: string;
     lock?: boolean;
     forceOverlay?: boolean;
-    inputs?: Record<string, number | string>;
+    inputs?: Record<string, number | string | boolean>;
   }[];
   compare?: string[];
 }

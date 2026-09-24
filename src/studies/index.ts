@@ -28,3 +28,68 @@ export type {
   StudySeries,
   StudySeriesStyle,
 } from "../types/charting_library";
+
+// ── Indicator contract v2 (defineIndicator) ─────────────────────────────────
+// Typed input schemas, plot/fill/level descriptors, a read-only compute
+// context and incremental init()/update(). A handle from defineIndicator() is
+// a StudyDefinition: pass it to `raze.custom_studies` or a StudyRegistry.
+export { createStudyContext, defineIndicator, runIndicator } from "./defineIndicator";
+export type { IndicatorHandle, StudyPlotOverride } from "./defineIndicator";
+export {
+  bool,
+  color,
+  float,
+  humanizeInputId,
+  int,
+  normalizeInputSchema,
+  positionalStudyInputs,
+  price,
+  resolution,
+  resolveStudyInputs,
+  select,
+  session,
+  source,
+  sourceValue,
+  StudyInputError,
+  studyInputFields,
+  symbol,
+  text,
+  time,
+} from "./inputs";
+export type {
+  ResolveInputsOptions,
+  StudyInputClamp,
+  StudyInputControl,
+  StudyInputErrorCode,
+  StudyInputField,
+  StudyInputOptions,
+  StudyNumberInputOptions,
+} from "./inputs";
+export { STUDY_INPUT_TYPES, STUDY_SOURCES } from "./types";
+export type {
+  ComputeIndicatorDefinition,
+  IncrementalIndicatorDefinition,
+  IndicatorDefinition,
+  StudyChange,
+  StudyChangeKind,
+  StudyComputeContext,
+  StudyDependency,
+  StudyFillDescriptor,
+  StudyInput,
+  StudyInputPrimitive,
+  StudyInputSchema,
+  StudyInputsOf,
+  StudyInputType,
+  StudyInputValue,
+  StudyInputValues,
+  StudyLevelDescriptor,
+  StudyOutputs,
+  StudyPlotDescriptor,
+  StudyPlotStyle,
+  StudyPointValues,
+  StudySource,
+  StudyUpdateFn,
+  StudyUpdateInput,
+  StudyUpdateMode,
+  StudyValues,
+} from "./types";

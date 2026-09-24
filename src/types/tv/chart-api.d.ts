@@ -2,6 +2,7 @@
 
 import type { EntityId, ISubscription, ResolutionString } from "./common";
 import type { CreateShapeOptions, ILineDataSourceApi, ShapePoint } from "./shapes";
+import type { StudyCreateInputs } from "./studies";
 import type {
   BracketOrderOptions,
   IBracketOrderAdapter,
@@ -35,12 +36,12 @@ export interface IChartWidgetApi {
   createBracketOrder(options: BracketOrderOptions): Promise<IBracketOrderAdapter>;
   getTradingLineById(id: string): ITradingLineAdapter | null;
   removeAllTradingLines(): void;
-  /** Add a study — built-in (EMA / SMA / RSI) or registered via `raze.custom_studies`. Returns an entity id removable via removeEntity. */
-  createStudy(
-    name: string,
+  /** Add a study — built-in (EMA / SMA / RSI) or registered via `raze.custom_studies`. Returns an entity id removable via removeEntity. Inputs are typed for names registered in `StudyInputsRegistry`; invalid inputs reject with a `StudyInputError`. */
+  createStudy<N extends string>(
+    name: N,
     forceOverlay?: boolean,
     lock?: boolean,
-    inputs?: Record<string, unknown>,
+    inputs?: StudyCreateInputs<N>,
   ): Promise<EntityId>;
   refreshMarks(): void;
   clearMarks(): void;

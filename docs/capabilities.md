@@ -26,8 +26,10 @@ Legend:
 
 Indicator math also ships on its own: `@razedotbot/charts/studies` exports the
 pure kernels (`sma`, `ema`, `rsi`, `stdev`, `bollinger`, `macd`, `vwap`,
-`closesFromBars`), `StudyRegistry`, `BUILTIN_STUDIES`, and the
-`StudyDefinition` contract types, with no DOM or widget code (**Yes** — ESM,
+`closesFromBars`), `StudyRegistry`, `BUILTIN_STUDIES`, the `StudyDefinition`
+contract types, and the typed indicator contract (`defineIndicator`, the input
+helpers `int`/`float`/`source`/`select`/…, `runIndicator`,
+`createStudyContext`, `StudyInputError`), with no DOM or widget code (**Yes** — ESM,
 CommonJS, and NodeNext types are covered by the packed package contract). A
 registry created there is standalone; pass definitions to a widget through
 `raze.custom_studies`.
@@ -50,7 +52,10 @@ registry created there is standalone; pass definitions to a widget through
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
 | Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. |
-| Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` and `lock` are stored on the instance. |
+| Custom studies | **Yes** | Overlay or pane. v1 `StudyDefinition`s recompute the full array after a data mutation and receive every declared default. `defineIndicator()` (v2) adds typed inputs, plot/fill/level descriptors and incremental `init()`/`update()`: one `update()` call per appended or replaced bar, never a full recompute on ticks. See [indicators.md](./indicators.md). `forceOverlay` and `lock` are stored on the instance. |
+| Typed, validated study inputs | **Yes** | `int`, `float`, `price`, `time`, `bool`, `source`, `select`, `color`, `session`, `symbol`, `resolution`, `text`. Missing inputs take defaults, numbers clamp to `min`/`max` (with a warning), and unknown ids or wrongly typed values reject `createStudy()` with a `StudyInputError` (`unknown-input`, `invalid-value`; malformed schemas throw `invalid-schema`). `StudyInputsRegistry` types `createStudy()` inputs per study name. Boolean inputs round-trip through `save()`/`load()`. |
+| Study compute context | **Yes** | `compute`/`init`/`update` receive a frozen `ctx`: `symbol`, `symbolInfo`, `resolution`, resolved `timezone`, `formatPrice`, `now`, `requestRecompute()`, and `visibleRange` for `dependsOn: ["visibleRange"]` studies, which recompute on pan/zoom (throttled to one pass per 100 ms). |
+| Study plot styles | **Subset** | `line`, `histogram` and `columns` paint as declared; `step`, `area`, `circles`, `cross` and `shapes` paint as lines and carry `plotStyle` for the plot painter. The first fill (between two plots or two levels) is painted; additional fills warn once. Hidden plots compute into `StudyInstance.outputs`. |
 | Multiple study panes | **Subset** | Pane studies are supported; arbitrary user-defined pane layouts are not. |
 | Drawing tools | **Yes** | Horizontal/vertical line, trend, ray, extended line, measure (ephemeral), Fibonacci, rectangle, and text. |
 | Magnet / stay-in-mode / objects tree | **Yes** | OHLC magnet, stay-in-drawing-mode, and an objects tree over shapes and studies. |
@@ -60,7 +65,7 @@ registry created there is standalone; pass definitions to a widget through
 | Marks on bars | **Yes** | Hover tooltip and refresh/clear APIs. |
 | Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
 | Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
-| Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |
+| Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. Study steps store specs, not value arrays, and the history keeps the newest `raze.undo_limit` steps (default 100). |
 | Encapsulated runtime surface | **Yes** | `widget` and `activeChart()` objects expose only the documented `IChartingLibraryWidget` / `IChartWidgetApi` methods. Internal state is `#private` or module-private and cannot be reached or mutated at runtime. |
 | Full TradingView study/drawing catalog | **No** | Compatibility is a documented subset, not feature parity. |
 | WebGL, LOD, or worker renderer | **No** | Canvas 2D is the current financial renderer. |

@@ -39,7 +39,13 @@ export function createApiDeps(host: WidgetHost): ChartApiDeps {
     getTradingLineById: (id) => host.trading.adapter(id),
     removeAllTradingLines: () => host.trading.removeAll(),
     createStudy: (name, forceOverlay, lock, inputs) => {
-      const id = host.studies.add(studySpecFromArgs(name, forceOverlay, lock, inputs));
+      let id: EntityId | null;
+      try {
+        id = host.studies.add(studySpecFromArgs(name, forceOverlay, lock, inputs));
+      } catch (error) {
+        // Invalid inputs (StudyInputError) reject the promise instead of throwing synchronously.
+        return Promise.reject(error);
+      }
       if (!id) return Promise.reject(new Error(`[raze-charts] unknown study: ${name}`));
       return Promise.resolve(id);
     },
