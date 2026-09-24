@@ -132,7 +132,9 @@ function assertHoverDocsPreserved(treeRoot, flattened) {
     .map((entry) => resolve(moduleDirectory, entry));
   const docs = hoverDocs(new Map([
     [probeFile, flattened],
-    ...modules.map((path) => [path, readFileSync(path, "utf8")]),
+    // The flattener always emits LF; a CRLF checkout (core.autocrlf) must not
+    // turn identical doc comments into a line-ending diff.
+    ...modules.map((path) => [path, readFileSync(path, "utf8").replace(/\r\n/g, "\n")]),
   ]));
   for (const [path, declarations] of docs) {
     for (const [name, entry] of declarations) {

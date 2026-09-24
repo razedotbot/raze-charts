@@ -46,6 +46,7 @@ const REPORTS = [
   { id: "index", files: ["dist/types/index.d.ts"] },
   { id: "chart", files: ["dist/types/chart/index.d.ts"] },
   { id: "react", files: ["dist/types/react/index.d.ts"] },
+  { id: "studies", files: ["dist/types/studies/index.d.ts"] },
 ];
 
 const display = (path) => relative(root, path).split(sep).join("/");
