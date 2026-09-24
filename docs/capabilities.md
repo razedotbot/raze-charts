@@ -53,6 +53,7 @@ Legend:
 | Compare / multiple symbols | **Yes** | `createCompare(symbol)` overlays extra series; `raze.layout` `"2x1"` / `"2x2"` syncs range and crosshair. |
 | Save/load chart layouts | **Yes** | Versioned JSON with stable drawing/study IDs via `save()` / `load()`; `disableSave` excludes a drawing and live broker/trading state is intentionally rehydrated separately. |
 | Undo/redo command history | **Yes** | Drawings and studies; `disableUndo` skips a create. |
+| Encapsulated runtime surface | **Yes** | `widget` and `activeChart()` objects expose only the documented `IChartingLibraryWidget` / `IChartWidgetApi` methods. Internal state is `#private` or module-private and cannot be reached or mutated at runtime. |
 | Full TradingView study/drawing catalog | **No** | Compatibility is a documented subset, not feature parity. |
 | WebGL, LOD, or worker renderer | **No** | Canvas 2D is the current financial renderer. |
 
