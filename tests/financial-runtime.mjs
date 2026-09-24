@@ -194,20 +194,27 @@ const intervalSelector = new IntervalSelector(
   (resolution) => { selectedInterval = resolution; },
   ["1", "5", "15", "60"],
 );
-intervalMount.querySelector('[aria-label="Interval 1s"]')?.click();
-assert(selectedInterval === "1S", "every supported interval is selectable from the header row");
-assert(
-  intervalMount.querySelector('[aria-label="Interval 1s"]')?.getAttribute("aria-current") === "true",
-  "the active interval is marked in the header row",
-);
-assert(
-  intervalMount.querySelector('[aria-label="More intervals"]') === null,
-  "the interval row has no overflow dropdown",
-);
 const inlineLabels = [...intervalMount.querySelectorAll('[aria-label^="Interval "]')].map((button) => button.textContent);
 assert(
-  inlineLabels.join(",") === "1s,5s,1m,5m,15m,1h,1D",
-  "supported intervals render as one duration-ordered row",
+  inlineLabels.join(",") === "1m,5m,15m,1h",
+  `favorite intervals render as header buttons in favorites order (${inlineLabels.join(",")})`,
+);
+const moreIntervals = intervalMount.querySelector('[aria-label="More intervals"]');
+assert(
+  moreIntervals?.getAttribute("aria-haspopup") === "menu",
+  "the other supported intervals are reachable from the interval menu",
+);
+moreIntervals.click();
+const intervalRows = [...window.document.querySelectorAll('.raze-chart-interval-menu [role="menuitemradio"]')];
+assert(
+  intervalRows.map((row) => row.textContent).join(",") === "1s,5s,1m,5m,15m,1h,1D",
+  "the interval menu lists every supported interval by duration",
+);
+intervalRows[0].click();
+assert(selectedInterval === "1S", "a menu interval is selectable");
+assert(
+  intervalMount.querySelector('[aria-label="Interval 1s"]')?.getAttribute("aria-pressed") === "true",
+  "a non-favorite active interval gets a visible, pressed header button",
 );
 intervalSelector.destroy();
 intervalMount.remove();

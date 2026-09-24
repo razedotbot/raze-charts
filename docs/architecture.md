@@ -134,6 +134,54 @@ return a truthy result consumes the event. A handler that returns a session
 owns the drag: the session commits on the last pointer up, and it rolls back
 on pointer cancel or when a second finger turns the gesture into a pinch.
 
+### Chrome styling and tokens
+
+The header (`Toolbar`, `IntervalSelector`, `TimeframeBar`, `SymbolSearch`)
+and the price-scale toggles (`ScaleBar`) carry no inline presentation and no
+JavaScript hover handlers. Each module declares its rules as a `defineStyles()`
+chunk and adopts it, together with the token chunk, into whichever Document or
+ShadowRoot renders it (`adoptStylesOnConnect()` also covers a root joined
+after construction and a remount). Hover, pressed, focus and touch sizing come
+from `:hover` (inside `@media (hover: hover)`), `[aria-pressed="true"]`,
+`:focus-visible` and `@media (pointer: coarse)`, so a pointer change on a
+hybrid device resizes controls live and forced-colors rules can target state.
+Base control rules are wrapped in `:where()`, so any host selector wins
+without `!important`.
+
+| Class | Element |
+| --- | --- |
+| `.raze-chart-toolbar`, `.raze-chart-toolbar-rail`, `.raze-chart-toolbar-slot` | Header bar, its scrolling rail and the button groups |
+| `.raze-chart-toolbar-btn` | Every `createButton()` element: a neutral reset (no native chrome), so host code may replace `style.cssText` |
+| `.raze-chart-header-btn` | Shared header control: interval, range, overflow and `useTradingViewStyle` custom buttons |
+| `.raze-chart-symbol-search-input` | Header symbol search field |
+| `.raze-chart-interval-menu` | "More intervals" menu (`menuitemradio` rows) |
+| `.raze-chart-scale-bar`, `.raze-chart-scale-btn` | % / L / A toggles in the corner cell under the price axis |
+
+Tokens are custom properties on `.raze-chart-root` (and kit portals). They
+default to the TradingView `--tv-color-*` variables, so
+`setCSSCustomProperty()` and existing overrides keep working, and a host rule
+such as `.raze-chart-root { --raze-accent: red }` recolours every pressed
+control.
+
+| Token | Default | Used for |
+| --- | --- | --- |
+| `--raze-font-size` | `12px` | Header controls and menus |
+| `--raze-font-size-sm` | `11px` | Axis-adjacent chrome (scale toggles), matching the axis labels |
+| `--raze-control-height` / `--raze-touch-control-height` | `26px` / `32px` | Header control height for fine / coarse pointers |
+| `--raze-row-height` / `--raze-touch-row-height` | `32px` / `48px` | Menu and sheet rows |
+| `--raze-radius-sm` / `--raze-radius` / `--raze-radius-lg` | `4px` / `6px` / `12px` | Controls / popups / sheets |
+| `--raze-toolbar-text` | `--tv-color-toolbar-button-text` | Header text |
+| `--raze-toolbar-hover` | `--tv-color-toolbar-button-background-hover` | Header hover and press |
+| `--raze-active` | `--tv-color-toolbar-button-background-active` | Pressed background |
+| `--raze-accent` | `--tv-color-toolbar-button-text-hover` | Pressed text, checked marks, focus |
+| `--raze-border` | `--tv-color-toolbar-divider-background` | Header divider, field border |
+| `--raze-scale-bar-background` / `--raze-scale-bar-text` | the axis colours | Set by `ScaleBar` from the theme so the toggles blend into the axis |
+
+The kit's own tokens (surface, text, hover, focus, danger, shadow, duration,
+z-index) are listed in [the UI kit guide](./ui-kit.md#stylesheet-and-design-tokens).
+Programmatic motion (`scrollIntoView`) checks `prefersReducedMotion()` and
+jumps instead of animating when the user asked for reduced motion.
+
 ### Time is a logical bar axis
 
 Financial time is not a wall-clock ruler. A Friday bar and the next Monday bar

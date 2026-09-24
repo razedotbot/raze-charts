@@ -177,6 +177,46 @@ export function adoptStyles(
   }
   const detached = !entry.sheet && !!entry.element && !entry.element.isConnected;
   if (changed || detached) write(root, entry, options);
+  // A component framework (Lit, Stencil…) that assigns `adoptedStyleSheets`
+  // after the chart mounted drops the library sheet; put it back.
+  if (entry.sheet && !root.adoptedStyleSheets.includes(entry.sheet)) {
+    root.adoptedStyleSheets = [...root.adoptedStyleSheets, entry.sheet];
+  }
+}
+
+/**
+ * Keep `chunks` adopted into whichever root renders `el`, including a root it
+ * joins after construction: a shadow root the element is appended to later, or
+ * a new root after a remount. Adopts now (a detached element inside a shadow
+ * tree already resolves to that shadow root), again on the next microtask
+ * (callers usually append synchronously), and whenever the element's box
+ * appears (a ResizeObserver reports a connected element as it gains a size).
+ * Returns a function that stops watching.
+ */
+export function adoptStylesOnConnect(
+  el: Element,
+  chunks: StyleChunk | readonly StyleChunk[],
+  options?: StyleOptions,
+): () => void {
+  if (typeof document === "undefined") return () => {};
+  let stopped = false;
+  const adopt = (): void => {
+    if (!stopped) adoptStyles(el, chunks, options);
+  };
+  adopt();
+  queueMicrotask(adopt);
+  let observer: ResizeObserver | null = null;
+  if (typeof ResizeObserver !== "undefined") {
+    observer = new ResizeObserver(() => {
+      if (el.isConnected) adopt();
+    });
+    observer.observe(el);
+  }
+  return () => {
+    stopped = true;
+    observer?.disconnect();
+    observer = null;
+  };
 }
 
 /**
@@ -210,6 +250,11 @@ export const TOKEN_STYLES: StyleChunk = /* @__PURE__ */ defineStyles(
   "--raze-radius-lg:12px;" +
   "--raze-row-height:32px;" +
   "--raze-touch-row-height:48px;" +
+  "--raze-font-size-sm:11px;" +
+  "--raze-control-height:26px;" +
+  "--raze-touch-control-height:32px;" +
+  "--raze-toolbar-text:var(--tv-color-toolbar-button-text,#d1d4dc);" +
+  "--raze-toolbar-hover:var(--tv-color-toolbar-button-background-hover,rgba(255,255,255,.06));" +
   "--raze-duration:160ms;" +
   "--raze-z:2147483640}",
 );

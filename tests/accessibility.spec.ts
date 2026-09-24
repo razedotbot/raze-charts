@@ -47,8 +47,8 @@ test.describe("widget accessibility", () => {
     await expect(vertical).toHaveAttribute("aria-pressed", "true");
     await expect(sidebar.getByRole("button", { name: "Objects tree" })).toBeVisible();
 
-    await expect(toolbar.getByRole("button", { name: "Interval 5s" })).toBeVisible();
-    await expect(toolbar.getByRole("button", { name: "More intervals" })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "Interval 1s" })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "More intervals" })).toHaveAttribute("aria-haspopup", "menu");
 
     const percent = scale.getByRole("button", { name: "Percent scale" });
     const logarithmic = scale.getByRole("button", { name: "Logarithmic scale" });

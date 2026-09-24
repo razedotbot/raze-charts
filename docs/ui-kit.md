@@ -109,8 +109,13 @@ TradingView-compatible `--tv-color-*` variables, so existing theme overrides
 keep working.
 
 `LoadingScreen` (a public export) adopts its own spinner keyframes and
-reduced-motion rule into the document, and into the shadow root it is
+reduced-motion rule into the document, and into every shadow root it is
 mounted in, so it spins without the widget's chrome stylesheet.
+`adoptStylesOnConnect(el, chunks)` keeps chunks adopted wherever an element
+ends up: a shadow root joined after construction (even before its host is
+attached), a second widget's shadow root, and a remount. `adoptStyles()` also
+re-attaches the library sheet when a component framework later replaces a
+root's `adoptedStyleSheets`.
 
 ## Translation runtime
 

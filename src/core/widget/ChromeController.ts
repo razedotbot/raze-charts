@@ -178,6 +178,7 @@ export class ChromeController implements WidgetController {
           () => this.intervalSelector?.setActive(String(context.resolution)),
         ),
         context.options.favorites?.intervals?.map(String),
+        () => data.getConfig(),
       );
       context.intervalChanged.subscribe(null, ((res: string) => {
         this.intervalSelector?.setActive(String(res));

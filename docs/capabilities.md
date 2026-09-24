@@ -48,6 +48,9 @@ registry created there is standalone; pass definitions to a widget through
 | Gapped market sessions | **Yes** | `TimeIndex` maps actual timestamps onto adjacent logical bar indices; `session_breaks` draws optional gap lines. |
 | Timeframe / go-to-date | **Yes** | Honours `options.timeframe`; header presets and go-to-date call `setVisibleRange`, which pages history when needed. |
 | Symbol search | **Yes** | Header search calls `searchSymbols`. |
+| Header intervals | **Yes** | Resolutions come from the symbol's `supported_resolutions`, then the `onReady` configuration's, then `favorites.intervals`; seconds need `has_seconds` (or an explicit feed list) and `has_seconds`/`has_intraday: false` remove them. Favorites (default `1S 1 5 15 60 240 1D`) are the header buttons, in favorites order; an unsupported favorite is dropped with a console warning, the rest sit in the "More intervals" menu, and the active interval is always shown. |
+| Price-scale toggles | **Yes** | `%` / `L` (log) / `A` (auto) sit in the corner cell under the price axis, never over the plot; `aria-pressed` follows the context's `scaleChanged` event. `scale_bar` feature. |
+| Chrome styling | **Yes** | Header and scale toggles are class-styled from one adopted stylesheet with documented `--raze-*` tokens ([architecture](./architecture.md#chrome-styling-and-tokens)); `createButton()` returns a reset `<button>` host CSS can restyle. |
 | Timezone and bar countdown | **Yes** | `timezone_display` and `countdown` features (on by default). |
 | EMA, SMA, RSI, VWAP, Bollinger, MACD | **Yes** | Multi-series `compute` results paint lines, bands, and histograms. Incremental built-ins remain EMA/SMA/RSI. |
 | Custom studies | **Yes** | Overlay or pane; public contract recomputes the full array after a data mutation. `forceOverlay` and `lock` are stored on the instance. |
