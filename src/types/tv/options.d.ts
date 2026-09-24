@@ -109,6 +109,13 @@ export interface RazeChartsOptions {
   layout_child?: boolean;
   volume_mode?: VolumeMode;
   magnet?: boolean;
+  /**
+   * CSP nonce for the chrome stylesheet. Only needed where the browser lacks
+   * constructable stylesheets and the page's `style-src` forbids
+   * `'unsafe-inline'`: the fallback `<style>` elements (in the document, the
+   * widget's shadow root and fullscreen overlays) then carry this nonce.
+   */
+  style_nonce?: string;
 }
 
 export interface ChartingLibraryWidgetOptions {

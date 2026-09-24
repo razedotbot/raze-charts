@@ -87,7 +87,6 @@ export class IndicatorsMenu {
       fontFamily: this.context.fontFamily,
       className: "raze-chart-indicators-menu",
       minWidth: 168,
-      padding: "6px 0",
       anchor,
       place: "right-start",
       role: "menu",

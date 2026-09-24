@@ -81,10 +81,15 @@ and orientation. Controls use native buttons with accessible labels and state:
 
 Popup triggers expose `aria-haspopup`, `aria-expanded`, and `aria-controls`.
 Menus are named and use menu item, radio item, or checkbox item semantics.
-Opening moves focus into the popup. Arrow Up/Down and Home/End navigate,
-Escape closes and returns focus, and an outside press or focus moving out of
-the menu dismisses it. Pressing a row moves focus to it without closing the
-menu, so its action runs. An indicator menu rerender preserves focus on the
+Opening moves focus into the popup. Arrow Up/Down and Home/End navigate and
+skip separators and disabled items, Escape closes and returns focus, Tab and
+Shift+Tab close the menu and move on from its button, and an outside press or
+focus moving out of the menu dismisses it. Pressing a row moves focus to it
+without closing the menu, so its action runs, in every engine (the press is
+not left to the browser's focus-on-click rules). Hovering a row of a focused
+menu moves focus to it, so the keyboard and the mouse share one highlight; the
+highlight is a background, drawn as a `Highlight` outline in forced-colours
+mode. Long menus scroll inside the viewport and keep the focused row visible. An indicator menu rerender preserves focus on the
 corresponding row. These rules also hold when the chart is mounted inside an
 (open) shadow root.
 
@@ -95,8 +100,12 @@ button that opened it. Tab and Shift+Tab stay inside an open sheet, the sheet
 is announced as a modal dialog (`aria-modal`) named after its menu, and the
 page behind it does not scroll. If a resize or rotation means the menu should
 switch between sheet and flyout, it closes and focus returns to its button.
+A kit dialog instead switches in place, keeping its content and focus.
 
-Animation on the loading state and on sheets respects
+Menus stay usable in element fullscreen: they render inside the fullscreen
+chart rather than behind it.
+
+Animation on the loading state, on menus and on sheets respects
 `prefers-reduced-motion`. Built-in focus styles remain visible in
 forced-color mode.
 

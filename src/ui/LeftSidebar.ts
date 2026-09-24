@@ -341,7 +341,6 @@ export class LeftSidebar {
       fontFamily: this.context.fontFamily,
       className: "raze-chart-style-menu",
       minWidth: 140,
-      padding: "6px 0",
       anchor: this.styleBtn,
       place: "right-start",
       role: "menu",

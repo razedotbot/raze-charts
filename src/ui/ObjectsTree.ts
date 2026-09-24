@@ -26,7 +26,6 @@ export class ObjectsTree {
       fontFamily: this.context.fontFamily,
       className: "raze-chart-objects-tree",
       minWidth: 220,
-      padding: "6px 0",
       anchor,
       place: "right-start",
       role: "menu",

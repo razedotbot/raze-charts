@@ -160,7 +160,6 @@ export class SymbolSearch {
       fontFamily: this.context.fontFamily,
       className: "raze-chart-symbol-search",
       minWidth: 220,
-      padding: "4px 0",
       anchor: this.input,
       place: "below-start",
       role: "dialog",

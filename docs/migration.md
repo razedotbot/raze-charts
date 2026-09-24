@@ -106,7 +106,7 @@ TradingView's library renders inside an iframe. Raze renders in your page,
 so your page's CSP applies to it. The widget's chrome styles use
 constructable stylesheets and CSSOM, so `style-src 'self'` works without
 `'unsafe-inline'`. Where constructable stylesheets are unavailable, provide a
-nonce through `<meta property="csp-nonce" nonce="…">` or
+nonce through `raze.style_nonce`, `<meta property="csp-nonce" nonce="…">` or
 `ensureBaseStyles(target, { nonce })`. With Trusted Types enforced, allow the
 `raze-charts` policy (`trusted-types raze-charts`). The
 [capability matrix](./capabilities.md#ui-kit-csp-and-localization) lists the
@@ -121,6 +121,17 @@ option for pages that enforce Trusted Types. Code that only builds sidebar
 items compiles unchanged. Code that reads `item.icon` back as a string, for
 example to inspect or serialise a sidebar configuration, now needs a check
 such as `typeof item.icon === "string"` before using it as one.
+
+### Context menu items: `ContextMenuItem`
+
+`onContextMenu` follows TradingView's conventions: `{ text: "-" }` renders a
+separator (it used to render a literal "-" row) and `{ text: "-Label" }`
+removes the default item named `Label` instead of adding a row. Because a
+separator or a removal needs no handler, `ContextMenuItem.click` and
+`ContextMenuItem.position` are now optional (`position` defaults to `"top"`).
+Code that builds items compiles unchanged; code that reads `item.click` or
+`item.position` back needs an `undefined` check. Tab and Shift+Tab now close
+an open menu and move on from its button instead of walking its rows.
 
 ### Custom financial shells
 

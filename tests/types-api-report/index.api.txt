@@ -312,8 +312,8 @@ class CommandStack
   undo(): boolean
 type ContextMenuCallback = (unixTime: number, price: number) => ContextMenuItem[] | Promise<ContextMenuItem[]>
 interface ContextMenuItem
-  click: () => void
-  position: 'bottom' | 'top'
+  click?: (() => void) | undefined
+  position?: 'bottom' | 'top' | undefined
   text: string
 interface CreateButtonOptions
   align?: 'left' | 'right' | undefined
@@ -756,6 +756,7 @@ interface RazeChartsOptions
   layout_symbols?: string[] | undefined
   magnet?: boolean | undefined
   sidebar?: SidebarItem[] | undefined
+  style_nonce?: string | undefined
   volume_mode?: VolumeMode | undefined
 interface RazeDataSource
   configuration?: (() => MaybePromise<DatafeedConfiguration>) | DatafeedConfiguration | undefined
@@ -1136,6 +1137,7 @@ function macd(closes: number[], fast?: number | undefined, slow?: number | undef
 function openPopup(opts: PopupOptions): PopupHandle
 function parseResolution(res: string): ParsedResolution
 function popupRow(content: string, onClick: (e: MouseEvent) => void, options?: undefined | { role?: 'menuitem' | 'menuitemcheckbox' | 'menuitemradio' | undefined; checked?: boolean | undefined; label?: string | undefined; trustedHtml?: boolean | undefined; }): HTMLButtonElement
+function popupSeparator(): HTMLDivElement
 function resolutionLabel(res: string): string
 function resolutionToMs(res: string): number
 function resolveIndicatorPresets(raze: RazeChartsOptions | undefined, registry: StudyRegistry): ResolvedIndicatorPreset[]
