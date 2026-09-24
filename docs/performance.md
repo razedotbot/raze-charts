@@ -67,11 +67,11 @@ npm run check:size
 | --- | --- | --- | ---: |
 | Root financial widget (`@razedotbot/charts`) | Published artifact | `charting_library.esm.js` | 72 KiB |
 | | Scenario: Widget only | `import { widget }` | 63 KiB |
-| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 53 KiB |
-| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 39 KiB |
-| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 24 KiB |
+| Native chart (`@razedotbot/charts/chart`) | Published artifact | `chart.esm.js` | 67 KiB |
+| | Scenario: Line-only mount | `import { defineChart, line, mountChart }` | 49 KiB |
+| | Scenario: Static line SVG | `import { defineChart, line, renderChartSvg }` | 33 KiB |
 | React adapter (`@razedotbot/charts/react`) | Published artifact | `react.esm.js` | 10 KiB |
-| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 42 KiB |
+| | Scenario: React LineChart | `import { LineChart, Line, XAxis, YAxis, Tooltip }` | 52 KiB |
 | | Scenario: Grammar only | `import { defineChart }` | 2 KiB |
 | Study kernels (`@razedotbot/charts/studies`) | Published artifact | `studies.esm.js` | 5 KiB |
 | | Scenario: Single kernel | `import { ema }` | 1 KiB |
@@ -94,6 +94,7 @@ The native artifact allowance grew from 42 to 44 KiB when the compiler and
 renderers were split into `src/chart/compile/*` and `src/chart/render/*`: the
 unminified artifact keeps every function and property name, so the module
 boundaries added about 2.2 KiB with byte-identical output.
+
 The native renderer and mount correctness package (W1B-03) raised the native
 artifact from 44 to 53 KiB, "Line-only mount" from 33 to 39 KiB, "Static line
 SVG" from 23 to 24 KiB, and "React LineChart" from 37 to 42 KiB. Measured on
@@ -156,6 +157,18 @@ thinning/rotation/ellipsis, heatmap value formats and the scene v2 formatters
 and measured axes account for the rest. Number formatting no longer imports
 the shared Intl cache (see "Native value formatting" below). The artifact is
 unminified, so consumer bundles are smaller than it.
+
+Wave 1B integration (W1B-04, W1B-01, W1B-02 and W1B-03 merged) set the native
+artifact budget to 67 KiB, "Line-only mount" to 49 KiB, "Static line SVG" to
+33 KiB and the React "React LineChart" scenario to 52 KiB. Each package raised
+the budget from the same 44 KiB starting point against its own branch, so the
+merged runtime carries all four increments: measured on the merged tree the
+artifact is 65.9 KiB (42.96 KiB before the wave) and the scenarios 48.3, 32.5
+and 51.4 KiB. The budgets keep about 0.5 to 1.1 KiB of headroom. This is a
+recorded integration decision, not a target: the per-package caps (50 KiB for
+W1B-01) were set per branch, and native-bundle-modular-marks and
+perf-native-per-mark-treeshaking (W2-13) are expected to win the mark-specific
+code back out of the single-mark scenarios.
 
 The native time axis does not use the shared `calendarTicks()` selector yet.
 Importing it costs about 7.5 KiB of the artifact (its zone arithmetic and
